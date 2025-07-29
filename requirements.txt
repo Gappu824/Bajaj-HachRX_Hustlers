@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+openai
+sentence-transformers
+faiss-cpu
+pypdf2
+requests
+python-dotenv
+asyncio
