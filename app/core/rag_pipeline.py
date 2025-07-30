@@ -11,7 +11,7 @@ import google.generativeai as genai
 from typing import List
 
 # --- CHANGE 1: Add new imports ---
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from google.api_core import exceptions as google_exceptions
 
 from PyPDF2 import PdfReader
