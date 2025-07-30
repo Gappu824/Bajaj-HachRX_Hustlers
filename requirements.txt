@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 pydantic-settings
-openai
+google-generativeai
 sentence-transformers
 faiss-cpu
 pypdf2
