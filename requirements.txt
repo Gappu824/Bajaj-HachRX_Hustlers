@@ -11,5 +11,6 @@ asyncio
 tenacity
 pdfplumber
 PyPDF2<3.0
+google-cloud-storage
 odfpy
 python-docx
