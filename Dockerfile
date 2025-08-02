@@ -1,28 +1,18 @@
-# Use Python slim image
+# Use an official lightweight Python image
 FROM python:3.12-slim
 
-# Essential environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PORT=8080
-
-# Install only essential system packages
-RUN apt-get update && apt-get install -y \
-    curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
+# Set the working directory inside the container
 WORKDIR /code
 
-# Copy and install requirements
+# Copy just the requirements file to leverage Docker layer caching
 COPY ./requirements.txt /code/requirements.txt
-RUN pip install --no-cache-dir -r /code/requirements.txt
 
-# Copy app
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+
+# Copy your application code into the container
 COPY ./app /code/app
 
-# Expose port
-EXPOSE 8080
-
-# Run with increased timeout settings
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "120", "--timeout-graceful-shutdown", "120"]
+# Command to run your application.
+# Google Cloud Run expects applications to listen on port 8080.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
