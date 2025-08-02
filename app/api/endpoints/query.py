@@ -31,7 +31,8 @@ async def run_query(
         raise HTTPException(status_code=400, detail="No document URL provided.")
     
     # This solution handles the first document URL, as per the sample request.
-    document_url = str(request_data.documents[0])
+    # NEW, MORE ROBUST CODE
+    document_url = request_data.documents.strip()
     logger.info(f"Received request for document: {document_url} with {len(request_data.questions)} questions.")
 
     try:
