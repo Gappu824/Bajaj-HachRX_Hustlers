@@ -213,7 +213,7 @@ class RAGPipeline:
             try:
                 if file_extension == '.pdf':
                     try:
-                        with pdfplumber.open(temp_file) as pdf:
+                        with pdfplumber.open(temp_file, laparams={"layout": True}) as pdf:
                             if len(pdf.pages) == 0:
                                 raise ValueError("PDF file contains no pages")
                             
