@@ -213,14 +213,14 @@ class RAGPipeline:
             try:
                 if file_extension == '.pdf':
                     try:
-                        with pdfplumber.open(temp_file, laparams={"layout": True}) as pdf:
+                        with pdfplumber.open(temp_file) as pdf:
                             if len(pdf.pages) == 0:
                                 raise ValueError("PDF file contains no pages")
                             
                             logger.info(f"Processing PDF with {len(pdf.pages)} pages")
                             for page_num, page in enumerate(pdf.pages):
                                 try:
-                                    page_text = page.extract_text()
+                                    page_text = page.extract_text(x_tolerance=3)
                                     if page_text and page_text.strip(): 
                                         full_text += page_text + "\n"
                                     
