@@ -39,7 +39,7 @@ class VectorStore:
         self.index.add(embeddings)
         logger.info(f"Built FAISS index for {len(chunks)} chunks.")
 
-    def search(self, query: str, k: int = 8) -> List[str]:
+    def search(self, query: str, k: int = 12) -> List[str]:
         query_embedding = self.model.encode([query]).astype('float32')
         _, indices = self.index.search(query_embedding, k)
         return [self.chunks[i] for i in indices[0]]
@@ -414,6 +414,11 @@ class RAGPipeline:
         This is the final version for the hackathon submission.
         """
         vector_store = await self.get_or_create_vector_store(document_url)
-        tasks = [self._generate_answer(question, vector_store.search(question, k=8)) for question in questions]
+        
+        # Create a list of tasks for each question string, now retrieving 12 chunks
+        tasks = [self._generate_answer(question, vector_store.search(question, k=12)) for question in questions]
+        
+        # Run all tasks in parallel and gather the results
         answers = await asyncio.gather(*tasks, return_exceptions=True)
+        
         return [str(ans) for ans in answers]
