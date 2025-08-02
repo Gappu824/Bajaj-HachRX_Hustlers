@@ -12,19 +12,15 @@ ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
-# Install system dependencies for networking, document processing, and SSL
+# Install minimal system dependencies for networking and SSL
 RUN apt-get update && apt-get install -y \
-    # Networking and SSL utilities
+    # Essential networking and SSL utilities
     curl \
     wget \
     ca-certificates \
     openssl \
-    # Document processing dependencies
-    libpoppler-cpp-dev \
-    libpoppler-utils \
-    # General utilities
-    gcc \
-    g++ \
+    # Build tools needed for some Python packages
+    build-essential \
     # Clean up to reduce image size
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
