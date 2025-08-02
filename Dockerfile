@@ -12,6 +12,12 @@ ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
+# Set environment variables for faster ML model loading
+ENV TOKENIZERS_PARALLELISM=false
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_DATASETS_OFFLINE=0
+ENV SENTENCE_TRANSFORMERS_HOME=/code/.cache/sentence_transformers
+
 # Install minimal system dependencies for networking and SSL
 RUN apt-get update && apt-get install -y \
     # Essential networking and SSL utilities
@@ -31,14 +37,20 @@ RUN update-ca-certificates
 # Set the working directory inside the container
 WORKDIR /code
 
-# Create a non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
 # Copy just the requirements file to leverage Docker layer caching
 COPY ./requirements.txt /code/requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+
+# Pre-download the sentence transformer model during build to speed up startup
+RUN python -c "from sentence_transformers import SentenceTransformer; model = SentenceTransformer('all-MiniLM-L6-v2'); print('Model downloaded successfully')"
+
+# Create a non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Create cache directory and set permissions
+RUN mkdir -p /code/.cache/sentence_transformers && chown -R appuser:appuser /code/.cache
 
 # Copy your application code into the container
 COPY ./app /code/app
@@ -52,10 +64,5 @@ USER appuser
 # Expose port 8080 (Google Cloud Run default)
 EXPOSE 8080
 
-# Health check to ensure the application is running properly
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/ || exit 1
-
-# Command to run your application
-# Google Cloud Run expects applications to listen on port 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# Command to run your application with optimized settings
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--timeout-keep-alive", "0"]
