@@ -8,7 +8,7 @@ class SourceClause(BaseModel):
     text: str = Field(..., description="The actual text of the clause")
     confidence_score: float = Field(..., description="Confidence score for this clause")
     page_number: Optional[int] = Field(None, description="Page number where clause was found")
-    section: Optional[str] = Field(None, description="Document section")
+    section: Optional[str] = Field(None, descriptiona="Document section")
 
 class DetailedAnswer(BaseModel):
     """Enhanced answer with explainability"""
