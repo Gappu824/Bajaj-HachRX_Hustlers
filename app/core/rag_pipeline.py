@@ -35,6 +35,7 @@ from unstructured.partition.html import partition_html
 from unstructured.partition.auto import partition
 
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -371,18 +372,24 @@ class RAGPipeline:
 
     # Replace your existing _chunk_text function with this one
 
+    # Replace your existing _chunk_text function with this one
+
     def _chunk_text(self, text: str) -> List[str]:
         """
         Intelligently chunks the document text using a layout-aware model.
         This respects semantic boundaries like paragraphs, titles, and tables.
         """
-        # The partition function from 'unstructured' can handle raw text.
-        # It finds titles, paragraphs, etc., and creates Element objects.
+        # The 'unstructured.partition' function can process raw text,
+        # identifying titles, paragraphs, etc., and creating 'Element' objects.
         elements = partition(text=text)
         
-        # chunk_by_title is a powerful strategy that groups related text under its nearest title.
-        # This creates highly contextual and semantically relevant chunks.
-        chunks = chunk_by_title(elements, max_characters=1000, combine_under_n_chars=500)
+        # 'chunk_by_title' is a powerful strategy that groups related text under 
+        # its nearest title, creating highly contextual chunks.
+        chunks = chunk_by_title(
+            elements, 
+            max_characters=1000, 
+            combine_under_n_chars=500
+        )
         
         chunk_texts = [chunk.text for chunk in chunks if chunk.text.strip()]
         
