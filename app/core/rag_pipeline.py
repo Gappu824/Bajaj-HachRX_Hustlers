@@ -25,25 +25,82 @@ from sentence_transformers.cross_encoder import CrossEncoder
 import faiss
 import numpy as np
 import google.generativeai as genai
+# Add this near your other RAG imports
+from rank_bm25 import BM25Okapi
 
 from app.core.config import settings
 
+
 logger = logging.getLogger(__name__)
 
+
+# class VectorStore:
+#     def __init__(self, chunks: List[str], embeddings: np.ndarray, model: SentenceTransformer):
+#         self.chunks = chunks
+#         self.model = model
+#         dimension = embeddings.shape[1]
+#         self.index = faiss.IndexFlatL2(dimension)
+#         self.index.add(embeddings)
+#         logger.info(f"Built FAISS index for {len(chunks)} chunks.")
+
+#     def search(self, query: str, k: int = 12) -> List[str]:
+#         query_embedding = self.model.encode([query]).astype('float32')
+#         _, indices = self.index.search(query_embedding, k)
+#         return [self.chunks[i] for i in indices[0]]
+
+# Replace your entire existing VectorStore class with this one
 
 class VectorStore:
     def __init__(self, chunks: List[str], embeddings: np.ndarray, model: SentenceTransformer):
         self.chunks = chunks
         self.model = model
+        
+        # 1. FAISS Index for semantic search (existing)
         dimension = embeddings.shape[1]
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(embeddings)
-        logger.info(f"Built FAISS index for {len(chunks)} chunks.")
+        
+        # 2. BM25 Index for keyword search (new)
+        tokenized_chunks = [doc.split(" ") for doc in chunks]
+        self.bm25 = BM25Okapi(tokenized_chunks)
+        
+        logger.info(f"Built both FAISS (semantic) and BM25 (keyword) indexes for {len(chunks)} chunks.")
 
-    def search(self, query: str, k: int = 12) -> List[str]:
+    def search(self, query: str, k: int = 20) -> List[str]:
+        """
+        Performs a hybrid search using both semantic (FAISS) and keyword (BM25) search,
+        then fuses the results using Reciprocal Rank Fusion (RRF) for superior retrieval.
+        """
+        # --- HYBRID SEARCH & FUSION LOGIC ---
+        
+        # Step 1: Perform Semantic Search (FAISS)
         query_embedding = self.model.encode([query]).astype('float32')
-        _, indices = self.index.search(query_embedding, k)
-        return [self.chunks[i] for i in indices[0]]
+        _, faiss_indices = self.index.search(query_embedding, k)
+        faiss_results = {self.chunks[i]: i for i in faiss_indices[0]}
+
+        # Step 2: Perform Keyword Search (BM25)
+        tokenized_query = query.split(" ")
+        bm25_scores = self.bm25.get_scores(tokenized_query)
+        bm25_top_indices = np.argsort(bm25_scores)[::-1][:k]
+        bm25_results = {self.chunks[i]: i for i in bm25_top_indices}
+
+        # Step 3: Fuse results with Reciprocal Rank Fusion (RRF)
+        fused_scores = {}
+        # k_rrf is a constant that controls how much to penalize lower ranks. 60 is a common value.
+        k_rrf = 60  
+
+        # Add scores from FAISS results
+        for doc, rank in faiss_results.items():
+            fused_scores[doc] = fused_scores.get(doc, 0) + 1 / (k_rrf + rank)
+
+        # Add scores from BM25 results
+        for doc, rank in bm25_results.items():
+            fused_scores[doc] = fused_scores.get(doc, 0) + 1 / (k_rrf + rank)
+
+        # Step 4: Sort the fused results to get the final ranked list
+        reranked_results = sorted(fused_scores.keys(), key=fused_scores.get, reverse=True)
+        
+        return reranked_results[:k]
 
 
 class RAGPipeline:
