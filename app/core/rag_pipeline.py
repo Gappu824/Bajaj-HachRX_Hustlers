@@ -32,9 +32,7 @@ import google.generativeai as genai
 
 from app.core.config import settings
 # Add these for the new parsing logic
-from unstructured.chunking.title import chunk_by_title
-from unstructured.partition.html import partition_html
-from unstructured.partition.auto import partition
+
 
 
 
