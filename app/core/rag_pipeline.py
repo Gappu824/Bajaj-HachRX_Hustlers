@@ -427,33 +427,62 @@ class RAGPipeline:
             return "An error occurred while generating the answer using the Gemini API."
 
     # app/core/rag_pipeline.py
+    # Add this new method inside the RAGPipeline class
+
+    async def _generate_hypothetical_answer(self, question: str) -> str:
+        """
+        Generates a concise, hypothetical answer to a question to improve retrieval accuracy (HyDE).
+        This answer is used for searching and is then discarded.
+        """
+        hyde_prompt = f"""You are a helpful assistant. Generate a plausible, one-sentence, hypothetical answer to the following user question. Do not say you don't know the answer.
+
+QUESTION: {question}
+
+HYPOTHETICAL ANSWER:"""
+        
+        try:
+            # Use a fast model for this task as it doesn't need to be perfect.
+            model = genai.GenerativeModel("gemini-1.5-flash-001")
+            response = await model.generate_content_async(hyde_prompt)
+            hypothetical_answer = response.text.strip()
+            logger.info(f"Generated HyDE answer for '{question}': '{hypothetical_answer}'")
+            return hypothetical_answer
+        except Exception as e:
+            logger.error(f"HyDE answer generation failed for question '{question}': {e}. Falling back to original question for search.")
+            # If HyDE fails, we can safely fall back to using the original question.
+            return question
 
     # --- REPLACEMENT FOR process_query ---
 
+    # Replace your existing _answer_question_with_rerank method with this one
+
     async def _answer_question_with_rerank(self, question: str, vector_store: VectorStore) -> str:
         """
-        A helper function that performs the full retrieve, re-rank, and answer generation for a single question.
+        Answers a question using a full retrieve-and-rerank strategy, enhanced with HyDE for better retrieval.
         """
-        # 1. RETRIEVE: Cast a wide net to get a large number of potential chunks.
-        retrieved_chunks = vector_store.search(question, k=20)
+        # --- HYDE IMPLEMENTATION ---
+        # 1. Generate a hypothetical answer to use for semantic search.
+        hypothetical_answer = await self._generate_hypothetical_answer(question)
+        # --- END HYDE ---
+
+        # 2. RETRIEVE: Use the hypothetical answer to find semantically similar chunks.
+        retrieved_chunks = vector_store.search(hypothetical_answer, k=20)
         
         if not retrieved_chunks:
             logger.warning(f"No relevant chunks found for question: '{question}'")
             return "Based on the provided documents, the information to answer this question is not available."
 
-        # 2. RE-RANK: Use the more powerful CrossEncoder to find the most relevant chunks.
-        # This is a CPU-bound task, so we run it in an executor to avoid blocking the event loop.
+        # 3. RE-RANK: Use the original, precise question with the CrossEncoder for high-accuracy re-ranking.
         loop = asyncio.get_running_loop()
         pairs = [[question, chunk] for chunk in retrieved_chunks]
         scores = await loop.run_in_executor(None, self.cross_encoder.predict, pairs)
         
-        # Combine chunks with their new scores and sort for relevance.
         reranked_chunks = sorted(zip(scores, retrieved_chunks), reverse=True)
         
-        # 3. SELECT: Take the top 4 most relevant chunks for a clean, focused context.
+        # 4. SELECT: Take the top 4 most relevant chunks to create a clean, focused context.
         top_chunks = [chunk for score, chunk in reranked_chunks[:4]]
 
-        # 4. GENERATE: Pass the high-quality context to the LLM for the final answer.
+        # 5. GENERATE: Pass the high-quality context and original question to the powerful LLM for the final, factual answer.
         return await self._generate_answer(question, top_chunks)
 
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
