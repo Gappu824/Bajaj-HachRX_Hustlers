@@ -1,50 +1,60 @@
 # app/api/endpoints/query.py
+import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Security, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Request, HTTPException
 
-from app.core.config import settings
-from app.models.schemas import QueryRequest, QueryResponse
-from app.core.rag_pipeline import RAGPipeline
+from app.models.query import QueryRequest, QueryResponse # Make sure you have these Pydantic models
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-bearer_scheme = HTTPBearer()
 
-def validate_token(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
-    """Validates the static bearer token from the problem statement."""
-    if credentials.scheme != "Bearer" or credentials.credentials != settings.BEARER_TOKEN:
-        logger.warning("Invalid API token received.")
-        raise HTTPException(status_code=403, detail="Invalid or missing API token")
-    return credentials
-
-@router.post("/hackrx/run", response_model=QueryResponse, tags=["Query"])
-async def run_query(
-    fastapi_req: Request,
-    request_data: QueryRequest,
-    token: str = Depends(validate_token)
-):
+@router.post("/hackrx/run", response_model=QueryResponse, tags=["Submissions"])
+async def run_submission(request_body: QueryRequest, request: Request):
     """
-    Main API endpoint to process documents and answer questions.
+    Processes a document URL and a list of questions.
+    It uses a cached vector store to avoid reprocessing the same document,
+    significantly improving performance.
     """
-    if not request_data.documents:
-        raise HTTPException(status_code=400, detail="No document URL provided.")
+    # Access the pipeline and cache from the application state
+    rag_pipeline = request.app.state.rag_pipeline
+    vector_store_cache = request.app.state.vector_store_cache
     
-    # This solution handles the first document URL, as per the sample request.
-    # NEW, MORE ROBUST CODE
-    document_url = request_data.documents.strip()
-    logger.info(f"Received request for document: {document_url} with {len(request_data.questions)} questions.")
+    doc_url = request_body.documents
+    if not doc_url:
+        raise HTTPException(status_code=400, detail="No document URL provided.")
 
     try:
-        # Get the initialized RAG pipeline instance from the app's state
-        rag_pipeline: RAGPipeline = fastapi_req.app.state.rag_pipeline
-        answers = await rag_pipeline.process_query(document_url, request_data.questions)
+        # --- CACHING LOGIC ---
+        # Check if the vector store for this URL is already in our cache
+        if doc_url not in vector_store_cache:
+            logger.info(f"Document not in cache. Processing and caching: {doc_url}")
+            # If not, download, process, and store it in the cache
+            local_pdf_path = await rag_pipeline.download_and_get_path(doc_url)
+            vector_store = await rag_pipeline.create_vector_store([local_pdf_path])
+            vector_store_cache[doc_url] = vector_store
+        else:
+            logger.info(f"Using cached vector store for document: {doc_url}")
+            vector_store = vector_store_cache[doc_url]
+        # --- END CACHING LOGIC ---
+
+        # Process all questions in parallel for maximum speed
+        tasks = [
+            rag_pipeline.answer_question(question, vector_store)
+            for question in request_body.questions
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        answers = []
+        for res in results:
+            if isinstance(res, Exception):
+                logger.error(f"An error occurred while answering a question: {res}")
+                answers.append("Error: Could not process this question due to an internal error.")
+            else:
+                # Assuming answer_question returns the answer string directly
+                answers.append(res)
+                
         return QueryResponse(answers=answers)
-    except ValueError as e:
-        # Handle known processing errors (e.g., empty PDF)
-        logger.error(f"Value Error processing request: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+
     except Exception as e:
-        # Catch-all for unexpected server errors
-        logger.critical(f"An unexpected server error occurred: {e}", exc_info=True)
+        logger.error(f"A critical error occurred in the query endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal server error occurred.")

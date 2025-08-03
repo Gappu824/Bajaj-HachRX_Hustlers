@@ -17,23 +17,28 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Manages application startup and shutdown events.
-    The embedding model is loaded here once to be reused across all requests.
+    The RAG pipeline and vector store cache are initialized here once
+    to be reused across all requests.
     """
     # --- Startup ---
-    logger.info("Application startup: Loading embedding model...")
+    logger.info("Application startup: Initializing resources...")
+    
     embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
     
-    # Instantiate the RAGPipeline. 
-    # The pipeline now configures the Google Gemini client internally.
+    # Instantiate the RAGPipeline and attach it to the app state
     app.state.rag_pipeline = RAGPipeline(embedding_model)
     
-    logger.info("Embedding model loaded. RAG pipeline is ready.")
+    # --- CACHING IMPROVEMENT ---
+    # Create the in-memory cache and attach it to the app state
+    app.state.vector_store_cache = {}
+    # --- END CACHING IMPROVEMENT ---
+    
+    logger.info("Resources initialized. RAG pipeline and cache are ready.")
     yield
     # --- Shutdown ---
     logger.info("Application shutdown...")
-    # This is a good practice to clear resources if needed.
-    from app.core.cache import cache
-    cache._cache.clear() 
+    # Clear the cache on shutdown
+    app.state.vector_store_cache.clear() 
     logger.info("Cache cleared. Shutdown complete.")
 
 

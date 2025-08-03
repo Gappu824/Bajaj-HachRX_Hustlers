@@ -21,6 +21,7 @@ from google.api_core import exceptions as google_exceptions
 
 # Imports for core RAG logic
 from sentence_transformers import SentenceTransformer
+from sentence_transformers.cross_encoder import CrossEncoder
 import faiss
 import numpy as np
 import google.generativeai as genai
@@ -54,6 +55,8 @@ class RAGPipeline:
         except Exception as e:
             logger.critical(f"Failed to configure Google Generative AI: {e}")
             raise RuntimeError("Google API Key is not configured correctly.")
+        self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+        logger.info("CrossEncoder model for re-ranking loaded.") 
         
 
 
@@ -388,15 +391,30 @@ class RAGPipeline:
     )
     async def _generate_answer(self, question: str, context: List[str]) -> str:
         context_str = "\n\n---\n\n".join(context)
-        prompt = (
-            "You are an expert AI assistant for analyzing complex policy documents. "
-            "Your task is to answer the user's question based ONLY on the provided text context. "
-            "Do not infer, imagine, or use any external knowledge. "
-            "If the answer is not found in the context, you MUST state: "
-            "'Based on the provided documents, there is no information on this topic.' "
-            "Be precise and concise in your answer.\n\n"
-            f"CONTEXT:\n{context_str}\n\nQUESTION:\n{question}"
-        )
+        prompt = f"""
+    You are a specialized AI Analyst with expertise in dissecting complex legal, insurance, HR, and compliance documents. Your responses must be precise, objective, and grounded exclusively in the provided text.
+
+    **Core Directive:** Answer the user's question using ONLY the information available in the 'CONTEXT' section below.
+
+    **Strict Constraints:**
+    - Do NOT use any external or prior knowledge.
+    - Do NOT make assumptions, inferences, or interpretations that are not explicitly supported by the text.
+    - If the context does not contain the answer, you are required to state: "Based on the provided documents, the information to answer this question is not available." Do not attempt to answer.
+
+    **Output Format:**
+    - Your answer must be a direct and factual response.
+    - Extract the key information and present it clearly and concisely.
+
+    ---
+    **CONTEXT:**
+    {context_str}
+    ---
+
+    **QUESTION:**
+    {question}
+
+    **PRECISE ANSWER:**
+    """
         try:
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
             response = await model.generate_content_async(prompt)
@@ -408,17 +426,49 @@ class RAGPipeline:
             logger.error(f"Google Gemini generation failed for question '{question}': {e}")
             return "An error occurred while generating the answer using the Gemini API."
 
+    # app/core/rag_pipeline.py
+
+    # --- REPLACEMENT FOR process_query ---
+
+    async def _answer_question_with_rerank(self, question: str, vector_store: VectorStore) -> str:
+        """
+        A helper function that performs the full retrieve, re-rank, and answer generation for a single question.
+        """
+        # 1. RETRIEVE: Cast a wide net to get a large number of potential chunks.
+        retrieved_chunks = vector_store.search(question, k=20)
+        
+        if not retrieved_chunks:
+            logger.warning(f"No relevant chunks found for question: '{question}'")
+            return "Based on the provided documents, the information to answer this question is not available."
+
+        # 2. RE-RANK: Use the more powerful CrossEncoder to find the most relevant chunks.
+        # This is a CPU-bound task, so we run it in an executor to avoid blocking the event loop.
+        loop = asyncio.get_running_loop()
+        pairs = [[question, chunk] for chunk in retrieved_chunks]
+        scores = await loop.run_in_executor(None, self.cross_encoder.predict, pairs)
+        
+        # Combine chunks with their new scores and sort for relevance.
+        reranked_chunks = sorted(zip(scores, retrieved_chunks), reverse=True)
+        
+        # 3. SELECT: Take the top 4 most relevant chunks for a clean, focused context.
+        top_chunks = [chunk for score, chunk in reranked_chunks[:4]]
+
+        # 4. GENERATE: Pass the high-quality context to the LLM for the final answer.
+        return await self._generate_answer(question, top_chunks)
+
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
         """
-        Processes a list of question strings concurrently for maximum speed.
-        This is the final version for the hackathon submission.
+        Processes a list of questions concurrently using the retrieve-and-rerank strategy.
         """
         vector_store = await self.get_or_create_vector_store(document_url)
         
-        # Create a list of tasks for each question string, now retrieving 12 chunks
-        tasks = [self._generate_answer(question, vector_store.search(question, k=12)) for question in questions]
+        # Create a list of tasks, where each task will answer one question using the re-ranking logic.
+        tasks = [self._answer_question_with_rerank(question, vector_store) for question in questions]
         
-        # Run all tasks in parallel and gather the results
+        # Run all tasks in parallel and gather the results.
         answers = await asyncio.gather(*tasks, return_exceptions=True)
         
-        return [str(ans) for ans in answers]
+        # Convert all results to string, handling any potential errors gracefully.
+        return [str(ans) if not isinstance(ans, Exception) else "Error processing question." for ans in answers]
+
+    # --- END REPLACEMENT ---
