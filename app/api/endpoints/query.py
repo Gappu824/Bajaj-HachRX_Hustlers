@@ -29,7 +29,8 @@ async def run_submission(request_body: QueryRequest, request: Request):
         if doc_url not in vector_store_cache:
             logger.info(f"Document not in cache. Processing and caching: {doc_url}")
             # If not, download, process, and store it in the cache
-            local_pdf_path = await rag_pipeline._download_and_parse_document(doc_url)
+            # This is the corrected line
+            local_pdf_path = rag_pipeline._download_and_parse_document(doc_url)
             vector_store = await rag_pipeline.get_or_create_vector_store([local_pdf_path])
             vector_store_cache[doc_url] = vector_store
         else:
