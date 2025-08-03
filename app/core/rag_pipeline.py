@@ -26,81 +26,34 @@ import faiss
 import numpy as np
 import google.generativeai as genai
 # Add this near your other RAG imports
-from rank_bm25 import BM25Okapi
+
 
 from app.core.config import settings
+# Add these for the new parsing logic
+from unstructured.chunking.title import chunk_by_title
+from unstructured.partition.html import partition_html
+from unstructured.partition.auto import partition
 
 
 logger = logging.getLogger(__name__)
 
 
-# class VectorStore:
-#     def __init__(self, chunks: List[str], embeddings: np.ndarray, model: SentenceTransformer):
-#         self.chunks = chunks
-#         self.model = model
-#         dimension = embeddings.shape[1]
-#         self.index = faiss.IndexFlatL2(dimension)
-#         self.index.add(embeddings)
-#         logger.info(f"Built FAISS index for {len(chunks)} chunks.")
 
-#     def search(self, query: str, k: int = 12) -> List[str]:
-#         query_embedding = self.model.encode([query]).astype('float32')
-#         _, indices = self.index.search(query_embedding, k)
-#         return [self.chunks[i] for i in indices[0]]
-
-# Replace your entire existing VectorStore class with this one
 
 class VectorStore:
     def __init__(self, chunks: List[str], embeddings: np.ndarray, model: SentenceTransformer):
         self.chunks = chunks
         self.model = model
-        
-        # 1. FAISS Index for semantic search (existing)
         dimension = embeddings.shape[1]
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(embeddings)
-        
-        # 2. BM25 Index for keyword search (new)
-        tokenized_chunks = [doc.split(" ") for doc in chunks]
-        self.bm25 = BM25Okapi(tokenized_chunks)
-        
-        logger.info(f"Built both FAISS (semantic) and BM25 (keyword) indexes for {len(chunks)} chunks.")
+        logger.info(f"Built FAISS index for {len(chunks)} chunks.")
 
-    def search(self, query: str, k: int = 20) -> List[str]:
-        """
-        Performs a hybrid search using both semantic (FAISS) and keyword (BM25) search,
-        then fuses the results using Reciprocal Rank Fusion (RRF) for superior retrieval.
-        """
-        # --- HYBRID SEARCH & FUSION LOGIC ---
-        
-        # Step 1: Perform Semantic Search (FAISS)
+    def search(self, query: str, k: int = 15) -> List[str]:
+        """Performs a simple, fast FAISS vector search."""
         query_embedding = self.model.encode([query]).astype('float32')
-        _, faiss_indices = self.index.search(query_embedding, k)
-        faiss_results = {self.chunks[i]: i for i in faiss_indices[0]}
-
-        # Step 2: Perform Keyword Search (BM25)
-        tokenized_query = query.split(" ")
-        bm25_scores = self.bm25.get_scores(tokenized_query)
-        bm25_top_indices = np.argsort(bm25_scores)[::-1][:k]
-        bm25_results = {self.chunks[i]: i for i in bm25_top_indices}
-
-        # Step 3: Fuse results with Reciprocal Rank Fusion (RRF)
-        fused_scores = {}
-        # k_rrf is a constant that controls how much to penalize lower ranks. 60 is a common value.
-        k_rrf = 60  
-
-        # Add scores from FAISS results
-        for doc, rank in faiss_results.items():
-            fused_scores[doc] = fused_scores.get(doc, 0) + 1 / (k_rrf + rank)
-
-        # Add scores from BM25 results
-        for doc, rank in bm25_results.items():
-            fused_scores[doc] = fused_scores.get(doc, 0) + 1 / (k_rrf + rank)
-
-        # Step 4: Sort the fused results to get the final ranked list
-        reranked_results = sorted(fused_scores.keys(), key=fused_scores.get, reverse=True)
-        
-        return reranked_results[:k]
+        _, indices = self.index.search(query_embedding, k)
+        return [self.chunks[i] for i in indices[0]]
 
 
 class RAGPipeline:
@@ -414,14 +367,27 @@ class RAGPipeline:
         except Exception as e:
             logger.error(f"Unexpected error processing document from {url}: {e}", exc_info=True)
             raise ValueError(f"Could not retrieve or parse document from URL: {str(e)}")
+    
+
+    # Replace your existing _chunk_text function with this one
+
     def _chunk_text(self, text: str) -> List[str]:
-        text = re.sub(r'\s+', ' ', text).strip()
-        chunk_size = 1000
-        overlap = 200
-        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
-        final_chunks = [chunk for chunk in chunks if len(chunk) > 100]
-        logger.info(f"Chunked document into {len(final_chunks)} overlapping parts.")
-        return final_chunks
+        """
+        Intelligently chunks the document text using a layout-aware model.
+        This respects semantic boundaries like paragraphs, titles, and tables.
+        """
+        # The partition function from 'unstructured' can handle raw text.
+        # It finds titles, paragraphs, etc., and creates Element objects.
+        elements = partition(text=text)
+        
+        # chunk_by_title is a powerful strategy that groups related text under its nearest title.
+        # This creates highly contextual and semantically relevant chunks.
+        chunks = chunk_by_title(elements, max_characters=1000, combine_under_n_chars=500)
+        
+        chunk_texts = [chunk.text for chunk in chunks if chunk.text.strip()]
+        
+        logger.info(f"Intelligently chunked document into {len(chunk_texts)} semantic parts.")
+        return chunk_texts
 
     async def get_or_create_vector_store(self, url: str) -> VectorStore:
         from app.core.cache import cache
@@ -484,63 +450,33 @@ class RAGPipeline:
             return "An error occurred while generating the answer using the Gemini API."
 
     # app/core/rag_pipeline.py
-    # Add this new method inside the RAGPipeline class
+    
 
-    async def _generate_hypothetical_answer(self, question: str) -> str:
-        """
-        Generates a concise, hypothetical answer to a question to improve retrieval accuracy (HyDE).
-        This answer is used for searching and is then discarded.
-        """
-        hyde_prompt = f"""You are a helpful assistant. Generate a plausible, one-sentence, hypothetical answer to the following user question. Do not say you don't know the answer.
-
-QUESTION: {question}
-
-HYPOTHETICAL ANSWER:"""
-        
-        try:
-            # Use a fast model for this task as it doesn't need to be perfect.
-            model = genai.GenerativeModel("gemini-1.5-flash-latest")
-            response = await model.generate_content_async(hyde_prompt)
-            hypothetical_answer = response.text.strip()
-            logger.info(f"Generated HyDE answer for '{question}': '{hypothetical_answer}'")
-            return hypothetical_answer
-        except Exception as e:
-            logger.error(f"HyDE answer generation failed for question '{question}': {e}. Falling back to original question for search.")
-            # If HyDE fails, we can safely fall back to using the original question.
-            return question
-
-    # --- REPLACEMENT FOR process_query ---
-
-    # Replace your existing _answer_question_with_rerank method with this one
-
+    # 2. Replace your _answer_question_with_rerank method with this simpler version.
     async def _answer_question_with_rerank(self, question: str, vector_store: VectorStore) -> str:
         """
-        Answers a question using a full retrieve-and-rerank strategy, enhanced with HyDE for better retrieval.
+        A simplified helper that uses fast retrieval and powerful re-ranking.
         """
-        # --- HYDE IMPLEMENTATION ---
-        # 1. Generate a hypothetical answer to use for semantic search.
-        hypothetical_answer = await self._generate_hypothetical_answer(question)
-        # --- END HYDE ---
-
-        # 2. RETRIEVE: Use the hypothetical answer to find semantically similar chunks.
-        retrieved_chunks = vector_store.search(hypothetical_answer, k=20)
+        # Step 1: Fast, simple retrieval on high-quality chunks.
+        retrieved_chunks = vector_store.search(question, k=15)
         
         if not retrieved_chunks:
-            logger.warning(f"No relevant chunks found for question: '{question}'")
             return "Based on the provided documents, the information to answer this question is not available."
 
-        # 3. RE-RANK: Use the original, precise question with the CrossEncoder for high-accuracy re-ranking.
+        # Step 2: Powerful re-ranking to find the absolute best context.
         loop = asyncio.get_running_loop()
         pairs = [[question, chunk] for chunk in retrieved_chunks]
         scores = await loop.run_in_executor(None, self.cross_encoder.predict, pairs)
         
         reranked_chunks = sorted(zip(scores, retrieved_chunks), reverse=True)
-        
-        # 4. SELECT: Take the top 4 most relevant chunks to create a clean, focused context.
-        top_chunks = [chunk for score, chunk in reranked_chunks[:4]]
+        # We pass the top 5 chunks to the LLM for a balance of context and focus.
+        top_chunks = [chunk for score, chunk in reranked_chunks[:5]]
 
-        # 5. GENERATE: Pass the high-quality context and original question to the powerful LLM for the final, factual answer.
+        # Step 3: Elite generation with the clean context.
         return await self._generate_answer(question, top_chunks)
+
+    # 3. Your get_or_create_vector_store and process_query methods are now correct
+    #    because they call the right underlying functions. No changes are needed there.
 
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
         """
