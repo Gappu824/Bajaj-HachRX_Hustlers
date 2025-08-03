@@ -14,4 +14,4 @@ PyPDF2<3.0
 google-cloud-storage
 odfpy
 python-docx
-unstructured[local-inference]
+cross-encoder

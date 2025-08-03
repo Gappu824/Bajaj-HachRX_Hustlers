@@ -7,6 +7,8 @@ import requests
 import asyncio
 import email
 from typing import List
+import time
+from typing import Tuple, Dict, Any
 
 # Imports for multi-format support
 import pdfplumber
@@ -70,7 +72,158 @@ class RAGPipeline:
         logger.info("CrossEncoder model for re-ranking loaded.") 
         
 
+    # Add these methods to your RAGPipeline class
 
+import time
+from typing import Tuple, Dict, Any
+
+async def _generate_detailed_answer(self, question: str, context: List[str], chunk_scores: List[float]) -> Dict[str, Any]:
+    """
+    Generate a detailed answer with explainability and decision rationale
+    """
+    context_with_scores = list(zip(context, chunk_scores))
+    context_str = "\n\n---\n\n".join([f"[CONFIDENCE: {score:.2f}] {text}" for text, score in context_with_scores])
+    
+    prompt = f"""
+You are a specialized AI Analyst for insurance, legal, HR, and compliance documents. Provide a comprehensive analysis with clear decision rationale.
+
+**INSTRUCTIONS:**
+1. Answer the question using ONLY the provided context
+2. Provide a clear coverage decision (Covered/Not Covered/Conditional) if applicable
+3. Explain your reasoning step-by-step
+4. Identify specific clauses that support your answer
+5. Rate your confidence in the answer (0-1 scale)
+
+**CONTEXT:**
+{context_str}
+
+**QUESTION:**
+{question}
+
+**REQUIRED OUTPUT FORMAT:**
+ANSWER: [Your direct answer]
+DECISION: [Covered/Not Covered/Conditional/Not Applicable]
+CONFIDENCE: [0.0-1.0]
+REASONING: [Step-by-step explanation of how you reached this conclusion]
+SUPPORTING_CLAUSES: [List the specific clauses/sections that support your answer, with their confidence scores]
+"""
+    
+    try:
+        model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+        response = await model.generate_content_async(prompt)
+        result = response.text.strip()
+        
+        # Parse the structured response
+        parsed = self._parse_detailed_response(result, context_with_scores)
+        return parsed
+        
+    except Exception as e:
+        logger.error(f"Error generating detailed answer: {e}")
+        return {
+            "answer": "Error processing question",
+            "confidence": 0.0,
+            "reasoning": f"Processing error: {str(e)}",
+            "coverage_decision": "Error",
+            "source_clauses": []
+        }
+
+def _parse_detailed_response(self, response: str, context_with_scores: List[Tuple[str, float]]) -> Dict[str, Any]:
+    """Parse the structured LLM response into components"""
+    
+    # Extract components using regex or simple parsing
+    import re
+    
+    answer_match = re.search(r'ANSWER:\s*(.*?)(?=DECISION:|$)', response, re.DOTALL)
+    decision_match = re.search(r'DECISION:\s*(.*?)(?=CONFIDENCE:|$)', response, re.DOTALL)
+    confidence_match = re.search(r'CONFIDENCE:\s*([\d.]+)', response)
+    reasoning_match = re.search(r'REASONING:\s*(.*?)(?=SUPPORTING_CLAUSES:|$)', response, re.DOTALL)
+    clauses_match = re.search(r'SUPPORTING_CLAUSES:\s*(.*?)$', response, re.DOTALL)
+    
+    answer = answer_match.group(1).strip() if answer_match else "Answer not found"
+    decision = decision_match.group(1).strip() if decision_match else "Not Applicable"
+    confidence = float(confidence_match.group(1)) if confidence_match else 0.5
+    reasoning = reasoning_match.group(1).strip() if reasoning_match else "Reasoning not provided"
+    
+    # Extract source clauses
+    source_clauses = []
+    for text, score in context_with_scores[:3]:  # Top 3 sources
+        source_clauses.append({
+            "text": text[:200] + "..." if len(text) > 200 else text,
+            "confidence_score": float(score),
+            "page_number": None,  # Could be extracted from document metadata
+            "section": None
+        })
+    
+    return {
+        "answer": answer,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "coverage_decision": decision if decision != "Not Applicable" else None,
+        "source_clauses": source_clauses
+    }
+
+async def _answer_question_with_explainability(self, question: str, vector_store: VectorStore) -> Dict[str, Any]:
+    """
+    Enhanced question answering with full explainability
+    """
+    # Step 1: Retrieval
+    retrieved_chunks = vector_store.search(question, k=15)
+    
+    if not retrieved_chunks:
+        return {
+            "answer": "Based on the provided documents, the information to answer this question is not available.",
+            "confidence": 0.0,
+            "reasoning": "No relevant content found in the document",
+            "coverage_decision": None,
+            "source_clauses": []
+        }
+
+    # Step 2: Re-ranking with score tracking
+    loop = asyncio.get_running_loop()
+    pairs = [[question, chunk] for chunk in retrieved_chunks]
+    scores = await loop.run_in_executor(None, self.cross_encoder.predict, pairs)
+    
+    # Get top chunks with scores
+    reranked_chunks = sorted(zip(scores, retrieved_chunks), reverse=True)
+    top_chunks = [chunk for score, chunk in reranked_chunks[:5]]
+    top_scores = [float(score) for score, chunk in reranked_chunks[:5]]
+
+    # Step 3: Generate detailed answer
+    return await self._generate_detailed_answer(question, top_chunks, top_scores)
+
+async def process_query_with_explainability(self, document_url: str, questions: List[str]) -> Tuple[List[str], List[Dict[str, Any]], float]:
+    """
+    Process queries with both simple and detailed responses
+    """
+    start_time = time.time()
+    
+    vector_store = await self.get_or_create_vector_store(document_url)
+    
+    # Process all questions
+    tasks = [self._answer_question_with_explainability(question, vector_store) for question in questions]
+    detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Extract simple answers for backward compatibility
+    simple_answers = []
+    detailed_answers = []
+    
+    for result in detailed_results:
+        if isinstance(result, Exception):
+            simple_answers.append("Error processing question.")
+            detailed_answers.append({
+                "answer": "Error processing question",
+                "confidence": 0.0,
+                "reasoning": "Processing error occurred",
+                "coverage_decision": None,
+                "source_clauses": []
+            })
+        else:
+            simple_answers.append(result["answer"])
+            detailed_answers.append(result)
+    
+    processing_time = time.time() - start_time
+    
+    return simple_answers, detailed_answers, processing_time
     
         
 
