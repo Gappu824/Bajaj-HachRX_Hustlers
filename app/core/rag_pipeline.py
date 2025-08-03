@@ -442,7 +442,7 @@ HYPOTHETICAL ANSWER:"""
         
         try:
             # Use a fast model for this task as it doesn't need to be perfect.
-            model = genai.GenerativeModel("gemini-1.5-flash-001")
+            model = genai.GenerativeModel("gemini-1.5-flash-latest")
             response = await model.generate_content_async(hyde_prompt)
             hypothetical_answer = response.text.strip()
             logger.info(f"Generated HyDE answer for '{question}': '{hypothetical_answer}'")
