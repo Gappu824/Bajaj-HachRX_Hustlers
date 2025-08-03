@@ -14,4 +14,3 @@ PyPDF2<3.0
 google-cloud-storage
 odfpy
 python-docx
-cross-encoder
