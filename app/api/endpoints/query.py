@@ -8,52 +8,32 @@ from app.models.query import QueryRequest, QueryResponse # Make sure you have th
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# In app/api/endpoints/query.py
+
 @router.post("/hackrx/run", response_model=QueryResponse, tags=["Submissions"])
 async def run_submission(request_body: QueryRequest, request: Request):
     """
-    Processes a document URL and a list of questions.
-    It uses a cached vector store to avoid reprocessing the same document,
-    significantly improving performance.
+    Processes a document URL and a list of questions by calling the RAG pipeline.
+    The pipeline itself is responsible for all caching and processing logic.
     """
-    # Access the pipeline and cache from the application state
+    # 1. Access the RAG pipeline from the application state.
     rag_pipeline = request.app.state.rag_pipeline
-    vector_store_cache = request.app.state.vector_store_cache
+
+    # 2. Validate and sanitize the incoming document URL. This part is correct!
+    if not request_body.documents or not isinstance(request_body.documents, list):
+        raise HTTPException(status_code=400, detail="Request body must include a non-empty 'documents' list.")
     
-    doc_url = request_body.documents
-    if not doc_url:
-        raise HTTPException(status_code=400, detail="No document URL provided.")
+    url_from_list = request_body.documents[0]
+    doc_url = url_from_list.strip()
+    questions = request_body.questions
 
     try:
-        # --- CACHING LOGIC ---
-        # Check if the vector store for this URL is already in our cache
-        if doc_url not in vector_store_cache:
-            logger.info(f"Document not in cache. Processing and caching: {doc_url}")
-            # If not, download, process, and store it in the cache
-            # This is the corrected line
-            local_pdf_path = rag_pipeline._download_and_parse_document(doc_url)
-            vector_store = await rag_pipeline.get_or_create_vector_store([local_pdf_path])
-            vector_store_cache[doc_url] = vector_store
-        else:
-            logger.info(f"Using cached vector store for document: {doc_url}")
-            vector_store = vector_store_cache[doc_url]
-        # --- END CACHING LOGIC ---
-
-        # Process all questions in parallel for maximum speed
-        tasks = [
-            rag_pipeline.answer_question(question, vector_store)
-            for question in request_body.questions
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        answers = []
-        for res in results:
-            if isinstance(res, Exception):
-                logger.error(f"An error occurred while answering a question: {res}")
-                answers.append("Error: Could not process this question due to an internal error.")
-            else:
-                # Assuming answer_question returns the answer string directly
-                answers.append(res)
-                
+        # 3. Delegate the entire process to the pipeline with a single, clean call.
+        # The 'process_query' method in your pipeline should handle everything:
+        # checking the cache, downloading if needed, creating the vector store,
+        # and answering the questions.
+        answers = await rag_pipeline.process_query(doc_url, questions)
+        
         return QueryResponse(answers=answers)
 
     except Exception as e:
