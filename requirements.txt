@@ -1,23 +1,40 @@
+# Core FastAPI and web framework
 fastapi
 uvicorn[standard]
+
+# Configuration and data models
 pydantic
 pydantic-settings
+
+# Google AI and LLM
 google-generativeai
+
+# ML and embeddings - optimized versions
 sentence-transformers
 faiss-cpu
+
+# HTTP requests and async
 requests
-python-dotenv
-asyncio
 tenacity
+
+# Document processing - essential only
 pdfplumber
-PyPDF2<3.0
-google-cloud-storage
-odfpy
 python-docx
+odfpy
+
+# Cloud storage (if needed)
+google-cloud-storage
+
+# Environment and utilities
+python-dotenv
+
+# Numpy for embeddings (faiss dependency)
 numpy
-torch
-transformers
-# Additional packages for higher accuracy
-scikit-learn  # For additional similarity metrics
-nltk  # For better text processing
-spacy  # For advanced NLP if needed
+
+# Remove these heavy/optional packages that might cause issues:
+# PyPDF2<3.0  # Removed - using pdfplumber only
+# scikit-learn  # Removed - not essential for Phase 1
+# nltk  # Removed - not used in fast version
+# spacy  # Removed - too heavy, not used
+# torch  # Let sentence-transformers handle this
+# transformers  # Let sentence-transformers handle this

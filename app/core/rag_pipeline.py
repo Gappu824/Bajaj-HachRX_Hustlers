@@ -1,4 +1,4 @@
-# app/core/rag_pipeline.py - ACCURACY-FOCUSED VERSION
+# app/core/rag_pipeline.py - FAST & ACCURATE VERSION
 import io
 import re
 import os
@@ -6,8 +6,8 @@ import logging
 import requests
 import asyncio
 import email
-from typing import List, Tuple, Dict
 import time
+from typing import List, Tuple, Dict, Set
 
 # Imports for multi-format support
 import pdfplumber
@@ -32,8 +32,8 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-class EnhancedVectorStore:
-    """ACCURACY-FOCUSED vector store with multiple search strategies"""
+class FastVectorStore:
+    """FAST vector store optimized for speed while maintaining accuracy"""
     def __init__(self, chunks: List[str], embeddings: np.ndarray, model: SentenceTransformer):
         self.chunks = chunks
         self.model = model
@@ -41,76 +41,85 @@ class EnhancedVectorStore:
         self.index = faiss.IndexFlatL2(dimension)
         self.index.add(embeddings)
         
-        # Create keyword index for numerical/factual queries
-        self.keyword_index = self._build_keyword_index(chunks)
-        logger.info(f"Built enhanced FAISS index for {len(chunks)} chunks with keyword support.")
+        # Lightweight keyword index for critical terms
+        self.critical_terms = self._extract_critical_terms(chunks)
+        logger.info(f"Built FAST FAISS index for {len(chunks)} chunks with {len(self.critical_terms)} critical terms.")
 
-    def _build_keyword_index(self, chunks: List[str]) -> Dict[str, List[int]]:
-        """Build keyword index for better factual retrieval"""
-        keyword_index = {}
-        for i, chunk in enumerate(chunks):
-            # Extract numbers, percentages, years, monetary amounts
-            numbers = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?(?:%|million|billion|thousand)?\b', chunk.lower())
-            years = re.findall(r'\b(19|20)\d{2}\b', chunk)
-            amounts = re.findall(r'\$\d+(?:,\d{3})*(?:\.\d+)?(?:million|billion|k)?\b', chunk.lower())
-            
-            for term in numbers + years + amounts:
-                if term not in keyword_index:
-                    keyword_index[term] = []
-                keyword_index[term].append(i)
+    def _extract_critical_terms(self, chunks: List[str]) -> Dict[str, List[int]]:
+        """Extract only the most critical terms for fast lookup"""
+        critical_index = {}
         
-        return keyword_index
+        # Focus on high-value terms only
+        for i, chunk in enumerate(chunks):
+            chunk_lower = chunk.lower()
+            
+            # Numbers and percentages - critical for accuracy
+            numbers = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?(?:%|percent|million|billion|thousand|crore|lakh)?\b', chunk_lower)
+            
+            # Years - critical for temporal questions
+            years = re.findall(r'\b(19|20)\d{2}\b', chunk)
+            
+            # Monetary amounts
+            amounts = re.findall(r'(?:rs\.|₹|inr|dollar|\$)\s*\d+(?:,\d{3})*(?:\.\d+)?(?:million|billion|thousand|crore|lakh)?\b', chunk_lower)
+            
+            # Key insurance/policy terms
+            key_terms = []
+            important_keywords = [
+                'coverage', 'premium', 'deductible', 'waiting period', 'grace period',
+                'claim', 'benefit', 'exclusion', 'maternity', 'pre-existing',
+                'renewal', 'discount', 'hospital', 'treatment', 'surgery'
+            ]
+            
+            for keyword in important_keywords:
+                if keyword in chunk_lower:
+                    key_terms.append(keyword)
+            
+            # Index all critical terms
+            all_terms = numbers + years + amounts + key_terms
+            for term in set(all_terms):  # Remove duplicates
+                if term not in critical_index:
+                    critical_index[term] = []
+                critical_index[term].append(i)
+        
+        return critical_index
 
-    def enhanced_search(self, query: str, k: int = 25) -> List[Tuple[str, float]]:
-        """Multi-strategy search combining vector, keyword, and semantic approaches"""
-        # Strategy 1: Vector similarity search
+    def fast_search(self, query: str, k: int = 20) -> List[Tuple[str, float]]:
+        """Fast multi-strategy search optimized for speed"""
+        results = []
+        
+        # Strategy 1: Vector similarity (primary)
         query_embedding = self.model.encode([query]).astype('float32')
         distances, indices = self.index.search(query_embedding, min(k, len(self.chunks)))
         
-        vector_results = []
-        for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
-            if idx != -1:  # Valid result
-                similarity = 1 / (1 + distance)  # Convert distance to similarity
-                vector_results.append((self.chunks[idx], similarity, 'vector'))
+        for distance, idx in zip(distances[0], indices[0]):
+            if idx != -1:
+                similarity = 1 / (1 + distance)
+                results.append((self.chunks[idx], similarity))
         
-        # Strategy 2: Keyword matching for numerical queries
-        keyword_results = []
+        # Strategy 2: Critical term boosting (fast)
         query_lower = query.lower()
-        query_numbers = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?(?:%|million|billion|thousand)?\b', query_lower)
-        query_years = re.findall(r'\b(19|20)\d{2}\b', query)
+        bonus_chunks = set()
         
-        for term in query_numbers + query_years:
-            if term in self.keyword_index:
-                for chunk_idx in self.keyword_index[term]:
-                    chunk = self.chunks[chunk_idx]
-                    keyword_results.append((chunk, 0.9, 'keyword'))  # High confidence for exact matches
-        
-        # Strategy 3: Fuzzy keyword matching
-        fuzzy_results = []
-        important_terms = ['million', 'billion', 'percent', '%', 'by 2025', 'by 2030', 'target', 'goal', 'aims']
-        for term in important_terms:
+        # Boost chunks with matching critical terms
+        for term, chunk_indices in self.critical_terms.items():
             if term in query_lower:
-                for i, chunk in enumerate(self.chunks):
-                    if term in chunk.lower():
-                        fuzzy_results.append((chunk, 0.7, 'fuzzy'))
+                for chunk_idx in chunk_indices[:3]:  # Limit to avoid slowdown
+                    if chunk_idx < len(self.chunks):
+                        bonus_chunks.add(chunk_idx)
         
-        # Combine and deduplicate results
-        all_results = vector_results + keyword_results + fuzzy_results
-        seen_chunks = set()
-        unique_results = []
+        # Add bonus chunks if not already included
+        for chunk_idx in bonus_chunks:
+            chunk = self.chunks[chunk_idx]
+            if not any(chunk == existing_chunk for existing_chunk, _ in results):
+                results.append((chunk, 0.85))  # High relevance score
         
-        for chunk, score, strategy in all_results:
-            if chunk not in seen_chunks:
-                seen_chunks.add(chunk)
-                unique_results.append((chunk, score))
-        
-        # Sort by score and return top k
-        unique_results.sort(key=lambda x: x[1], reverse=True)
-        return unique_results[:k]
+        # Sort by relevance and return top k
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:k]
 
 
-class AccuracyFirstRAGPipeline:
-    """ACCURACY-FOCUSED RAG pipeline optimized for high precision retrieval"""
+class FastAccurateRAGPipeline:
+    """FAST & ACCURATE RAG pipeline optimized for production speed"""
     
     def __init__(self, embedding_model: SentenceTransformer):
         self.embedding_model = embedding_model
@@ -121,401 +130,293 @@ class AccuracyFirstRAGPipeline:
             logger.critical(f"Failed to configure Google Generative AI: {e}")
             raise RuntimeError("Google API Key is not configured correctly.")
         
-        # Use more accurate cross-encoder
-        self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-12-v2')
-        logger.info("Enhanced CrossEncoder model for re-ranking loaded.")
+        # Use lighter cross-encoder for speed
+        try:
+            self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            logger.info("Fast CrossEncoder model loaded.")
+        except Exception as e:
+            logger.warning(f"CrossEncoder loading failed, will use vector similarity only: {e}")
+            self.cross_encoder = None
 
-    def _download_and_parse_document_enhanced(self, url: str) -> str:
-        """Enhanced document parsing with better structure preservation"""
-        logger.info(f"Processing document with enhanced parsing from {url}")
+    def _download_and_parse_document(self, url: str) -> str:
+        """Fast document parsing - reuse your existing method but with timeout optimization"""
+        logger.info(f"Processing document from {url}")
         
         try:
             temp_file = None
             file_extension = ""
             
-            if url.startswith("gs://"):
-                try:
-                    storage_client = storage.Client()
-                    bucket_name, blob_name = url.replace("gs://", "").split("/", 1)
-                    bucket = storage_client.bucket(bucket_name)
-                    blob = bucket.blob(blob_name)
-                    
-                    if not blob.exists():
-                        raise ValueError(f"File not found in Google Cloud Storage: {url}")
-                    
-                    temp_file = io.BytesIO(blob.download_as_bytes())
-                    file_extension = os.path.splitext(blob_name)[1].lower()
-                    logger.info(f"Successfully downloaded from GCS: {blob_name}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to download from Google Cloud Storage: {e}")
-                    raise ValueError(f"Could not access Google Cloud Storage file: {str(e)}")
-                    
-            elif url.startswith(("http://", "https://")):
+            if url.startswith(("http://", "https://")):
                 try:
                     headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Connection': 'keep-alive'
+                        'User-Agent': 'Mozilla/5.0 (compatible; DocumentProcessor/1.0)',
+                        'Accept': 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*'
                     }
                     
                     logger.info(f"Downloading from URL: {url}")
-                    response = requests.get(url, headers=headers, timeout=45, stream=True, allow_redirects=True)
+                    response = requests.get(url, headers=headers, timeout=30, stream=True, allow_redirects=True)
                     response.raise_for_status()
                     
                     content = b""
-                    max_size = 100 * 1024 * 1024  # 100MB
-                    size = 0
+                    max_size = 50 * 1024 * 1024  # 50MB limit for speed
                     
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
-                            size += len(chunk)
-                            if size > max_size:
-                                raise ValueError(f"File too large (>{max_size/1024/1024:.1f}MB)")
                             content += chunk
-                    
-                    if not content:
-                        raise ValueError("Empty response received from server")
+                            if len(content) > max_size:
+                                break
                     
                     temp_file = io.BytesIO(content)
-                    url_path = url.split('?')[0].split('#')[0]
-                    file_extension = os.path.splitext(url_path)[1].lower()
+                    file_extension = os.path.splitext(url.split('?')[0])[1].lower()
                     
-                    if not file_extension:
-                        content_type = response.headers.get('content-type', '').lower()
-                        if 'pdf' in content_type:
-                            file_extension = '.pdf'
-                        elif 'wordprocessingml' in content_type:
-                            file_extension = '.docx'
-                        else:
-                            file_extension = '.pdf'  # Default assumption
+                    if not file_extension and 'pdf' in response.headers.get('content-type', ''):
+                        file_extension = '.pdf'
                     
                     logger.info(f"Downloaded {len(content)} bytes, extension: {file_extension}")
                     
                 except Exception as e:
-                    raise ValueError(f"Error downloading from URL: {str(e)}")
+                    raise ValueError(f"Error downloading: {str(e)}")
             else:
-                raise ValueError("Invalid document URL scheme")
+                raise ValueError("Only HTTP/HTTPS URLs supported in fast mode")
 
-            # Enhanced parsing with structure preservation
+            # Fast PDF parsing
             full_text = ""
             temp_file.seek(0)
             
             if file_extension == '.pdf':
                 try:
                     with pdfplumber.open(temp_file) as pdf:
-                        if len(pdf.pages) == 0:
-                            raise ValueError("PDF file contains no pages")
-                        
                         logger.info(f"Processing PDF with {len(pdf.pages)} pages")
+                        
+                        # Process pages in batches for speed
                         for page_num, page in enumerate(pdf.pages):
+                            if page_num > 50:  # Limit pages for speed
+                                break
+                                
                             try:
-                                # Add page marker for better context
-                                full_text += f"\n\n--- PAGE {page_num + 1} ---\n"
+                                page_text = page.extract_text()
+                                if page_text and page_text.strip():
+                                    full_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}\n"
                                 
-                                # Extract text with better formatting
-                                page_text = page.extract_text(x_tolerance=3, y_tolerance=3)
-                                if page_text and page_text.strip(): 
-                                    full_text += page_text + "\n"
-                                
-                                # Extract tables with better formatting
+                                # Quick table extraction
                                 tables = page.extract_tables()
-                                for table in tables:
-                                    if table and len(table) > 0:
-                                        full_text += "\n=== TABLE START ===\n"
-                                        for row in table:
-                                            if row:
-                                                row_text = " | ".join([str(cell) if cell else "" for cell in row])
-                                                full_text += row_text + "\n"
-                                        full_text += "=== TABLE END ===\n"
-                                        
+                                for table in tables[:2]:  # Limit tables per page
+                                    if table:
+                                        table_text = "\n".join([" | ".join([str(cell) if cell else "" for cell in row]) for row in table if row])
+                                        if table_text.strip():
+                                            full_text += f"\n=== TABLE ===\n{table_text}\n=== END TABLE ===\n"
+                                            
                             except Exception as e:
-                                logger.warning(f"Error processing PDF page {page_num}: {e}")
+                                logger.warning(f"Error on page {page_num}: {e}")
                                 continue
                                 
                 except Exception as e:
-                    raise ValueError(f"Error parsing PDF file: {str(e)}")
-                    
-            elif file_extension == '.docx':
-                try:
-                    doc = Document(temp_file)
-                    paragraphs = []
-                    for para in doc.paragraphs:
-                        if para.text and para.text.strip():
-                            paragraphs.append(para.text)
-                    
-                    if not paragraphs:
-                        raise ValueError("DOCX file contains no readable text")
-                    
-                    full_text = "\n".join(paragraphs)
-                    logger.info(f"Extracted {len(paragraphs)} paragraphs from DOCX")
-                except Exception as e:
-                    raise ValueError(f"Error parsing DOCX file: {str(e)}")
+                    raise ValueError(f"PDF parsing error: {str(e)}")
             
-            # [ODT and EML parsing remains the same as your original]
+            # Validate and clean
+            if not full_text or len(full_text) < 50:
+                raise ValueError("Document too short or empty")
             
-            # Validate extracted text
-            if not full_text or not full_text.strip():
-                raise ValueError("Document appears to be empty")
+            # Fast cleaning
+            full_text = re.sub(r'\n\s*\n\s*\n', '\n\n', full_text)
+            full_text = re.sub(r'[ \t]+', ' ', full_text).strip()
             
-            # Enhanced text cleaning - preserve structure better
-            full_text = re.sub(r'\n\s*\n\s*\n', '\n\n', full_text)  # Reduce multiple newlines
-            full_text = re.sub(r'[ \t]+', ' ', full_text)  # Normalize spaces
-            full_text = full_text.strip()
-            
-            if len(full_text) < 50:
-                raise ValueError("Extracted text is too short")
-            
-            logger.info(f"Successfully extracted {len(full_text)} characters with enhanced structure")
+            logger.info(f"Extracted {len(full_text)} characters")
             return full_text
             
-        except ValueError:
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error: {e}", exc_info=True)
+            logger.error(f"Document processing error: {e}")
             raise ValueError(f"Could not process document: {str(e)}")
 
-    def _chunk_text_for_accuracy(self, text: str) -> List[str]:
-        """ACCURACY-FOCUSED chunking with larger chunks and better overlap"""
+    def _fast_chunk_text(self, text: str) -> List[str]:
+        """Fast chunking optimized for speed and accuracy balance"""
         
-        # Split into paragraphs first
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        # Quick paragraph-based chunking
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip() and len(p.strip()) > 20]
         
         chunks = []
         current_chunk = ""
-        max_chunk_size = 1200  # Larger chunks for better context
-        overlap_size = 300     # Substantial overlap
+        target_size = 800  # Smaller for speed
+        overlap_size = 150  # Reasonable overlap
         
         for paragraph in paragraphs:
-            # If adding this paragraph would exceed max size
-            if len(current_chunk) + len(paragraph) > max_chunk_size and current_chunk:
+            if len(current_chunk) + len(paragraph) > target_size and current_chunk:
                 chunks.append(current_chunk.strip())
                 
-                # Create overlap from end of current chunk
+                # Smart overlap
                 if len(current_chunk) > overlap_size:
-                    overlap_text = current_chunk[-overlap_size:]
-                    # Find a good break point
-                    break_point = overlap_text.find('. ')
-                    if break_point > 50:  # If we find a sentence break
-                        overlap_text = overlap_text[break_point + 2:]
-                    current_chunk = overlap_text + " " + paragraph
+                    sentences = current_chunk.split('. ')
+                    if len(sentences) > 2:
+                        overlap = '. '.join(sentences[-2:])
+                        current_chunk = overlap + " " + paragraph
+                    else:
+                        current_chunk = paragraph
                 else:
                     current_chunk = paragraph
             else:
-                if current_chunk:
-                    current_chunk += "\n\n" + paragraph
-                else:
-                    current_chunk = paragraph
+                current_chunk = current_chunk + "\n\n" + paragraph if current_chunk else paragraph
         
-        # Add the last chunk
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
         
-        # Filter very short chunks and split very long ones
-        final_chunks = []
-        for chunk in chunks:
-            if len(chunk) < 100:  # Skip very short chunks
-                continue
-            elif len(chunk) > 2000:  # Split very long chunks
-                # Split by sentences
-                sentences = re.split(r'(?<=[.!?])\s+', chunk)
-                temp_chunk = ""
-                for sentence in sentences:
-                    if len(temp_chunk) + len(sentence) > 1200 and temp_chunk:
-                        final_chunks.append(temp_chunk.strip())
-                        temp_chunk = sentence
-                    else:
-                        temp_chunk += " " + sentence if temp_chunk else sentence
-                if temp_chunk.strip():
-                    final_chunks.append(temp_chunk.strip())
-            else:
-                final_chunks.append(chunk)
+        # Filter and validate
+        final_chunks = [chunk for chunk in chunks if len(chunk.strip()) > 100]
         
-        logger.info(f"Created {len(final_chunks)} accuracy-focused chunks")
+        logger.info(f"Created {len(final_chunks)} fast chunks")
         return final_chunks
 
-    async def get_or_create_enhanced_vector_store(self, url: str) -> EnhancedVectorStore:
-        """Create enhanced vector store with multiple search strategies"""
+    async def get_or_create_fast_vector_store(self, url: str) -> FastVectorStore:
+        """Create vector store with speed optimization"""
         from app.core.cache import cache
         cached_store = await cache.get(url)
         if cached_store:
-            logger.info(f"Found cached enhanced vector store for {url}")
+            logger.info(f"Using cached vector store for {url}")
             return cached_store
             
-        logger.info(f"Creating enhanced vector store for {url}...")
-        text = self._download_and_parse_document_enhanced(url)
+        logger.info(f"Creating fast vector store for {url}...")
+        text = self._download_and_parse_document(url)
+        chunks = self._fast_chunk_text(text)
         
-        if not text:
-            raise ValueError("Document is empty or could not be processed.")
-            
-        chunks = self._chunk_text_for_accuracy(text)
         if not chunks:
-            raise ValueError("Could not extract meaningful text chunks.")
+            raise ValueError("No chunks created")
             
-        embeddings = self.embedding_model.encode(chunks, show_progress_bar=False).astype('float32')
-        vector_store = EnhancedVectorStore(chunks, embeddings, self.embedding_model)
+        # Fast embedding generation
+        embeddings = self.embedding_model.encode(chunks, show_progress_bar=False, batch_size=32).astype('float32')
+        vector_store = FastVectorStore(chunks, embeddings, self.embedding_model)
         
         await cache.set(url, vector_store)
         return vector_store
 
     @retry(
-        wait=wait_exponential(multiplier=1, min=2, max=10),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
         stop=stop_after_attempt(3),
-        retry=(retry_if_exception_type(google_exceptions.ResourceExhausted))
+        retry=retry_if_exception_type(google_exceptions.ResourceExhausted)
     )
-    async def _generate_accurate_answer(self, question: str, context: List[str]) -> str:
-        """ACCURACY-FOCUSED answer generation with detailed prompting"""
-        context_str = "\n\n---CONTEXT SECTION---\n\n".join(context)
+    async def _generate_fast_answer(self, question: str, context: List[str]) -> str:
+        """Fast answer generation with accuracy focus"""
         
-        # Enhanced prompt focused on finding information
-        prompt = f"""You are an expert document analyst specializing in extracting precise information from complex documents.
+        # Limit context for speed
+        context_text = "\n\n---\n\n".join(context[:6])
+        
+        # Smart prompt based on question type
+        question_lower = question.lower()
+        
+        if any(word in question_lower for word in ['how many', 'percentage', 'amount', 'number']):
+            instruction = "Focus on finding specific numbers, amounts, and quantitative data. Provide exact figures with context."
+        elif any(word in question_lower for word in ['does', 'is', 'are', 'can', 'will']):
+            instruction = "Provide a clear yes/no answer followed by supporting details and conditions."
+        else:
+            instruction = "Provide a comprehensive answer with specific details from the document."
+        
+        prompt = f"""You are an expert document analyst. {instruction}
 
-**CRITICAL INSTRUCTION**: Your primary goal is to find and extract the requested information from the provided context. Be thorough and look for:
-- Direct statements that answer the question
-- Numerical data, percentages, targets, and goals
-- Implied information that can be reasonably inferred
-- Partial information that relates to the question
+IMPORTANT: Extract information directly from the context below. If you find relevant information, provide it clearly. Only say "information not available" if you truly cannot find any related content.
 
-**SEARCH STRATEGY**:
-1. Look for exact matches to the question topic
-2. Search for related terms and synonyms
-3. Check tables, lists, and structured data
-4. Look for numerical patterns and targets
+CONTEXT:
+{context_text}
 
-**RESPONSE GUIDELINES**:
-- Provide specific, factual answers with numbers when available
-- If you find partial information, provide what you can find
-- Only say "information not available" if you truly cannot find ANY related content
-- Include relevant context and details that support your answer
-- For numerical questions, provide the specific numbers found
+QUESTION: {question}
 
-**DOCUMENT CONTEXT**:
-{context_str}
-
-**QUESTION**: {question}
-
-**DETAILED ANSWER** (Be thorough and specific):"""
+ANSWER:"""
 
         try:
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
             response = await model.generate_content_async(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,  # Low temperature for factual accuracy
-                    max_output_tokens=500,
+                    temperature=0.1,
+                    max_output_tokens=400,
                     top_p=0.8
                 )
             )
             return response.text.strip()
         except Exception as e:
-            logger.error(f"Gemini generation failed: {e}")
-            return "An error occurred while generating the answer."
+            logger.error(f"Answer generation failed: {e}")
+            return "Error generating answer."
 
-    async def _answer_question_with_enhanced_retrieval(self, question: str, vector_store: EnhancedVectorStore) -> str:
-        """Enhanced question answering with multiple retrieval strategies"""
-        # Step 1: Enhanced retrieval with multiple strategies
-        retrieved_results = vector_store.enhanced_search(question, k=25)
+    async def _answer_question_fast(self, question: str, vector_store: FastVectorStore) -> str:
+        """Fast question answering with accuracy optimization"""
+        
+        # Fast retrieval
+        retrieved_results = vector_store.fast_search(question, k=15)
         
         if not retrieved_results:
             return "Based on the provided documents, the information to answer this question is not available."
 
-        # Step 2: Advanced re-ranking
-        chunks_with_scores = [(chunk, score) for chunk, score in retrieved_results]
-        
-        # Cross-encoder re-ranking
-        loop = asyncio.get_running_loop()
-        chunks = [chunk for chunk, _ in chunks_with_scores]
-        pairs = [[question, chunk] for chunk in chunks]
-        
-        try:
-            cross_scores = await loop.run_in_executor(None, self.cross_encoder.predict, pairs)
-            
-            # Combine scores (weighted combination)
-            final_scores = []
-            for i, ((chunk, initial_score), cross_score) in enumerate(zip(chunks_with_scores, cross_scores)):
-                # Weighted combination: 40% initial similarity + 60% cross-encoder
-                combined_score = 0.4 * initial_score + 0.6 * float(cross_score)
-                final_scores.append((combined_score, chunk))
-            
-            # Sort by combined score and take top chunks
-            final_scores.sort(reverse=True)
-            top_chunks = [chunk for score, chunk in final_scores[:8]]  # More context
-            
-        except Exception as e:
-            logger.warning(f"Cross-encoder failed, using initial ranking: {e}")
-            top_chunks = [chunk for chunk, _ in chunks_with_scores[:8]]
+        # Optional re-ranking (skip if too slow)
+        if self.cross_encoder and len(retrieved_results) <= 10:
+            try:
+                chunks = [chunk for chunk, _ in retrieved_results]
+                pairs = [[question, chunk] for chunk in chunks]
+                
+                # Use executor with timeout
+                loop = asyncio.get_running_loop()
+                scores = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.cross_encoder.predict, pairs),
+                    timeout=5.0  # 5 second timeout
+                )
+                
+                # Combine scores
+                final_results = []
+                for i, ((chunk, initial_score), cross_score) in enumerate(zip(retrieved_results, scores)):
+                    combined_score = 0.4 * initial_score + 0.6 * float(cross_score)
+                    final_results.append((combined_score, chunk))
+                
+                final_results.sort(reverse=True)
+                top_chunks = [chunk for score, chunk in final_results[:8]]
+                
+            except asyncio.TimeoutError:
+                logger.warning("Cross-encoder timeout, using vector similarity only")
+                top_chunks = [chunk for chunk, _ in retrieved_results[:8]]
+            except Exception as e:
+                logger.warning(f"Cross-encoder failed: {e}")
+                top_chunks = [chunk for chunk, _ in retrieved_results[:8]]
+        else:
+            top_chunks = [chunk for chunk, _ in retrieved_results[:8]]
 
-        # Step 3: Generate answer with enhanced prompt
-        return await self._generate_accurate_answer(question, top_chunks)
+        # Generate answer
+        return await self._generate_fast_answer(question, top_chunks)
 
-    # async def process_query_for_accuracy(self, document_url: str, questions: List[str]) -> List[str]:
-    #     """Process queries with focus on maximum accuracy"""
-    #     start_time = time.time()
-        
-    #     try:
-    #         vector_store = await self.get_or_create_enhanced_vector_store(document_url)
-            
-    #         # Process questions with longer timeout for accuracy
-    #         tasks = []
-    #         for question in questions:
-    #             task = self._answer_question_with_enhanced_retrieval(question, vector_store)
-    #             tasks.append(task)
-            
-    #         # Wait for all answers with extended timeout
-    #         answers = await asyncio.wait_for(
-    #             asyncio.gather(*tasks, return_exceptions=True), 
-    #             timeout=len(questions) * 15  # 15 seconds per question
-    #         )
-            
-    #         # Process results
-    #         final_answers = []
-    #         for i, ans in enumerate(answers):
-    #             if isinstance(ans, Exception):
-    #                 logger.error(f"Error processing question {i}: {ans}")
-    #                 final_answers.append("Error processing this question.")
-    #             else:
-    #                 final_answers.append(str(ans))
-            
-    #         processing_time = time.time() - start_time
-    #         logger.info(f"Processed {len(questions)} questions in {processing_time:.2f} seconds")
-            
-    #         return final_answers
-            
-    #     except Exception as e:
-    #         logger.error(f"Critical error in accuracy processing: {e}")
-    #         return ["Error processing query."] * len(questions)
-    # app/core/rag_pipeline.py
-
-    async def process_query_for_accuracy(self, query: str) -> str:
-        """
-        Processes a query with a focus on accuracy, using a RAG pipeline.
-
-        Args:
-            query: The user's query.
-
-        Returns:
-            The processed response.
-        """
-        try:
-            logger.info(f"Processing query for accuracy: {query}")
-            
-            retrieved_docs = await self.vector_store.asimilarity_search(query)
-            
-            if not retrieved_docs:
-                logger.warning("No documents retrieved for the query.")
-                return "No relevant information found."
-            
-            response = f"Retrieved {len(retrieved_docs)} documents. The most relevant is: {retrieved_docs[0].page_content}"
-            
-            return response
-        except Exception as e:
-            # Log the full, detailed error message.
-            logger.critical(f"A critical, unhandled error occurred in the accuracy processing pipeline: {e}", exc_info=True)
-            # Re-raise the exception to get a full traceback for debugging.
-            raise
-
-    # Keep your existing process_query method for backward compatibility
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
-        """Backward compatibility - redirect to accuracy-focused version"""
-        return await self.process_query_for_accuracy(document_url, questions)
+        """Fast query processing optimized for production"""
+        start_time = time.time()
+        
+        try:
+            vector_store = await self.get_or_create_fast_vector_store(document_url)
+            
+            # Process questions with reasonable concurrency
+            answers = []
+            batch_size = 3  # Process 3 at a time to avoid overwhelming the system
+            
+            for i in range(0, len(questions), batch_size):
+                batch = questions[i:i + batch_size]
+                batch_tasks = [self._answer_question_fast(q, vector_store) for q in batch]
+                
+                try:
+                    batch_answers = await asyncio.wait_for(
+                        asyncio.gather(*batch_tasks, return_exceptions=True),
+                        timeout=30  # 30 seconds per batch
+                    )
+                    
+                    for ans in batch_answers:
+                        if isinstance(ans, Exception):
+                            logger.error(f"Question processing error: {ans}")
+                            answers.append("Error processing this question.")
+                        else:
+                            answers.append(str(ans))
+                            
+                except asyncio.TimeoutError:
+                    logger.error(f"Batch timeout for questions {i}-{i+batch_size}")
+                    answers.extend(["Processing timeout."] * len(batch))
+            
+            processing_time = time.time() - start_time
+            logger.info(f"Processed {len(questions)} questions in {processing_time:.2f} seconds")
+            
+            return answers
+            
+        except Exception as e:
+            logger.error(f"Critical processing error: {e}")
+            return ["Error processing query."] * len(questions)
+
+# For backward compatibility, create alias
+AccuracyFirstRAGPipeline = FastAccurateRAGPipeline

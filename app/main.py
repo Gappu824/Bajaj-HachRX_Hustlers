@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.core.rag_pipeline import AccuracyFirstRAGPipeline  # Updated import
+from app.core.rag_pipeline import FastAccurateRAGPipeline  # Updated import
 from app.api.endpoints import query
 
 # Set up logging as the very first step
@@ -21,17 +21,16 @@ async def lifespan(app: FastAPI):
     # --- Startup ---
     logger.info("Application startup: Initializing accuracy-focused resources...")
     
-    # Use a more accurate embedding model if possible
+    # Use MiniLM for speed (you can switch back to mpnet later if needed)  
     try:
-        # Try the more accurate model first
-        embedding_model = SentenceTransformer('all-mpnet-base-v2')
-        logger.info("Loaded high-accuracy embedding model: all-mpnet-base-v2")
-    except Exception as e:
-        logger.warning(f"Could not load mpnet model, falling back to MiniLM: {e}")
         embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        logger.info(f"Loaded embedding model: {settings.EMBEDDING_MODEL_NAME}")
+    except Exception as e:
+        logger.error(f"Could not load embedding model: {e}")
+        raise RuntimeError("Failed to load embedding model")
     
-    # Instantiate the Accuracy-Focused RAGPipeline
-    app.state.rag_pipeline = AccuracyFirstRAGPipeline(embedding_model)
+    # Instantiate the Fast & Accurate RAG Pipeline
+    app.state.rag_pipeline = FastAccurateRAGPipeline(embedding_model)
     
     # Create the in-memory cache
     app.state.vector_store_cache = {}
