@@ -449,42 +449,71 @@ class AccuracyFirstRAGPipeline:
         # Step 3: Generate answer with enhanced prompt
         return await self._generate_accurate_answer(question, top_chunks)
 
-    async def process_query_for_accuracy(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process queries with focus on maximum accuracy"""
-        start_time = time.time()
+    # async def process_query_for_accuracy(self, document_url: str, questions: List[str]) -> List[str]:
+    #     """Process queries with focus on maximum accuracy"""
+    #     start_time = time.time()
         
+    #     try:
+    #         vector_store = await self.get_or_create_enhanced_vector_store(document_url)
+            
+    #         # Process questions with longer timeout for accuracy
+    #         tasks = []
+    #         for question in questions:
+    #             task = self._answer_question_with_enhanced_retrieval(question, vector_store)
+    #             tasks.append(task)
+            
+    #         # Wait for all answers with extended timeout
+    #         answers = await asyncio.wait_for(
+    #             asyncio.gather(*tasks, return_exceptions=True), 
+    #             timeout=len(questions) * 15  # 15 seconds per question
+    #         )
+            
+    #         # Process results
+    #         final_answers = []
+    #         for i, ans in enumerate(answers):
+    #             if isinstance(ans, Exception):
+    #                 logger.error(f"Error processing question {i}: {ans}")
+    #                 final_answers.append("Error processing this question.")
+    #             else:
+    #                 final_answers.append(str(ans))
+            
+    #         processing_time = time.time() - start_time
+    #         logger.info(f"Processed {len(questions)} questions in {processing_time:.2f} seconds")
+            
+    #         return final_answers
+            
+    #     except Exception as e:
+    #         logger.error(f"Critical error in accuracy processing: {e}")
+    #         return ["Error processing query."] * len(questions)
+    # app/core/rag_pipeline.py
+
+    async def process_query_for_accuracy(self, query: str) -> str:
+        """
+        Processes a query with a focus on accuracy, using a RAG pipeline.
+
+        Args:
+            query: The user's query.
+
+        Returns:
+            The processed response.
+        """
         try:
-            vector_store = await self.get_or_create_enhanced_vector_store(document_url)
+            logger.info(f"Processing query for accuracy: {query}")
             
-            # Process questions with longer timeout for accuracy
-            tasks = []
-            for question in questions:
-                task = self._answer_question_with_enhanced_retrieval(question, vector_store)
-                tasks.append(task)
+            retrieved_docs = await self.vector_store.asimilarity_search(query)
             
-            # Wait for all answers with extended timeout
-            answers = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True), 
-                timeout=len(questions) * 15  # 15 seconds per question
-            )
+            if not retrieved_docs:
+                logger.warning("No documents retrieved for the query.")
+                return "No relevant information found."
             
-            # Process results
-            final_answers = []
-            for i, ans in enumerate(answers):
-                if isinstance(ans, Exception):
-                    logger.error(f"Error processing question {i}: {ans}")
-                    final_answers.append("Error processing this question.")
-                else:
-                    final_answers.append(str(ans))
+            response = f"Retrieved {len(retrieved_docs)} documents. The most relevant is: {retrieved_docs[0].page_content}"
             
-            processing_time = time.time() - start_time
-            logger.info(f"Processed {len(questions)} questions in {processing_time:.2f} seconds")
-            
-            return final_answers
-            
+            return response
         except Exception as e:
-            logger.error(f"Critical error in accuracy processing: {e}")
-            return ["Error processing query."] * len(questions)
+            # Log the full, detailed error message.
+            logger.critical(f"A critical, unhandled error occurred in the accuracy processing pipeline: {e}", exc_info=True)
+            # Re-raise the exception to get a full traceback for debugging.
+            raise
 
     # Keep your existing process_query method for backward compatibility
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
