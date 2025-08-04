@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Model Configuration - can be easily swapped
     EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'
-    LLM_MODEL_NAME: str = 'gemini-1.5-pro-latest'
+    LLM_MODEL_NAME: str = 'gemini-1.5-flash-latest'
     GOOGLE_API_KEY: str
 
     class Config:
