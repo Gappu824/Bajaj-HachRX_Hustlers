@@ -454,9 +454,12 @@ class HybridFastTrackRAGPipeline:
             logger.info(f"Using cached vector store for {url}")
             return cached_store
         
-        # Check if we have cached embeddings
+        # # Check if we have cached embeddings
+        # embed_cache_key = f"emb_{hashlib.md5(url.encode()).hexdigest()}"
+        # cached_embeddings = self.embedding_cache.get(embed_cache_key)
+        # Check for cached intermediate embeddings in the main shared cache
         embed_cache_key = f"emb_{hashlib.md5(url.encode()).hexdigest()}"
-        cached_embeddings = self.embedding_cache.get(embed_cache_key)
+        cached_embeddings_data = await cache.get(embed_cache_key)
         
         if cached_embeddings:
             logger.info("Using cached embeddings")
@@ -501,9 +504,14 @@ class HybridFastTrackRAGPipeline:
             embeddings = np.vstack(all_embeddings).astype('float32')
             
             # Cache embeddings for large documents
-            if len(chunks) > 1000:
-                self.embedding_cache[embed_cache_key] = (chunks, embeddings, chunk_metadata)
-                logger.info("Cached embeddings for future use")
+            # if len(chunks) > 1000:
+            #     self.embedding_cache[embed_cache_key] = (chunks, embeddings, chunk_metadata)
+            #     logger.info("Cached embeddings for future use")
+            # Cache the expensive-to-create embeddings data in the main shared cache
+            embedding_data_to_cache = (chunks, embeddings, chunk_metadata)
+            await cache.set(embed_cache_key, embedding_data_to_cache)
+            logger.info(f"Cached intermediate embeddings for {url} under key {embed_cache_key}")
+
         
         # Create vector store
         vector_store = OptimizedVectorStore(chunks, embeddings, self.embedding_model, chunk_metadata)
