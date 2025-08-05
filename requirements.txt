@@ -12,22 +12,36 @@ google-generativeai
 # ML and embeddings
 sentence-transformers
 faiss-cpu
+transformers  # Added for better tokenization
+
+# Enhanced retrieval
+rank-bm25  # Added for BM25 retrieval
+nltk  # Added for text processing
 
 # HTTP requests and async
 requests
 tenacity
+aiohttp  # Added for async downloads
 
 # Document processing
 pdfplumber
 python-docx
 odfpy
 PyPDF2
+pypdf  # Added as alternative PDF parser
 
 # Cloud storage (if needed)
 google-cloud-storage
 
 # Environment and utilities
 python-dotenv
+python-multipart
 
-# Numpy for embeddings
+# Performance
+msgpack  # Added for efficient serialization
+lz4  # Added for compression
+
+# Numpy and computation
 numpy
+scipy  # Added for advanced computations
+scikit-learn  # Added for TF-IDF

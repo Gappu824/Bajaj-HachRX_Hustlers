@@ -1,19 +1,24 @@
-# app/core/cache.py - Enhanced with TTL and size limits
-from typing import Dict, Any, Optional
+# app/core/cache.py - Enhanced caching
 import logging
 import time
 import sys
+import pickle
+import lz4.frame
+from typing import Dict, Any, Optional
 from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
 class EnhancedInMemoryCache:
-    """Enhanced in-memory cache with TTL and size limits"""
-    def __init__(self, max_size_mb: int = 500, ttl_seconds: int = 3600):
+    """Enhanced cache with compression and better serialization"""
+    
+    def __init__(self, max_size_mb: int = 1000, ttl_seconds: int = 7200):
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self.ttl_seconds = ttl_seconds
         self.current_size = 0
+        self.hit_count = 0
+        self.miss_count = 0
         logger.info(f"Initialized Enhanced Cache (max: {max_size_mb}MB, TTL: {ttl_seconds}s)")
 
     async def get(self, key: str) -> Optional[Any]:
@@ -21,47 +26,98 @@ class EnhancedInMemoryCache:
             entry = self._cache[key]
             # Check TTL
             if time.time() - entry['timestamp'] > self.ttl_seconds:
-                # Expired
                 await self.delete(key)
+                self.miss_count += 1
                 return None
+            
             # Move to end (LRU)
             self._cache.move_to_end(key)
+            self.hit_count += 1
+            
+            # Decompress if needed
+            if entry.get('compressed', False):
+                try:
+                    decompressed = lz4.frame.decompress(entry['value'])
+                    return pickle.loads(decompressed)
+                except:
+                    logger.error(f"Failed to decompress cache entry {key}")
+                    await self.delete(key)
+                    return None
+            
             return entry['value']
+        
+        self.miss_count += 1
         return None
 
     async def set(self, key: str, value: Any):
-        # Estimate size (rough)
-        size = sys.getsizeof(value)
+        # Try to compress large objects
+        try:
+            serialized = pickle.dumps(value)
+            size = len(serialized)
+            
+            if size > 1024 * 1024:  # Compress if > 1MB
+                compressed = lz4.frame.compress(serialized)
+                if len(compressed) < size * 0.8:  # Only use if 20% smaller
+                    value_to_store = compressed
+                    size = len(compressed)
+                    is_compressed = True
+                else:
+                    value_to_store = value
+                    is_compressed = False
+            else:
+                value_to_store = value
+                is_compressed = False
+        except:
+            # Fallback to uncompressed
+            value_to_store = value
+            size = sys.getsizeof(value)
+            is_compressed = False
         
-        # If adding this would exceed limit, remove oldest entries
+        # Evict old entries if needed
         while self.current_size + size > self.max_size_bytes and self._cache:
             oldest_key = next(iter(self._cache))
             await self.delete(oldest_key)
         
-        # Add/update entry
+        # Update entry
         if key in self._cache:
-            self.current_size -= sys.getsizeof(self._cache[key]['value'])
+            old_size = self._cache[key].get('size', 0)
+            self.current_size -= old_size
         
         self._cache[key] = {
-            'value': value,
+            'value': value_to_store,
             'timestamp': time.time(),
-            'size': size
+            'size': size,
+            'compressed': is_compressed
         }
         self.current_size += size
-        
-        # Move to end (LRU)
         self._cache.move_to_end(key)
         
-        logger.debug(f"Cached {key} (size: {size/1024:.1f}KB, total: {self.current_size/1024/1024:.1f}MB)")
+        logger.debug(f"Cached {key} (size: {size/1024:.1f}KB, compressed: {is_compressed})")
 
     async def delete(self, key: str):
         if key in self._cache:
-            self.current_size -= self._cache[key]['size']
+            self.current_size -= self._cache[key].get('size', 0)
             del self._cache[key]
 
     def clear(self):
         self._cache.clear()
         self.current_size = 0
+        self.hit_count = 0
+        self.miss_count = 0
 
-# Singleton instance with enhanced features
-cache = EnhancedInMemoryCache(max_size_mb=500, ttl_seconds=3600)
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        total_requests = self.hit_count + self.miss_count
+        hit_rate = self.hit_count / total_requests if total_requests > 0 else 0
+        
+        return {
+            "entries": len(self._cache),
+            "size_mb": self.current_size / 1024 / 1024,
+            "hit_count": self.hit_count,
+            "miss_count": self.miss_count,
+            "hit_rate": hit_rate,
+            "max_size_mb": self.max_size_bytes / 1024 / 1024
+        }
+
+# Create singleton with larger size for better performance
+cache = EnhancedInMemoryCache(max_size_mb=1000, ttl_seconds=7200)

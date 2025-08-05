@@ -1,4 +1,4 @@
-# app/main.py - Optimized for Hybrid Fast-Track Pipeline
+# app/main.py - Enhanced version
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -11,83 +11,85 @@ from app.core.rag_pipeline import HybridFastTrackRAGPipeline
 from app.api.endpoints import query
 from app.core.cache import cache
 
-# Set up logging as the very first step
+# Set up logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Manages application startup and shutdown events with optimized setup.
-    """
+    """Application lifecycle management"""
     # --- Startup ---
-    logger.info("Application startup: Initializing Hybrid Fast-Track Pipeline...")
+    logger.info("Starting Enhanced RAG Pipeline...")
     
-    # Load embedding model
     try:
         embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
         logger.info(f"Loaded embedding model: {settings.EMBEDDING_MODEL_NAME}")
     except Exception as e:
-        logger.error(f"Could not load embedding model: {e}")
-        raise RuntimeError("Failed to load embedding model")
+        logger.error(f"Failed to load embedding model: {e}")
+        raise RuntimeError("Failed to initialize")
     
-    # Instantiate the Hybrid Fast-Track RAG Pipeline
     app.state.rag_pipeline = HybridFastTrackRAGPipeline(embedding_model)
+    logger.info("Enhanced RAG Pipeline ready")
     
-    logger.info("Hybrid Fast-Track Pipeline initialized. Ready for high-speed, accurate queries.")
     yield
     
     # --- Shutdown ---
-    logger.info("Application shutdown...")
-    # Clear cache on shutdown
-    if hasattr(cache, '_cache'):
-        cache._cache.clear()
-    logger.info("Cache cleared. Shutdown complete.")
+    logger.info("Shutting down...")
+    cache.clear()
+    logger.info("Shutdown complete")
 
-# Add middleware for request logging
+# Middleware for logging
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.2f}s")
+    
+    if request.url.path.startswith("/api/v1/hackrx"):
+        logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.2f}s")
+    
     return response
 
 app = FastAPI(
-    title=settings.APP_NAME + " - Hybrid Fast-Track",
-    description="Ultra-fast document query system with intelligent routing for 90%+ accuracy",
-    version="3.0.0",
+    title=settings.APP_NAME + " - Enhanced",
+    description="High-accuracy document query system with hybrid retrieval",
+    version="4.0.0",
     lifespan=lifespan
 )
 
-# Add middleware
 app.middleware("http")(log_requests)
 
-# Include the API router
+# Include API router
 app.include_router(query.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    """Root endpoint with system information"""
+    """Root endpoint"""
     return {
-        "message": f"Welcome to {settings.APP_NAME} - Hybrid Fast-Track", 
-        "version": "3.0.0",
+        "message": f"Welcome to {settings.APP_NAME} - Enhanced", 
+        "version": "4.0.0",
         "features": [
-            "Intelligent question complexity routing",
-            "Optimized PDF parsing with page limits",
-            "Hybrid search with keyword and vector retrieval",
-            "Parallel processing with larger batches",
-            "Multi-level caching for maximum speed",
-            "Support for PDF, DOCX, ODT formats"
+            "Hybrid BM25 + Semantic search",
+            "Multi-stage answer generation",
+            "Smart semantic chunking",
+            "Enhanced caching with compression",
+            "Cross-encoder reranking",
+            "Support for large documents"
         ],
-        "optimization": "Designed for <20s processing of complex documents with 90%+ accuracy"
+        "optimization": "Optimized for 80%+ accuracy with <30s processing"
     }
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Health check endpoint"""
+    """Health check with cache stats"""
+    cache_stats = cache.get_stats()
+    
     return {
-        "status": "healthy", 
-        "pipeline": "hybrid-fast-track",
-        "cache_enabled": True,
-        "parallel_processing": True
+        "status": "healthy",
+        "pipeline": "enhanced-hybrid",
+        "cache": cache_stats
     }
+
+@app.get("/cache/stats", tags=["Cache"])
+async def cache_stats():
+    """Detailed cache statistics"""
+    return cache.get_stats()
