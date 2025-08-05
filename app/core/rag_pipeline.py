@@ -560,6 +560,35 @@ class HybridFastTrackRAGPipeline:
                 full_text.append(text)
         
         return "\n\n".join(full_text)
+
+    def _parse_other_formats(self, content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
+        """
+        Parses non-PDF document formats like DOCX, ODT, and plain text.
+        This function was previously missing.
+        """
+        logger.info(f"Parsing document with extension: {file_extension}")
+        metadata = [{'type': file_extension.strip('.')}]
+        
+        try:
+            if file_extension in ['.docx', '.doc']:
+                temp_file = io.BytesIO(content)
+                text = self._parse_docx(temp_file)
+                return self._clean_text(text), metadata
+            
+            elif file_extension == '.odt':
+                temp_file = io.BytesIO(content)
+                text = self._parse_odt(temp_file)
+                return self._clean_text(text), metadata
+
+            else:
+                # Default to decoding as text, ignoring errors
+                logger.warning(f"Unsupported extension '{file_extension}', attempting to read as plain text.")
+                text = content.decode('utf-8', errors='ignore')
+                return self._clean_text(text), metadata
+
+        except Exception as e:
+            logger.error(f"Failed to parse file with extension {file_extension}: {e}")
+            raise ValueError(f"Could not parse file with extension: {file_extension}") 
     
     async def _answer_question_enhanced(self, question: str, vector_store: OptimizedVectorStore) -> str:
         """Enhanced answer generation with multi-stage approach"""
