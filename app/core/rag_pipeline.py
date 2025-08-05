@@ -11,6 +11,7 @@ import json
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import multiprocessing
+import numpy as np
 
 # ... (previous imports remain the same)
 
