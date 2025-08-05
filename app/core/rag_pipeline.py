@@ -9,6 +9,7 @@ import email
 import time
 from typing import List, Tuple, Dict, Set, Optional
 import json
+import hashlib
 
 # Imports for multi-format support
 import pdfplumber
@@ -84,6 +85,47 @@ class OptimizedVectorStore:
         self.question_patterns = self._build_question_patterns()
         
         logger.info(f"Built optimized FAISS index for {len(chunks)} chunks")
+
+    # Place this method inside the OptimizedVectorStore class
+
+    # def _build_question_patterns(self) -> Dict[str, Dict]:
+    #     """
+    #     Builds a dictionary of regex patterns to classify question types and identify
+    #     terms that should be boosted in the relevance score.
+    #     """
+    #     patterns = {
+    #         'definitional': {
+    #             'patterns': [
+    #                 r'what is', r'define', r'meaning of', r'explain the term'
+    #             ],
+    #             'boost_terms': ['is defined as', 'refers to', 'means', 'definition']
+    #         },
+    #         'computational': {
+    #             'patterns': [
+    #                 r'calculate', r'how much', r'what is the total', r'compute'
+    #             ],
+    #             'boost_terms': ['formula', 'calculation', 'total amount', 'sum', '%', 'percentage']
+    #         },
+    #         'procedural': {
+    #             'patterns': [
+    #                 r'how to', r'what is the process', r'steps to', r'explain the procedure'
+    #             ],
+    #             'boost_terms': ['process', 'procedure', 'steps', 'instructions', 'guidelines']
+    #         },
+    #         'list_based': {
+    #             'patterns': [
+    #                 r'list all', r'what are all', r'mention the'
+    #             ],
+    #             'boost_terms': ['include:', 'are as follows', 'following are', 'list includes']
+    #         },
+    #         'conditional': {
+    #             'patterns': [
+    #                 r'what if', r'under what circumstances', r'are there any conditions'
+    #             ],
+    #             'boost_terms': ['if', 'subject to', 'provided that', 'conditions apply', 'unless']
+    #         }
+    #     }
+    #     return patterns    
 
     def _build_section_index(self, chunks: List[str], metadata: List[Dict]) -> Dict[str, List[int]]:
         """Build index of document sections for targeted retrieval"""
@@ -353,6 +395,40 @@ class HybridFastTrackRAGPipeline:
                 r'what.*if.*then'
             ]
         }
+
+    # Place this method inside the HybridFastTrackRAGPipeline class
+
+    # def _parse_pdf_pypdf2_parallel(self, pdf_content: io.BytesIO) -> Tuple[str, List[Dict]]:
+    #     """
+    #     Parses PDF content using PyPDF2 as a fallback method.
+    #     Extracts text page by page and generates basic metadata.
+    #     """
+    #     full_text = ""
+    #     chunk_metadata = []
+    #     try:
+    #         pdf_reader = PyPDF2.PdfReader(pdf_content)
+    #         total_pages = len(pdf_reader.pages)
+    #         logger.info(f"PyPDF2 Fallback: Processing {total_pages} pages.")
+
+    #         for page_num, page in enumerate(pdf_reader.pages):
+    #             try:
+    #                 page_text = page.extract_text()
+    #                 if page_text and page_text.strip():
+    #                     full_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}\n"
+    #                     chunk_metadata.append({
+    #                         'page': page_num + 1,
+    #                         'type': 'text_fallback'
+    #                     })
+    #             except Exception as e:
+    #                 logger.warning(f"PyPDF2 could not extract text from page {page_num + 1}: {e}")
+            
+    #         logger.info(f"PyPDF2 Fallback: Successfully processed {total_pages} pages.")
+    #         return full_text, chunk_metadata
+
+    #     except Exception as e:
+    #         logger.error(f"Critical error during PyPDF2 fallback parsing: {e}")
+    #         # Return empty values if PyPDF2 also fails
+    #         return "", []    
 
     def _parse_pdf_parallel(self, content: bytes) -> Tuple[str, List[Dict]]:
         """Parse PDF in parallel chunks for speed without losing information"""
