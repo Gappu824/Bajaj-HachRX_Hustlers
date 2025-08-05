@@ -728,7 +728,7 @@ class HybridFastTrackRAGPipeline:
                         asyncio.get_running_loop().run_in_executor(
                             None, self.cross_encoder.predict, pairs
                         ),
-                        timeout=3.0
+                        timeout=15.0
                     )
                     
                     # Re-rank based on cross-encoder scores
@@ -980,7 +980,7 @@ class HybridFastTrackRAGPipeline:
                 try:
                     batch_answers = await asyncio.wait_for(
                         asyncio.gather(*batch_coroutines, return_exceptions=True),
-                        timeout=30  # 30 seconds per batch
+                        timeout=120  # 30 seconds per batch
                     )
                     
                     for j, (idx, _) in enumerate(batch):
