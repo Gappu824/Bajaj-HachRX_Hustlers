@@ -229,9 +229,9 @@ class FastAccurateRAGPipeline:
                 logger.info(f"Processing PDF with {len(pdf.pages)} pages using pdfplumber")
                 
                 for page_num, page in enumerate(pdf.pages):
-                    if page_num > 200:  # Reasonable limit
-                        logger.warning(f"Stopping at page {page_num} to prevent timeout")
-                        break
+                    # if page_num > 200:  # Reasonable limit
+                    #     logger.warning(f"Stopping at page {page_num} to prevent timeout")
+                    #     break
                     
                     try:
                         # Try with layout preservation for complex documents
