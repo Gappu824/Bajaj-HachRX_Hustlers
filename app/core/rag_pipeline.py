@@ -459,7 +459,7 @@ class HybridFastTrackRAGPipeline:
         # cached_embeddings = self.embedding_cache.get(embed_cache_key)
         # Check for cached intermediate embeddings in the main shared cache
         embed_cache_key = f"emb_{hashlib.md5(url.encode()).hexdigest()}"
-        cached_embeddings_data = await cache.get(embed_cache_key)
+        cached_embeddings = await cache.get(embed_cache_key)
         
         if cached_embeddings:
             logger.info("Using cached embeddings")
