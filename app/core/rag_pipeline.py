@@ -1,4 +1,4 @@
-# app/core/rag_pipeline.py - FAST & ACCURATE VERSION
+# app/core/rag_pipeline.py - Enhanced RAG Pipeline with Improved Parsing and Error Handling
 import io
 import re
 import os
@@ -7,13 +7,21 @@ import requests
 import asyncio
 import email
 import time
-from typing import List, Tuple, Dict, Set
+from typing import List, Tuple, Dict, Set, Optional
+import json
 
 # Imports for multi-format support
 import pdfplumber
 from docx import Document
 from odf.text import P
 from odf.opendocument import load
+
+# Additional PDF parsing libraries
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
+    logging.warning("PyPDF2 not available - using pdfplumber only")
 
 # Imports for resilience and cloud integration
 from google.cloud import storage
@@ -119,7 +127,7 @@ class FastVectorStore:
 
 
 class FastAccurateRAGPipeline:
-    """FAST & ACCURATE RAG pipeline optimized for production speed"""
+    """Enhanced RAG pipeline with improved error handling and logging"""
     
     def __init__(self, embedding_model: SentenceTransformer):
         self.embedding_model = embedding_model
@@ -139,7 +147,7 @@ class FastAccurateRAGPipeline:
             self.cross_encoder = None
 
     def _download_and_parse_document(self, url: str) -> str:
-        """Fast document parsing - reuse your existing method but with timeout optimization"""
+        """Enhanced document parsing with better error handling and multiple fallbacks"""
         logger.info(f"Processing document from {url}")
         
         try:
@@ -154,16 +162,17 @@ class FastAccurateRAGPipeline:
                     }
                     
                     logger.info(f"Downloading from URL: {url}")
-                    response = requests.get(url, headers=headers, timeout=30, stream=True, allow_redirects=True)
+                    response = requests.get(url, headers=headers, timeout=60, stream=True, allow_redirects=True)
                     response.raise_for_status()
                     
                     content = b""
-                    max_size = 50 * 1024 * 1024  # 50MB limit for speed
+                    max_size = 100 * 1024 * 1024  # 100MB limit
                     
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             content += chunk
                             if len(content) > max_size:
+                                logger.warning(f"Document exceeds {max_size} bytes, truncating")
                                 break
                     
                     temp_file = io.BytesIO(content)
@@ -177,56 +186,207 @@ class FastAccurateRAGPipeline:
                 except Exception as e:
                     raise ValueError(f"Error downloading: {str(e)}")
             else:
-                raise ValueError("Only HTTP/HTTPS URLs supported in fast mode")
+                raise ValueError("Only HTTP/HTTPS URLs supported")
 
-            # Fast PDF parsing
+            # Enhanced PDF parsing with multiple strategies
             full_text = ""
             temp_file.seek(0)
             
             if file_extension == '.pdf':
-                try:
-                    with pdfplumber.open(temp_file) as pdf:
-                        logger.info(f"Processing PDF with {len(pdf.pages)} pages")
-                        
-                        # Process pages in batches for speed
-                        for page_num, page in enumerate(pdf.pages):
-                            if page_num > 50:  # Limit pages for speed
-                                break
-                                
-                            try:
-                                page_text = page.extract_text()
-                                if page_text and page_text.strip():
-                                    full_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}\n"
-                                
-                                # Quick table extraction
-                                tables = page.extract_tables()
-                                for table in tables[:2]:  # Limit tables per page
-                                    if table:
-                                        table_text = "\n".join([" | ".join([str(cell) if cell else "" for cell in row]) for row in table if row])
-                                        if table_text.strip():
-                                            full_text += f"\n=== TABLE ===\n{table_text}\n=== END TABLE ===\n"
-                                            
-                            except Exception as e:
-                                logger.warning(f"Error on page {page_num}: {e}")
-                                continue
-                                
-                except Exception as e:
-                    raise ValueError(f"PDF parsing error: {str(e)}")
+                # Try multiple PDF parsing strategies
+                full_text = self._parse_pdf_with_fallbacks(temp_file, url)
+            elif file_extension in ['.docx', '.doc']:
+                full_text = self._parse_docx(temp_file)
+            elif file_extension == '.odt':
+                full_text = self._parse_odt(temp_file)
+            else:
+                # Try PDF parsing as default
+                logger.warning(f"Unknown extension {file_extension}, attempting PDF parsing")
+                full_text = self._parse_pdf_with_fallbacks(temp_file, url)
             
             # Validate and clean
             if not full_text or len(full_text) < 50:
                 raise ValueError("Document too short or empty")
             
-            # Fast cleaning
-            full_text = re.sub(r'\n\s*\n\s*\n', '\n\n', full_text)
-            full_text = re.sub(r'[ \t]+', ' ', full_text).strip()
+            # Enhanced cleaning
+            full_text = self._clean_text(full_text)
             
-            logger.info(f"Extracted {len(full_text)} characters")
+            logger.info(f"Successfully extracted {len(full_text)} characters")
             return full_text
             
         except Exception as e:
             logger.error(f"Document processing error: {e}")
             raise ValueError(f"Could not process document: {str(e)}")
+
+    def _parse_pdf_with_fallbacks(self, temp_file: io.BytesIO, url: str) -> str:
+        """Try multiple PDF parsing strategies with fallbacks"""
+        full_text = ""
+        
+        # Strategy 1: pdfplumber with enhanced settings
+        try:
+            temp_file.seek(0)
+            with pdfplumber.open(temp_file) as pdf:
+                logger.info(f"Processing PDF with {len(pdf.pages)} pages using pdfplumber")
+                
+                for page_num, page in enumerate(pdf.pages):
+                    if page_num > 200:  # Reasonable limit
+                        logger.warning(f"Stopping at page {page_num} to prevent timeout")
+                        break
+                    
+                    try:
+                        # Try with layout preservation for complex documents
+                        page_text = page.extract_text(
+                            x_tolerance=3,
+                            y_tolerance=3,
+                            layout=False,  # Disable layout for speed
+                            x_density=7.25,
+                            y_density=13
+                        )
+                        
+                        if page_text and page_text.strip():
+                            full_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}\n"
+                        
+                        # Extract tables
+                        tables = page.extract_tables()
+                        for table_idx, table in enumerate(tables[:5]):  # Limit tables per page
+                            if table:
+                                table_text = self._format_table(table)
+                                if table_text.strip():
+                                    full_text += f"\n=== TABLE {table_idx + 1} (Page {page_num + 1}) ===\n{table_text}\n"
+                                    
+                    except Exception as e:
+                        logger.warning(f"Error on page {page_num} with pdfplumber: {e}")
+                        continue
+                
+                if len(full_text) > 1000:
+                    logger.info("Successfully parsed with pdfplumber")
+                    return full_text
+                    
+        except Exception as e:
+            logger.warning(f"pdfplumber parsing failed: {e}")
+        
+        # Strategy 2: PyPDF2 fallback
+        if PyPDF2:
+            try:
+                temp_file.seek(0)
+                logger.info("Attempting PyPDF2 fallback parsing")
+                pdf_reader = PyPDF2.PdfReader(temp_file)
+                
+                for page_num in range(min(len(pdf_reader.pages), 200)):
+                    try:
+                        page = pdf_reader.pages[page_num]
+                        text = page.extract_text()
+                        if text and text.strip():
+                            full_text += f"\n--- PAGE {page_num + 1} ---\n{text}\n"
+                    except Exception as e:
+                        logger.warning(f"PyPDF2 error on page {page_num}: {e}")
+                        continue
+                
+                if len(full_text) > 1000:
+                    logger.info("Successfully parsed with PyPDF2")
+                    return full_text
+                    
+            except Exception as e:
+                logger.warning(f"PyPDF2 parsing failed: {e}")
+        
+        # Strategy 3: Re-attempt pdfplumber with minimal settings
+        try:
+            temp_file.seek(0)
+            logger.info("Final attempt with minimal pdfplumber settings")
+            with pdfplumber.open(temp_file) as pdf:
+                for page_num, page in enumerate(pdf.pages[:100]):
+                    try:
+                        # Minimal extraction
+                        page_text = page.extract_text()
+                        if page_text:
+                            full_text += page_text + "\n"
+                    except:
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"All PDF parsing strategies failed: {e}")
+        
+        if not full_text:
+            raise ValueError("All PDF parsing methods failed")
+            
+        return full_text
+
+    def _format_table(self, table: List[List]) -> str:
+        """Format table data into readable text"""
+        if not table:
+            return ""
+        
+        formatted_rows = []
+        for row in table:
+            if row and any(cell for cell in row if cell):
+                formatted_row = " | ".join([str(cell) if cell else "" for cell in row])
+                formatted_rows.append(formatted_row)
+        
+        return "\n".join(formatted_rows)
+
+    def _parse_docx(self, temp_file: io.BytesIO) -> str:
+        """Parse DOCX files"""
+        try:
+            doc = Document(temp_file)
+            full_text = []
+            
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    full_text.append(paragraph.text)
+            
+            # Also extract tables
+            for table in doc.tables:
+                table_text = []
+                for row in table.rows:
+                    row_text = [cell.text.strip() for cell in row.cells]
+                    if any(row_text):
+                        table_text.append(" | ".join(row_text))
+                if table_text:
+                    full_text.append("\n=== TABLE ===\n" + "\n".join(table_text) + "\n=== END TABLE ===\n")
+            
+            return "\n\n".join(full_text)
+            
+        except Exception as e:
+            logger.error(f"DOCX parsing error: {e}")
+            raise
+
+    def _parse_odt(self, temp_file: io.BytesIO) -> str:
+        """Parse ODT files"""
+        try:
+            doc = load(temp_file)
+            full_text = []
+            
+            for element in doc.getElementsByType(P):
+                text = str(element)
+                if text.strip():
+                    full_text.append(text)
+            
+            return "\n\n".join(full_text)
+            
+        except Exception as e:
+            logger.error(f"ODT parsing error: {e}")
+            raise
+
+    def _clean_text(self, text: str) -> str:
+        """Enhanced text cleaning"""
+        # Remove excessive whitespace
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        
+        # Fix common OCR issues
+        text = text.replace('ﬁ', 'fi')
+        text = text.replace('ﬂ', 'fl')
+        text = text.replace('–', '-')
+        text = text.replace('"', '"').replace('"', '"')
+        text = text.replace(''', "'").replace(''', "'")
+        
+        # Handle encoding issues
+        try:
+            text = text.encode('utf-8', 'ignore').decode('utf-8')
+        except:
+            pass
+        
+        return text.strip()
 
     def _fast_chunk_text(self, text: str) -> List[str]:
         """Fast chunking optimized for speed and accuracy balance"""
@@ -266,26 +426,36 @@ class FastAccurateRAGPipeline:
         return final_chunks
 
     async def get_or_create_fast_vector_store(self, url: str) -> FastVectorStore:
-        """Create vector store with speed optimization"""
+        """Create vector store with speed optimization and error handling"""
         from app.core.cache import cache
+        
+        # Check cache first
         cached_store = await cache.get(url)
         if cached_store:
             logger.info(f"Using cached vector store for {url}")
             return cached_store
-            
+        
         logger.info(f"Creating fast vector store for {url}...")
-        text = self._download_and_parse_document(url)
-        chunks = self._fast_chunk_text(text)
         
-        if not chunks:
-            raise ValueError("No chunks created")
+        try:
+            text = self._download_and_parse_document(url)
+            chunks = self._fast_chunk_text(text)
             
-        # Fast embedding generation
-        embeddings = self.embedding_model.encode(chunks, show_progress_bar=False, batch_size=32).astype('float32')
-        vector_store = FastVectorStore(chunks, embeddings, self.embedding_model)
-        
-        await cache.set(url, vector_store)
-        return vector_store
+            if not chunks:
+                raise ValueError("No chunks created from document")
+            
+            # Fast embedding generation
+            logger.info(f"Generating embeddings for {len(chunks)} chunks")
+            embeddings = self.embedding_model.encode(chunks, show_progress_bar=False, batch_size=32).astype('float32')
+            vector_store = FastVectorStore(chunks, embeddings, self.embedding_model)
+            
+            # Cache the store
+            await cache.set(url, vector_store)
+            return vector_store
+            
+        except Exception as e:
+            logger.error(f"Failed to create vector store: {e}")
+            raise
 
     @retry(
         wait=wait_exponential(multiplier=1, min=1, max=5),
@@ -293,24 +463,39 @@ class FastAccurateRAGPipeline:
         retry=retry_if_exception_type(google_exceptions.ResourceExhausted)
     )
     async def _generate_fast_answer(self, question: str, context: List[str]) -> str:
-        """Fast answer generation with accuracy focus"""
+        """Enhanced answer generation with better prompts"""
         
-        # Limit context for speed
-        context_text = "\n\n---\n\n".join(context[:6])
+        # Check if we have sufficient context
+        if not context or all(len(c.strip()) < 50 for c in context):
+            logger.warning(f"Insufficient context for question: {question[:50]}...")
+            # Try to provide a more helpful response
+            return await self._generate_answer_with_limited_context(question)
         
-        # Smart prompt based on question type
+        # Use more context for better answers
+        context_text = "\n\n---\n\n".join(context[:8])
+        
+        # Enhanced prompt based on question type
         question_lower = question.lower()
         
-        if any(word in question_lower for word in ['how many', 'percentage', 'amount', 'number']):
-            instruction = "Focus on finding specific numbers, amounts, and quantitative data. Provide exact figures with context."
+        # Determine instruction based on question type
+        if any(word in question_lower for word in ['how many', 'percentage', 'amount', 'number', 'calculate']):
+            instruction = "Focus on finding specific numbers, amounts, and quantitative data. Provide exact figures with context. If you need to calculate, show your work."
+        elif any(word in question_lower for word in ['list', 'all', 'every', 'each']):
+            instruction = "Provide a comprehensive list of all items requested. Even if you can't find everything, list what you can find."
         elif any(word in question_lower for word in ['does', 'is', 'are', 'can', 'will']):
-            instruction = "Provide a clear yes/no answer followed by supporting details and conditions."
+            instruction = "Provide a clear yes/no answer followed by supporting details and any relevant conditions."
         else:
             instruction = "Provide a comprehensive answer with specific details from the document."
         
         prompt = f"""You are an expert document analyst. {instruction}
 
-IMPORTANT: Extract information directly from the context below. If you find relevant information, provide it clearly. Only say "information not available" if you truly cannot find any related content.
+IMPORTANT INSTRUCTIONS:
+1. Extract information directly from the context below
+2. If you find relevant information, provide it clearly
+3. If information is partial, share what you found and note what's missing
+4. Only say "information not available" if you've thoroughly searched and found NOTHING related
+5. For calculations, use any numbers you find and show your work
+6. Make reasonable inferences from available data
 
 CONTEXT:
 {context_text}
@@ -324,18 +509,33 @@ ANSWER:"""
             response = await model.generate_content_async(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=400,
-                    top_p=0.8
+                    temperature=0.2,
+                    max_output_tokens=500,
+                    top_p=0.9
                 )
             )
-            return response.text.strip()
+            
+            answer = response.text.strip()
+            
+            # Validate answer quality
+            if len(answer) < 20 or "error" in answer.lower():
+                logger.warning(f"Poor quality answer for question: {question[:50]}...")
+                return await self._generate_answer_with_limited_context(question)
+                
+            return answer
+            
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
-            return "Error generating answer."
+            return await self._generate_answer_with_limited_context(question)
+
+    async def _generate_answer_with_limited_context(self, question: str) -> str:
+        """Generate a helpful response when context is limited"""
+        return f"Based on the available document content, I could not find specific information to answer: '{question}'. This may be due to the information not being present in the document or not being extracted properly from the source material."
 
     async def _answer_question_fast(self, question: str, vector_store: FastVectorStore) -> str:
         """Fast question answering with accuracy optimization"""
+        
+        logger.debug(f"Answering question: {question}")
         
         # Fast retrieval
         retrieved_results = vector_store.fast_search(question, k=15)
@@ -378,19 +578,44 @@ ANSWER:"""
         return await self._generate_fast_answer(question, top_chunks)
 
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
-        """Fast query processing optimized for production"""
+        """Enhanced query processing with better error handling and logging"""
         start_time = time.time()
         
+        # Log the questions being processed
+        logger.info(f"Processing {len(questions)} questions for document: {document_url}")
+        for i, q in enumerate(questions):
+            logger.info(f"Question {i+1}: {q}")
+        
         try:
-            vector_store = await self.get_or_create_fast_vector_store(document_url)
+            # Create vector store with retries
+            vector_store = None
+            for attempt in range(3):
+                try:
+                    vector_store = await self.get_or_create_fast_vector_store(document_url)
+                    break
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed for document processing: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    else:
+                        # Final attempt failed
+                        logger.critical(f"All attempts failed to process document: {document_url}")
+                        return self._generate_error_responses(questions, "Document processing failed")
+            
+            if not vector_store:
+                return self._generate_error_responses(questions, "Could not create vector store")
             
             # Process questions with reasonable concurrency
             answers = []
-            batch_size = 3  # Process 3 at a time to avoid overwhelming the system
+            batch_size = 3  # Process 3 at a time
             
             for i in range(0, len(questions), batch_size):
                 batch = questions[i:i + batch_size]
-                batch_tasks = [self._answer_question_fast(q, vector_store) for q in batch]
+                batch_tasks = []
+                
+                for q in batch:
+                    task = self._answer_question_safe(q, vector_store)
+                    batch_tasks.append(task)
                 
                 try:
                     batch_answers = await asyncio.wait_for(
@@ -398,16 +623,18 @@ ANSWER:"""
                         timeout=30  # 30 seconds per batch
                     )
                     
-                    for ans in batch_answers:
+                    for j, ans in enumerate(batch_answers):
                         if isinstance(ans, Exception):
-                            logger.error(f"Question processing error: {ans}")
-                            answers.append("Error processing this question.")
+                            logger.error(f"Question {i+j+1} processing error: {ans}")
+                            answers.append(f"An error occurred while processing this question: {questions[i+j][:50]}...")
                         else:
                             answers.append(str(ans))
+                            logger.debug(f"Answer {i+j+1}: {str(ans)[:100]}...")
                             
                 except asyncio.TimeoutError:
-                    logger.error(f"Batch timeout for questions {i}-{i+batch_size}")
-                    answers.extend(["Processing timeout."] * len(batch))
+                    logger.error(f"Batch timeout for questions {i+1}-{i+batch_size}")
+                    for q in batch:
+                        answers.append("Processing timeout. Please try again with a shorter question.")
             
             processing_time = time.time() - start_time
             logger.info(f"Processed {len(questions)} questions in {processing_time:.2f} seconds")
@@ -415,8 +642,43 @@ ANSWER:"""
             return answers
             
         except Exception as e:
-            logger.error(f"Critical processing error: {e}")
-            return ["Error processing query."] * len(questions)
+            logger.critical(f"Critical processing error: {e}", exc_info=True)
+            return self._generate_error_responses(questions, str(e))
 
-# For backward compatibility, create alias
+    async def _answer_question_safe(self, question: str, vector_store: FastVectorStore) -> str:
+        """Safe wrapper for question answering"""
+        try:
+            return await self._answer_question_fast(question, vector_store)
+        except Exception as e:
+            logger.error(f"Error answering question '{question[:50]}...': {e}")
+            return f"Unable to process this question due to an error. Question: {question[:100]}..."
+
+    def _generate_error_responses(self, questions: List[str], error_msg: str) -> List[str]:
+        """Generate appropriate error responses"""
+        logger.error(f"Generating error responses: {error_msg}")
+        return [f"Unable to answer due to document processing error: {error_msg}"] * len(questions)
+
+    async def process_query_with_explainability(self, document_url: str, questions: List[str]) -> Tuple[List[str], List[Dict], float]:
+        """Process queries with explainability - for future enhancement"""
+        start_time = time.time()
+        
+        # For now, just use the regular process_query
+        simple_answers = await self.process_query(document_url, questions)
+        
+        # Placeholder for detailed answers
+        detailed_answers = []
+        for i, answer in enumerate(simple_answers):
+            detailed_answers.append({
+                "answer": answer,
+                "confidence": 0.8,  # Placeholder
+                "source_clauses": [],
+                "reasoning": "Answer extracted from document using semantic search",
+                "coverage_decision": None
+            })
+        
+        processing_time = time.time() - start_time
+        return simple_answers, detailed_answers, processing_time
+
+
+# For backward compatibility
 AccuracyFirstRAGPipeline = FastAccurateRAGPipeline

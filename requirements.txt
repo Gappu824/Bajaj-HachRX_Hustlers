@@ -9,7 +9,7 @@ pydantic-settings
 # Google AI and LLM
 google-generativeai
 
-# ML and embeddings - optimized versions
+# ML and embeddings
 sentence-transformers
 faiss-cpu
 
@@ -17,10 +17,11 @@ faiss-cpu
 requests
 tenacity
 
-# Document processing - essential only
+# Document processing
 pdfplumber
 python-docx
 odfpy
+PyPDF2
 
 # Cloud storage (if needed)
 google-cloud-storage
@@ -28,13 +29,5 @@ google-cloud-storage
 # Environment and utilities
 python-dotenv
 
-# Numpy for embeddings (faiss dependency)
+# Numpy for embeddings
 numpy
-
-# Remove these heavy/optional packages that might cause issues:
-# PyPDF2<3.0  # Removed - using pdfplumber only
-# scikit-learn  # Removed - not essential for Phase 1
-# nltk  # Removed - not used in fast version
-# spacy  # Removed - too heavy, not used
-# torch  # Let sentence-transformers handle this
-# transformers  # Let sentence-transformers handle this
