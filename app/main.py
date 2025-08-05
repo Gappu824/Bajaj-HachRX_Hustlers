@@ -8,20 +8,11 @@ from app.core.config import settings
 from app.core.logging_config import setup_logging
 from app.core.rag_pipeline import FastAccurateRAGPipeline  # Updated import
 from app.api.endpoints import query
-import time
+
 
 # Set up logging as the very first step
 setup_logging()
 logger = logging.getLogger(__name__)
-
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    logger.info(f"Request processed in {process_time:.2f}s")
-    return response
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
