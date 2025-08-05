@@ -5,15 +5,41 @@ import os
 import logging
 import requests
 import asyncio
+import email
 import time
 from typing import List, Tuple, Dict, Set, Optional
 import json
-import hashlib
+
+# Imports for multi-format support
+import pdfplumber
+from docx import Document
+from odf.text import P
+from odf.opendocument import load
+
+# Additional PDF parsing libraries
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
+    logging.warning("PyPDF2 not available - using pdfplumber only")
+
+# Imports for resilience and cloud integration
+from google.cloud import storage
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.api_core import exceptions as google_exceptions
+
+# Imports for core RAG logic
+from sentence_transformers import SentenceTransformer
+from sentence_transformers.cross_encoder import CrossEncoder
+import faiss
+import numpy as np
+import google.generativeai as genai
+
+from app.core.config import settings
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import multiprocessing
-import numpy as np
 
-# ... (previous imports remain the same)
+
 
 logger = logging.getLogger(__name__)
 
