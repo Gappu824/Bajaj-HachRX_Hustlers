@@ -1044,5 +1044,5 @@ class HybridFastTrackRAGPipeline:
 
 
     # For backward compatibility
-    FastAccurateRAGPipeline = HybridFastTrackRAGPipeline
-    AccuracyFirstRAGPipeline = HybridFastTrackRAGPipeline
+FastAccurateRAGPipeline = HybridFastTrackRAGPipeline
+AccuracyFirstRAGPipeline = HybridFastTrackRAGPipeline
