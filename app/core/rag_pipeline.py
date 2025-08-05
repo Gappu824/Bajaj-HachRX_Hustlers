@@ -490,10 +490,8 @@ class HybridFastTrackRAGPipeline:
                 batch = chunks[i:i + batch_size]
                 batch_embeddings = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    self.embedding_model.encode,
-                    batch,
-                    True,  # convert_to_numpy
-                    False  # show_progress_bar
+                    lambda b: self.embedding_model.encode(b, convert_to_numpy=True, show_progress_bar=False),
+                    batch
                 )
                 all_embeddings.append(batch_embeddings)
                 
