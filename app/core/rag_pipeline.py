@@ -383,6 +383,29 @@ class HybridRAGPipeline:
 
     # Add these methods inside the HybridRAGPipeline class
 
+    # async def download_document_path(self, url: str) -> str:
+    #     """
+    #     Downloads a document by streaming it to a temporary file on disk
+    #     and returns the file path. This is essential for large files.
+    #     """
+    #     headers = {'User-Agent': 'Mozilla/5.0'}
+    #     try:
+    #         timeout = aiohttp.ClientTimeout(total=600)  # 10 minute timeout for large downloads
+    #         async with aiohttp.ClientSession(timeout=timeout) as session:
+    #             async with session.get(url, headers=headers) as response:
+    #                 response.raise_for_status()
+                    
+    #                 # Use a temporary file to save memory
+    #                 with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+    #                     file_path = tmp_file.name
+    #                     async with aiofiles.open(file_path, 'wb') as f:
+    #                         async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
+    #                             await f.write(chunk)
+    #                     logger.info(f"Downloaded large file to temporary path: {file_path}")
+    #                     return file_path
+    #     except Exception as e:
+    #         logger.error(f"Streaming download to disk failed: {e}")
+    #         raise
     async def download_document_path(self, url: str) -> str:
         """
         Downloads a document by streaming it to a temporary file on disk
@@ -390,7 +413,8 @@ class HybridRAGPipeline:
         """
         headers = {'User-Agent': 'Mozilla/5.0'}
         try:
-            timeout = aiohttp.ClientTimeout(total=600)  # 10 minute timeout for large downloads
+            # Increased timeout to 30 minutes for very large files
+            timeout = aiohttp.ClientTimeout(total=1800)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, headers=headers) as response:
                     response.raise_for_status()
