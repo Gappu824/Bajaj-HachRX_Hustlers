@@ -251,64 +251,134 @@ class HybridRAGPipeline:
     #         logger.info(f"Cached vector store for large document")
         
     #     return vector_store
-    async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
-        """Get or create vector store, with special handling for large ZIP files.""" # --- MODIFIED ---
+#     async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
+#         """Get or create vector store, with special handling for large ZIP files.""" # --- MODIFIED ---
         
-        # --- This cache check logic remains the same ---
-        cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
-        cached_store = await cache.get(cache_key)
-        if cached_store:
-            logger.info(f"Using cached vector store for {url}")
-            return cached_store
+#         # --- This cache check logic remains the same ---
+#         cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+#         cached_store = await cache.get(cache_key)
+#         if cached_store:
+#             logger.info(f"Using cached vector store for {url}")
+#             return cached_store
         
-        logger.info(f"Creating new vector store for {url}")
+#         logger.info(f"Creating new vector store for {url}")
         
-        # --- ADDED: Detect file type to decide on processing strategy ---
-        file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+#         # --- ADDED: Detect file type to decide on processing strategy ---
+#         file_extension = os.path.splitext(url.split('?')[0])[1].lower()
         
-        # --- ADDED: Conditional logic to handle ZIPs differently ---
-        if file_extension == '.zip':
-            # Use the new memory-safe incremental process for ZIPs
-            vector_store = await self._process_zip_incrementally(url)
-        else:
-            # --- MODIFIED: This is your original logic, now used for non-ZIP files ---
-            # Note: Assumes you have a download function that returns bytes for these files.
-            content = await self.download_document(url) 
+#         # --- ADDED: Conditional logic to handle ZIPs differently ---
+#         if file_extension == '.zip':
+#             # Use the new memory-safe incremental process for ZIPs
+#             vector_store = await self._process_zip_incrementally(url)
+#         else:
+#             # --- MODIFIED: This is your original logic, now used for non-ZIP files ---
+#             # Note: Assumes you have a download function that returns bytes for these files.
+#             content = await self.download_document(url) 
             
-            text, metadata = DocumentParser.parse_document(content, file_extension)
+#             text, metadata = DocumentParser.parse_document(content, file_extension)
             
-            if not text or len(text) < 10:
-                logger.error(f"Document parsing failed or empty: {url}")
-                text = "Document could not be parsed or is empty."
-                metadata = [{'type': 'error'}]
+#             if not text or len(text) < 10:
+#                 logger.error(f"Document parsing failed or empty: {url}")
+#                 text = "Document could not be parsed or is empty."
+#                 metadata = [{'type': 'error'}]
             
-            chunks, chunk_metadata = SmartChunker.chunk_document(
-                text, metadata,
-                chunk_size=settings.CHUNK_SIZE_CHARS,
-                overlap=settings.CHUNK_OVERLAP_CHARS
-            )
+#             chunks, chunk_metadata = SmartChunker.chunk_document(
+#                 text, metadata,
+#                 chunk_size=settings.CHUNK_SIZE_CHARS,
+#                 overlap=settings.CHUNK_OVERLAP_CHARS
+#             )
             
-            logger.info(f"Created {len(chunks)} chunks")
-            embeddings = await self._generate_embeddings(chunks)
+#             logger.info(f"Created {len(chunks)} chunks")
+#             embeddings = await self._generate_embeddings(chunks)
             
-            # --- MODIFIED: Create the vector store using the new incremental approach ---
-            # Note: Assumes self.embedding_model.get_sentence_embedding_dimension() exists
-            # dimension = self.embedding_model.get_sentence_embedding_dimension()
-            # # Line 375 in rag_pipeline.py  
-            # dimension = self.embedding_model.get_sentence_embedding_dimension()
-            # Line 375 in rag_pipeline.py
-# Get dimension by encoding a sample text
-            sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
-            dimension = sample_embedding.shape[1]
-            vector_store = OptimizedVectorStore(self.embedding_model, dimension)
-            # Add all data in one batch
-            vector_store.add(chunks, embeddings, chunk_metadata)
+#             # --- MODIFIED: Create the vector store using the new incremental approach ---
+#             # Note: Assumes self.embedding_model.get_sentence_embedding_dimension() exists
+#             # dimension = self.embedding_model.get_sentence_embedding_dimension()
+#             # # Line 375 in rag_pipeline.py  
+#             # dimension = self.embedding_model.get_sentence_embedding_dimension()
+#             # Line 375 in rag_pipeline.py
+# # Get dimension by encoding a sample text
+#             sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+#             dimension = sample_embedding.shape[1]
+#             vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+#             # Add all data in one batch
+#             vector_store.add(chunks, embeddings, chunk_metadata)
 
-        # --- MODIFIED: Caching is now done at the end, regardless of file type ---
-        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
-        logger.info(f"Cached vector store for document: {url}")
+#         # --- MODIFIED: Caching is now done at the end, regardless of file type ---
+#         await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+#         logger.info(f"Cached vector store for document: {url}")
         
-        return vector_store
+#         return vector_store
+    async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
+            """Get or create vector store, with special handling for large ZIP and BIN files."""
+            
+            cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+            cached_store = await cache.get(cache_key)
+            if cached_store:
+                logger.info(f"Using cached vector store for {url}")
+                return cached_store
+            
+            logger.info(f"Creating new vector store for {url}")
+            
+            file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+            
+            # --- NEW: Route both .zip and .bin files to streaming processors ---
+            if file_extension == '.zip':
+                vector_store = await self._process_zip_incrementally(url)
+            elif file_extension == '.bin':
+                vector_store = await self._process_bin_incrementally(url)
+            else:
+                # Original logic for smaller, manageable file types
+                content = await self.download_document(url) 
+                
+                text, metadata = DocumentParser.parse_document(content, file_extension)
+                
+                if not text or len(text) < 10:
+                    logger.error(f"Document parsing failed or empty: {url}")
+                    text = "Document could not be parsed or is empty."
+                    metadata = [{'type': 'error'}]
+                
+                chunks, chunk_metadata = SmartChunker.chunk_document(
+                    text, metadata,
+                    chunk_size=settings.CHUNK_SIZE_CHARS,
+                    overlap=settings.CHUNK_OVERLAP_CHARS
+                )
+                
+                logger.info(f"Created {len(chunks)} chunks")
+                embeddings = await self._generate_embeddings(chunks)
+                
+                sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+                dimension = sample_embedding.shape[1]
+                vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+                vector_store.add(chunks, embeddings, chunk_metadata)
+
+            await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+            logger.info(f"Cached vector store for document: {url}")
+            
+            return vector_store
+    async def _process_bin_incrementally(self, url: str) -> 'OptimizedVectorStore':
+        """
+        Orchestrates the memory-safe streaming and processing of a single large binary file.
+        """
+        # 1. Initialize an empty vector store
+        sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+        dimension = sample_embedding.shape[1]
+        vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+        
+        file_path = None
+        try:
+            # 2. Download the large file to a temporary path on disk
+            file_path = await self.download_document_path(url)
+            
+            # 3. The parser will now read the file in chunks and populate the vector store
+            await DocumentParser.parse_bin_incrementally(file_path, vector_store, self)
+            
+            return vector_store
+        finally:
+            # 4. CRITICAL: Clean up the temporary file from disk
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Cleaned up temporary file: {file_path}")
     
 
     # Add these methods inside the HybridRAGPipeline class
