@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Request, HTTPException, Query
 from app.models.query import QueryRequest, QueryResponse
 
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
