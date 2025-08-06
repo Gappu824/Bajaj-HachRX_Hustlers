@@ -76,7 +76,9 @@ async def read_root():
             "Smart adaptive chunking",
             "Enhanced caching with compression",
             "Parallel question processing",
-            "Support for PDF, DOCX, Excel, PowerPoint"
+            "Support for PDF, DOCX, Excel, PowerPoint",
+            "Image processing with OCR (PNG, JPG, etc.)",
+            "ZIP archive processing (extracts and handles multiple files)"
         ],
         "performance": {
             "target_accuracy": "80%+",

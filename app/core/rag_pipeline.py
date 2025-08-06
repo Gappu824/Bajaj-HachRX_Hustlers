@@ -13,6 +13,7 @@ import msgpack
 import lz4.frame
 from typing import List, Tuple, Dict, Set, Optional, Any
 from collections import defaultdict
+import zipfile
 
 # Document parsing imports
 import pdfplumber
@@ -28,6 +29,13 @@ try:
 except ImportError:
     PPTX_AVAILABLE = False
     logging.warning("python-pptx not available, PowerPoint parsing disabled")
+try:
+    from PIL import Image
+    import pytesseract
+    IMAGE_PROCESSING_AVAILABLE = True
+except ImportError:
+    IMAGE_PROCESSING_AVAILABLE = False
+    logging.warning("Pillow or pytesseract not available, image processing disabled")    
 
 # ML and AI imports
 from sentence_transformers import SentenceTransformer
@@ -51,6 +59,49 @@ logger = logging.getLogger(__name__)
 
 class SmartChunker:
     """Intelligent chunking that preserves semantic boundaries"""
+
+    # In SmartChunker class, add this method:
+    @staticmethod
+    def chunk_spreadsheet_data(text: str, metadata: List[Dict]) -> Tuple[List[str], List[Dict]]:
+        """Special chunking for spreadsheet data to preserve row context"""
+        chunks = []
+        chunk_metadata = []
+        
+        lines = text.split('\n')
+        
+        # Keep headers in every chunk for context
+        headers = []
+        summary = []
+        data_lines = []
+        
+        for line in lines:
+            if line.startswith('Column Headers:') or line.startswith('Headers:'):
+                headers.append(line)
+            elif line.startswith('===') or line.startswith('Shape:') or line.startswith('Total'):
+                summary.append(line)
+            elif line.startswith('Row'):
+                data_lines.append(line)
+        
+        # Create chunks with headers included
+        header_text = '\n'.join(headers + summary) if headers else ''
+        
+        # Chunk data rows
+        chunk_size = 20  # rows per chunk
+        for i in range(0, len(data_lines), chunk_size):
+            chunk_lines = data_lines[i:i+chunk_size]
+            if header_text:
+                chunk_text = header_text + '\n\n' + '\n'.join(chunk_lines)
+            else:
+                chunk_text = '\n'.join(chunk_lines)
+            
+            chunks.append(chunk_text)
+            chunk_metadata.append({
+                'type': 'spreadsheet_chunk',
+                'start_row': i + 1,
+                'end_row': min(i + chunk_size, len(data_lines))
+            })
+        
+        return chunks, chunk_metadata if chunks else ([text], metadata)
     
     @staticmethod
     def chunk_with_boundaries(text: str, metadata: List[Dict], 
@@ -311,6 +362,77 @@ class HybridFastTrackRAGPipeline:
         
         # Thread pools
         self.thread_pool = ThreadPoolExecutor(max_workers=8)
+
+    # In the HybridFastTrackRAGPipeline class within app/core/rag_pipeline.py
+
+    # In the HybridFastTrackRAGPipeline class within app/core/rag_pipeline.py
+
+    async def get_text_and_metadata(self, content: bytes, url: str) -> Tuple[str, List[Dict]]:
+        """Helper function to parse content based on file extension from a URL."""
+        file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+        
+        if not file_extension or file_extension == '.pdf':
+            return self._parse_pdf_enhanced(content)
+        elif file_extension in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff']:
+            return self._parse_image(content)
+        # This function now handles all other formats.
+        else:
+            return self._parse_other_formats(content, file_extension)
+
+    async def _parse_zip(self, content: bytes) -> Tuple[str, List[Dict]]:
+        """
+        Extracts files from a ZIP archive and processes their content recursively.
+        """
+        logger.info("Processing ZIP archive...")
+        combined_text = []
+        combined_metadata = []
+
+        with io.BytesIO(content) as temp_file:
+            with zipfile.ZipFile(temp_file, 'r') as zip_ref:
+                file_list = zip_ref.namelist()
+                for file_name in file_list:
+                    # Skip macOS metadata files and empty directory entries
+                    if file_name.startswith('__MACOSX') or file_name.endswith('/'):
+                        continue
+
+                    logger.info(f"Extracting and processing: {file_name}")
+                    with zip_ref.open(file_name) as extracted_file:
+                        extracted_content = extracted_file.read()
+                        file_extension = os.path.splitext(file_name)[1].lower()
+                        
+                        # Create a temporary URL-like identifier for caching
+                        # This helps reuse the parsing logic and potential caching
+                        temp_url_for_parsing = f"zip://{file_name}"
+
+                        # Recursively process the extracted file
+                        # We create a new task to process each file to avoid blocking
+                        # This demonstrates a more advanced, but powerful, pattern
+                        text, metadata = await self.get_text_and_metadata(
+                            extracted_content, temp_url_for_parsing
+                        )
+
+                        if text.strip():
+                            combined_text.append(f"--- START OF FILE: {file_name} ---\n{text}\n--- END OF FILE: {file_name} ---")
+                            combined_metadata.extend(metadata)
+        
+        return "\n\n".join(combined_text), combined_metadata    
+
+    # ... (inside the HybridFastTrackRAGPipeline class)
+
+    def _parse_image(self, content: bytes) -> Tuple[str, List[Dict]]:
+        """Parse image files using OCR"""
+        if not IMAGE_PROCESSING_AVAILABLE:
+            logger.warning("Image processing libraries not installed. Skipping OCR.")
+            return "Image content could not be processed.", [{'type': 'image_error'}]
+        try:
+            image = Image.open(io.BytesIO(content))
+            text = pytesseract.image_to_string(image)
+            return self._clean_text(text), [{'type': 'image'}]
+        except Exception as e:
+            logger.error(f"OCR processing failed: {e}")
+            return "Unable to extract text from image.", [{'type': 'ocr_error'}]
+
+# ... (rest of the class)    
         
     async def download_document_async(self, url: str) -> bytes:
         """Async document download with better error handling"""
@@ -466,29 +588,61 @@ class HybridFastTrackRAGPipeline:
         return text.strip()
     
     def _parse_docx(self, temp_file: io.BytesIO) -> str:
-        """Parse DOCX files"""
+        """Enhanced DOCX parsing with better structure preservation"""
         try:
             doc = Document(temp_file)
             full_text = []
             
-            for paragraph in doc.paragraphs:
-                if paragraph.text.strip():
-                    full_text.append(paragraph.text)
+            # Extract document properties if available
+            if doc.core_properties.title:
+                full_text.append(f"Title: {doc.core_properties.title}")
+            if doc.core_properties.subject:
+                full_text.append(f"Subject: {doc.core_properties.subject}")
             
-            # Extract tables
-            for table in doc.tables:
-                table_text = []
-                for row in table.rows:
-                    row_text = [cell.text.strip() for cell in row.cells]
-                    if any(row_text):
-                        table_text.append(" | ".join(row_text))
-                if table_text:
-                    full_text.append("\n=== TABLE ===\n" + "\n".join(table_text) + "\n=== END TABLE ===\n")
+            full_text.append("\n=== DOCUMENT CONTENT ===\n")
             
-            return "\n\n".join(full_text)
+            # Process paragraphs with style information
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    # Detect headings
+                    if para.style.name.startswith('Heading'):
+                        level = para.style.name[-1] if para.style.name[-1].isdigit() else '1'
+                        full_text.append(f"\n{'#' * int(level)} {para.text}\n")
+                    else:
+                        full_text.append(para.text)
+            
+            # Extract tables with better formatting
+            for i, table in enumerate(doc.tables):
+                full_text.append(f"\n=== TABLE {i+1} ===")
+                
+                # Get headers if first row looks like headers
+                headers = []
+                if table.rows:
+                    first_row = table.rows[0]
+                    headers = [cell.text.strip() for cell in first_row.cells]
+                    if all(h for h in headers):
+                        full_text.append("Headers: " + " | ".join(headers))
+                
+                # Process remaining rows
+                for j, row in enumerate(table.rows[1:] if headers else table.rows):
+                    row_data = []
+                    for k, cell in enumerate(row.cells):
+                        cell_text = cell.text.strip()
+                        if headers and k < len(headers):
+                            row_data.append(f"{headers[k]}: {cell_text}")
+                        else:
+                            row_data.append(cell_text)
+                    
+                    if any(row_data):
+                        full_text.append(f"Row {j+1}: " + " | ".join(row_data))
+                
+                full_text.append("=== END TABLE ===\n")
+            
+            return "\n".join(full_text)
+            
         except Exception as e:
             logger.error(f"DOCX parsing error: {e}")
-            return ""
+            return f"Error parsing DOCX: {str(e)}"
     
     def _parse_odt(self, temp_file: io.BytesIO) -> str:
         """Parse ODT files"""
@@ -511,42 +665,119 @@ class HybridFastTrackRAGPipeline:
         logger.info(f"Parsing document with extension: {file_extension}")
         
         # Skip binary formats that can't contain text
-        binary_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.zip', '.rar', 
+        binary_extensions = ['.gif', '.bmp', '.zip', '.rar', 
                             '.7z', '.mp3', '.mp4', '.avi', '.mov', '.bin']
         if file_extension.lower() in binary_extensions:
             logger.warning(f"Skipping binary file format: {file_extension}")
             return "This appears to be a binary file that cannot be processed for text content.", [{'type': 'binary_skip'}]
         
         # Handle Excel files
-        if file_extension in ['.xlsx', '.xls']:
+        # In app/core/rag_pipeline.py - Enhanced Excel parsing
+        if file_extension in ['.xlsx', '.xls', '.csv']:
             try:
                 temp_file = io.BytesIO(content)
-                df = pd.read_excel(temp_file, engine='openpyxl' if file_extension == '.xlsx' else None)
-                # Convert to string representation
-                text = df.to_string(max_rows=1000)  # Limit rows for large files
-                return self._clean_text(text), [{'type': 'spreadsheet'}]
+                
+                # For CSV files
+                if file_extension == '.csv':
+                    import csv
+                    text_content = content.decode('utf-8', errors='ignore')
+                    reader = csv.DictReader(io.StringIO(text_content))
+                    
+                    # Create structured text with headers
+                    headers = reader.fieldnames
+                    text = f"Column Headers: {', '.join(headers)}\n\n"
+                    
+                    # Add data rows with context
+                    rows_data = []
+                    for i, row in enumerate(reader):
+                        if i < 1000:  # Limit for performance
+                            row_text = " | ".join([f"{k}: {v}" for k, v in row.items() if v])
+                            rows_data.append(f"Row {i+1}: {row_text}")
+                    
+                    text += "\n".join(rows_data)
+                    
+                    # Also create a summary section
+                    df = pd.read_csv(io.BytesIO(content))
+                    text += f"\n\n=== DATA SUMMARY ===\n"
+                    text += f"Total Rows: {len(df)}\n"
+                    text += f"Columns: {', '.join(df.columns)}\n"
+                    for col in df.columns:
+                        if df[col].dtype in ['int64', 'float64']:
+                            text += f"{col} - Min: {df[col].min()}, Max: {df[col].max()}, Mean: {df[col].mean():.2f}\n"
+                        else:
+                            text += f"{col} - Unique values: {df[col].nunique()}\n"
+                            if df[col].nunique() < 20:
+                                text += f"  Values: {', '.join(df[col].unique()[:20].astype(str))}\n"
+                
+                else:  # Excel files
+                    df = pd.read_excel(temp_file, engine='openpyxl' if file_extension == '.xlsx' else None)
+                    
+                    # Convert with better structure
+                    text = f"=== EXCEL DATA ===\n"
+                    text += f"Shape: {df.shape[0]} rows × {df.shape[1]} columns\n"
+                    text += f"Columns: {', '.join(df.columns)}\n\n"
+                    
+                    # Add full data in searchable format
+                    for idx, row in df.iterrows():
+                        if idx < 1000:  # Limit
+                            row_text = " | ".join([f"{col}: {val}" for col, val in row.items() if pd.notna(val)])
+                            text += f"Row {idx+1}: {row_text}\n"
+                    
+                    # Add statistical summary for numeric columns
+                    text += "\n=== STATISTICS ===\n"
+                    text += df.describe().to_string()
+                    
+                return self._clean_text(text), [{'type': 'spreadsheet', 'headers': list(df.columns)}]
+                
             except Exception as e:
-                logger.warning(f"Failed to parse Excel file: {e}")
-                return "Unable to parse Excel file content.", [{'type': 'excel_error'}]
+                logger.error(f"Failed to parse Excel/CSV file: {e}")
+                return f"Error parsing file: {str(e)}", [{'type': 'excel_error'}]
         
         # Handle PowerPoint
+        # In _parse_other_formats, enhance PowerPoint section:
         if file_extension in ['.pptx', '.ppt'] and PPTX_AVAILABLE:
             try:
                 temp_file = io.BytesIO(content)
                 prs = Presentation(temp_file)
                 text_runs = []
+                
+                # Add presentation title if available
+                if prs.core_properties.title:
+                    text_runs.append(f"Presentation Title: {prs.core_properties.title}\n")
+                
                 for slide_num, slide in enumerate(prs.slides):
-                    slide_text = f"\n--- SLIDE {slide_num + 1} ---\n"
+                    slide_text = f"\n=== SLIDE {slide_num + 1} ===\n"
+                    
+                    # Extract title
+                    if slide.shapes.title:
+                        slide_text += f"Title: {slide.shapes.title.text}\n"
+                    
+                    # Extract all text from shapes
                     for shape in slide.shapes:
                         if hasattr(shape, "text") and shape.text:
-                            slide_text += shape.text + "\n"
+                            # Check if it's a table
+                            if shape.has_table:
+                                slide_text += "Table:\n"
+                                for row in shape.table.rows:
+                                    row_text = " | ".join([cell.text for cell in row.cells])
+                                    slide_text += f"  {row_text}\n"
+                            else:
+                                slide_text += f"{shape.text}\n"
+                        
+                        # Extract text from text frame
+                        if hasattr(shape, "text_frame"):
+                            for paragraph in shape.text_frame.paragraphs:
+                                if paragraph.text.strip():
+                                    slide_text += f"- {paragraph.text}\n"
+                    
                     text_runs.append(slide_text)
+                
                 text = "\n".join(text_runs)
                 return self._clean_text(text), [{'type': 'presentation'}]
+                
             except Exception as e:
-                logger.warning(f"Failed to parse PowerPoint file: {e}")
-                return "Unable to parse PowerPoint file content.", [{'type': 'pptx_error'}]
-        
+                logger.warning(f"Failed to parse PowerPoint: {e}")
+                return f"PowerPoint parsing error: {str(e)}", [{'type': 'pptx_error'}]
         # Handle DOCX
         if file_extension in ['.docx', '.doc']:
             try:
@@ -602,11 +833,14 @@ class HybridFastTrackRAGPipeline:
             
             # Determine file type and parse
             file_extension = os.path.splitext(url.split('?')[0])[1].lower()
-            
-            if not file_extension or file_extension == '.pdf':
-                text, doc_metadata = self._parse_pdf_enhanced(content)
+
+            if file_extension == '.zip':
+                text, doc_metadata = await self._parse_zip(content)
             else:
-                text, doc_metadata = self._parse_other_formats(content, file_extension)
+                # Use the new helper for all other file types
+                text, doc_metadata = await self.get_text_and_metadata(content, url)
+            
+            
             
             # Check if we got valid text
             if not text or len(text) < 10:
@@ -663,24 +897,34 @@ class HybridFastTrackRAGPipeline:
         return vector_store
     
     async def _answer_question_fast(self, question: str, vector_store: OptimizedVectorStore) -> str:
-        """Fast answer generation with caching"""
-        # Check answer cache first
+        """Enhanced answer generation with better context understanding"""
+        
+        # Check cache first
         answer_cache_key = f"ans_{hashlib.md5(question.encode()).hexdigest()[:16]}"
         cached_answer = await cache.get(answer_cache_key)
         if cached_answer:
             return cached_answer
         
-        # Get relevant chunks using hybrid search
-        retrieved_results = vector_store.hybrid_search(question, k=settings.MAX_CHUNKS_PER_QUERY)
+        # Detect if question needs aggregation or calculation
+        needs_aggregation = any(word in question.lower() for word in [
+            'how many', 'count', 'total', 'sum', 'average', 'highest', 'lowest',
+            'maximum', 'minimum', 'list all', 'compare', 'ratio', 'percentage'
+        ])
+        
+        # Get more chunks for aggregation questions
+        k = 20 if needs_aggregation else settings.MAX_CHUNKS_PER_QUERY
+        retrieved_results = vector_store.hybrid_search(question, k=k)
         
         if not retrieved_results:
-            return "Based on the available document content, I could not find specific information to answer this question."
+            return "Information not found in the provided context."
         
-        # Extract just the text chunks
-        top_chunks = [result[0] for result in retrieved_results[:8]]
+        # Use more chunks for complex questions
+        num_chunks = 12 if needs_aggregation else 8
+        top_chunks = [result[0] for result in retrieved_results[:num_chunks]]
         
-        # Use a single, focused prompt for speed
-        prompt = f"""Answer the question based ONLY on the provided context. Be specific and direct.
+        # Enhanced prompt based on question type
+        if needs_aggregation:
+            prompt = f"""You are analyzing data from a document. Answer the question by carefully examining ALL the provided context.
 
     CONTEXT:
     {chr(10).join(top_chunks)}
@@ -688,47 +932,73 @@ class HybridFastTrackRAGPipeline:
     QUESTION: {question}
 
     INSTRUCTIONS:
-    - Answer directly with specific information from the context
-    - Include exact values, numbers, or terms found
-    - If information is not in the context, say "Information not found in the provided context"
-    - Keep answer concise but complete
+    - For counting/listing questions: Examine ALL occurrences in the context
+    - For comparison questions: Compare the specific items mentioned
+    - For statistical questions: Calculate based on the data provided
+    - Include specific numbers, names, or values found
+    - If data is incomplete, mention what you found and what might be missing
+    - Be precise and comprehensive
 
     ANSWER:"""
+        else:
+            prompt = f"""Answer the question based on the provided context. Be specific and direct.
 
+    CONTEXT:
+    {chr(10).join(top_chunks)}
+
+    QUESTION: {question}
+
+    INSTRUCTIONS:
+    - Extract the specific information requested
+    - Include exact values, terms, or details from the context
+    - If partially available, provide what you found
+    - Say "Information not found" only if truly not present
+
+    ANSWER:"""
+        
         try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)  # Use flash model by default
+            # Use more capable model for complex questions
+            model_name = settings.LLM_MODEL_NAME_PRECISE if needs_aggregation else settings.LLM_MODEL_NAME
+            model = genai.GenerativeModel(model_name)
             
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.1,
-                        max_output_tokens=400,
+                        max_output_tokens=600 if needs_aggregation else 400,
                         top_p=0.95,
                         candidate_count=1
                     )
                 ),
-                timeout=settings.ANSWER_TIMEOUT_SECONDS
+                timeout=settings.ANSWER_TIMEOUT_SECONDS * (1.5 if needs_aggregation else 1)
             )
             
             answer = response.text.strip()
             
-            # Validate answer
-            if not answer or len(answer) < 10:
-                answer = "Unable to generate a valid answer from the document."
+            # Better validation
+            if not answer or len(answer) < 5:
+                answer = "Unable to generate answer from the document."
+            elif "information not found" in answer.lower() and len(top_chunks) > 0:
+                # Try once more with a simpler prompt
+                simple_prompt = f"Based on this text, {question}\n\nText: {' '.join(top_chunks[:3])}"
+                try:
+                    response = await model.generate_content_async(simple_prompt)
+                    fallback_answer = response.text.strip()
+                    if fallback_answer and len(fallback_answer) > 10:
+                        answer = fallback_answer
+                except:
+                    pass
             
-            # Cache the answer
-            if len(answer) > 20:
+            # Cache successful answers
+            if len(answer) > 20 and "error" not in answer.lower():
                 await cache.set(answer_cache_key, answer)
             
             return answer
             
-        except asyncio.TimeoutError:
-            logger.warning(f"Answer generation timeout for question: {question[:50]}...")
-            return "Processing timeout. Unable to generate answer."
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
-            return "Unable to generate answer due to an error."
+            return "Unable to process this question."
     
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
         """Process queries with optimized parallel execution"""

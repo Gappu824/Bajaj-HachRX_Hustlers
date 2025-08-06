@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     # For pandas/numpy optimization
     libopenblas-dev \
     gfortran \
+    tesseract-ocr \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy just the requirements file to leverage Docker layer caching
