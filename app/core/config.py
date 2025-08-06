@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     MAX_CHUNKS_PER_QUERY: int = 15  # Increased for better context
     MAX_CONCURRENT_QUESTIONS: int = 2  # More parallel processing
     ANSWER_TIMEOUT_SECONDS: int = 30  # Balanced timeout
-    TOTAL_TIMEOUT_SECONDS: int = 300  # Slightly increased
+    TOTAL_TIMEOUT_SECONDS: int = 1000  # Slightly increased
     
     # Cache settings - less aggressive
     CACHE_SIZE_MB: int = 1000  # Reduced from 2000
