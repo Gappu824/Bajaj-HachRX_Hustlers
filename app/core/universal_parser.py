@@ -242,7 +242,7 @@ class UniversalDocumentParser:
             if extension in ['.zip']:
                 with zipfile.ZipFile(archive_path, 'r') as zf:
                     # Process files in batches to avoid memory issues
-                    for file_info in zf.filelist[:100]:  # Limit to first 100 files
+                    for file_info in zf.filelist:  # Limit to first 100 files
                         if file_info.is_dir() or file_info.file_size > 50 * 1024 * 1024:  # Skip large files
                             continue
                         
@@ -262,7 +262,7 @@ class UniversalDocumentParser:
                             
             elif extension in ['.tar', '.gz', '.tgz']:
                 with tarfile.open(archive_path, 'r:*') as tf:
-                    for member in tf.getmembers()[:100]:  # Limit
+                    for member in tf.getmembers():  # Limit
                         if member.isfile() and member.size < 50 * 1024 * 1024:
                             try:
                                 file_content = tf.extractfile(member).read()

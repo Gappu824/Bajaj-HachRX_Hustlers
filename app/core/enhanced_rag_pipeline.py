@@ -11,6 +11,7 @@ from typing import List, Tuple, Dict, Optional, Any
 from collections import defaultdict
 import numpy as np
 import tempfile
+import aiofiles  # Missing import
 
 # External imports
 import aiohttp

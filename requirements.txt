@@ -80,3 +80,4 @@ langdetect
 # Structured data extraction
 tabula-py
 camelot-py[cv]
+easyocr
