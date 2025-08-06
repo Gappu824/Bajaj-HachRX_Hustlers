@@ -17,6 +17,8 @@ from docx import Document
 from pptx import Presentation
 from odf.text import P
 from odf.opendocument import load
+from app.core.smart_chunker import SmartChunker
+import asyncio
 
 logger = logging.getLogger(__name__)
 
