@@ -147,6 +147,7 @@ class HybridRAGPipeline:
     
     def __init__(self, embedding_model: SentenceTransformer):
         self.embedding_model = embedding_model
+        self.settings = settings
         
         # Configure Gemini
         try:
