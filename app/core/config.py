@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     # Performance settings - balanced
     MAX_CHUNKS_PER_QUERY: int = 15  # Increased for better context
     MAX_CONCURRENT_QUESTIONS: int = 8  # More parallel processing
-    ANSWER_TIMEOUT_SECONDS: int = 8  # Balanced timeout
-    TOTAL_TIMEOUT_SECONDS: int = 30  # Slightly increased
+    ANSWER_TIMEOUT_SECONDS: int = 12  # Balanced timeout
+    TOTAL_TIMEOUT_SECONDS: int = 120  # Slightly increased
     
     # Cache settings - less aggressive
     CACHE_SIZE_MB: int = 1000  # Reduced from 2000
-    CACHE_TTL_SECONDS: int = 3600  # 1 hour instead of 2
+    CACHE_TTL_SECONDS: int = 7200  # 1 hour instead of 2
     USE_DISK_CACHE: bool = True  # Enable disk cache for large docs
     
     # Document processing

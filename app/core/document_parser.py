@@ -195,12 +195,36 @@ class DocumentParser:
                 text_parts.extend(table_data)
                 text_parts.append("=== END TABLE ===\n")
                 metadata.append({'type': 'table', 'table_id': i+1})
+            if text_parts:
+                return "\n".join(text_parts), metadata
+            else:
+                raise ValueError("No text extracted with python-docx, trying fallback.")    
             
-            return "\n".join(text_parts), metadata
+            # return "\n".join(text_parts), metadata
             
         except Exception as e:
-            logger.error(f"Word parsing failed: {e}")
-            return f"Error parsing Word document: {str(e)}", [{'type': 'error'}]
+        # --- MODIFIED: This block now triggers the fallback instead of returning an error ---
+            logger.warning(f"python-docx failed: {e}. Trying pypdf fallback.")
+            
+            # --- ADDED: The entire fallback block using pypdf ---
+            try:
+                reader = pypdf.PdfReader(io.BytesIO(content))
+                text_parts = []
+                metadata = []
+                for i, page in enumerate(reader.pages):
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+                        metadata.append({'page': i+1, 'type': 'text_fallback'})
+                
+                if text_parts:
+                    return "\n\n".join(text_parts), metadata
+                else:
+                    return "Unable to parse Word document with any method.", [{'type': 'error'}]
+                    
+            except Exception as e2:
+                logger.error(f"Word parsing failed with all methods: {e2}")
+                return "Error parsing Word document.", [{'type': 'error'}]
     
     @staticmethod
     def parse_powerpoint(content: bytes) -> Tuple[str, List[Dict]]:
