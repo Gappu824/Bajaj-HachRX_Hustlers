@@ -1,31 +1,58 @@
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings
-google-generativeai
-sentence-transformers
-faiss-cpu
-transformers
-rank-bm25
-nltk
-requests
-tenacity
-aiohttp
-pdfplumber
-python-docx
-odfpy
-PyPDF2
-pypdf
-pandas
-openpyxl
-python-pptx
-google-cloud-storage
-python-dotenv
-python-multipart
-msgpack
-lz4
-numpy
-scipy
-scikit-learn
-pytesseract
-Pillow
+# Core FastAPI and web framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Configuration and data models
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Google AI and LLM
+google-generativeai==0.3.2
+
+# ML and embeddings
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+transformers==4.36.2
+
+# Enhanced retrieval
+rank-bm25==0.2.2
+nltk==3.8.1
+
+# HTTP requests and async
+requests==2.31.0
+tenacity==8.2.3
+aiohttp==3.9.1
+
+# Document processing
+pdfplumber==0.10.3
+python-docx==1.1.0
+odfpy==1.4.1
+PyPDF2==3.0.1
+pypdf==3.17.4
+
+# Spreadsheet and presentation handling
+pandas==2.1.4
+openpyxl==3.1.2
+python-pptx==0.6.23
+xlrd==2.0.1  # For older Excel files
+
+# Image processing
+Pillow==10.1.0
+pytesseract==0.3.10
+
+# Cloud storage
+google-cloud-storage==2.13.0
+
+# Environment and utilities
+python-dotenv==1.0.0
+python-multipart==0.0.6
+
+# Performance and caching
+msgpack==1.0.7
+lz4==4.3.2
+diskcache==5.6.3  # Better caching
+
+# Numpy and computation
+numpy==1.24.3
+scipy==1.11.4
+scikit-learn==1.3.2

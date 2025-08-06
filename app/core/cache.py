@@ -1,4 +1,4 @@
-# app/core/cache.py - Enhanced caching with larger size
+# app/core/cache.py - Hybrid memory and disk cache
 import logging
 import time
 import sys
@@ -6,124 +6,124 @@ import pickle
 import lz4.frame
 from typing import Dict, Any, Optional
 from collections import OrderedDict
+import diskcache
+import hashlib
+import os
 
 logger = logging.getLogger(__name__)
 
-class EnhancedInMemoryCache:
-    """Enhanced cache with compression and better serialization"""
+class HybridCache:
+    """Hybrid cache using memory for small items and disk for large items"""
     
-    def __init__(self, max_size_mb: int = 2000, ttl_seconds: int = 7200):
-        self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
-        self.max_size_bytes = max_size_mb * 1024 * 1024
-        self.ttl_seconds = ttl_seconds
-        self.current_size = 0
-        self.hit_count = 0
-        self.miss_count = 0
-        logger.info(f"Initialized Enhanced Cache (max: {max_size_mb}MB, TTL: {ttl_seconds}s)")
-
-    async def get(self, key: str) -> Optional[Any]:
-        if key in self._cache:
-            entry = self._cache[key]
-            # Check TTL
-            if time.time() - entry['timestamp'] > self.ttl_seconds:
-                await self.delete(key)
-                self.miss_count += 1
-                return None
-            
-            # Move to end (LRU)
-            self._cache.move_to_end(key)
-            self.hit_count += 1
-            
-            # Decompress if needed
-            if entry.get('compressed', False):
-                try:
-                    decompressed = lz4.frame.decompress(entry['value'])
-                    return pickle.loads(decompressed)
-                except Exception as e:
-                    logger.error(f"Failed to decompress cache entry {key}: {e}")
-                    await self.delete(key)
-                    return None
-            
-            return entry['value']
+    def __init__(self, cache_dir: str = ".cache", memory_size_mb: int = 500, disk_size_mb: int = 2000):
+        # Memory cache for small, frequently accessed items
+        self.memory_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        self.memory_size_bytes = memory_size_mb * 1024 * 1024
+        self.current_memory_size = 0
         
-        self.miss_count += 1
-        return None
-
-    async def set(self, key: str, value: Any):
-        # Try to compress large objects
+        # Disk cache for large items
+        self.disk_cache = diskcache.Cache(
+            cache_dir,
+            size_limit=disk_size_mb * 1024 * 1024,
+            eviction_policy='least-recently-used'
+        )
+        
+        # Stats
+        self.hits = 0
+        self.misses = 0
+        
+        logger.info(f"Initialized Hybrid Cache (Memory: {memory_size_mb}MB, Disk: {disk_size_mb}MB)")
+    
+    def _get_item_size(self, value: Any) -> int:
+        """Get approximate size of an item"""
         try:
-            serialized = pickle.dumps(value)
-            size = len(serialized)
-            
-            if size > 1024 * 1024:  # Compress if > 1MB
-                compressed = lz4.frame.compress(serialized)
-                if len(compressed) < size * 0.8:  # Only use if 20% smaller
-                    value_to_store = compressed
-                    size = len(compressed)
-                    is_compressed = True
-                else:
-                    value_to_store = value
-                    is_compressed = False
-            else:
-                value_to_store = value
-                is_compressed = False
+            return len(pickle.dumps(value))
+        except:
+            return sys.getsizeof(value)
+    
+    async def get(self, key: str) -> Optional[Any]:
+        """Get item from cache (memory first, then disk)"""
+        # Check memory cache
+        if key in self.memory_cache:
+            self.memory_cache.move_to_end(key)  # LRU
+            self.hits += 1
+            return self.memory_cache[key]['value']
+        
+        # Check disk cache
+        try:
+            value = self.disk_cache.get(key)
+            if value is not None:
+                self.hits += 1
+                # Promote to memory if small enough
+                size = self._get_item_size(value)
+                if size < 1024 * 1024:  # < 1MB
+                    await self._add_to_memory(key, value, size)
+                return value
         except Exception as e:
-            logger.warning(f"Failed to serialize/compress value: {e}")
-            # Fallback to uncompressed
-            value_to_store = value
-            size = sys.getsizeof(value)
-            is_compressed = False
+            logger.warning(f"Disk cache error: {e}")
         
-        # Evict old entries if needed
-        while self.current_size + size > self.max_size_bytes and self._cache:
-            oldest_key = next(iter(self._cache))
-            await self.delete(oldest_key)
+        self.misses += 1
+        return None
+    
+    async def _add_to_memory(self, key: str, value: Any, size: int):
+        """Add item to memory cache with LRU eviction"""
+        # Evict if needed
+        while self.current_memory_size + size > self.memory_size_bytes and self.memory_cache:
+            oldest_key, oldest_val = self.memory_cache.popitem(last=False)
+            self.current_memory_size -= self._get_item_size(oldest_val['value'])
         
-        # Update entry
-        if key in self._cache:
-            old_size = self._cache[key].get('size', 0)
-            self.current_size -= old_size
+        # Add to memory
+        self.memory_cache[key] = {'value': value, 'size': size}
+        self.current_memory_size += size
+    
+    async def set(self, key: str, value: Any, ttl: int = 3600):
+        """Set item in appropriate cache based on size"""
+        size = self._get_item_size(value)
         
-        self._cache[key] = {
-            'value': value_to_store,
-            'timestamp': time.time(),
-            'size': size,
-            'compressed': is_compressed
-        }
-        self.current_size += size
-        self._cache.move_to_end(key)
-        
-        logger.debug(f"Cached {key} (size: {size/1024:.1f}KB, compressed: {is_compressed})")
-
+        if size < 1024 * 1024:  # < 1MB goes to memory
+            await self._add_to_memory(key, value, size)
+        else:  # Large items go to disk
+            try:
+                self.disk_cache.set(key, value, expire=ttl)
+            except Exception as e:
+                logger.error(f"Failed to cache to disk: {e}")
+    
     async def delete(self, key: str):
-        if key in self._cache:
-            self.current_size -= self._cache[key].get('size', 0)
-            del self._cache[key]
-
+        """Delete from both caches"""
+        if key in self.memory_cache:
+            val = self.memory_cache.pop(key)
+            self.current_memory_size -= val['size']
+        
+        try:
+            self.disk_cache.delete(key)
+        except:
+            pass
+    
     def clear(self):
-        self._cache.clear()
-        self.current_size = 0
-        self.hit_count = 0
-        self.miss_count = 0
-
+        """Clear both caches"""
+        self.memory_cache.clear()
+        self.current_memory_size = 0
+        self.disk_cache.clear()
+        self.hits = 0
+        self.misses = 0
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
-        total_requests = self.hit_count + self.miss_count
-        hit_rate = self.hit_count / total_requests if total_requests > 0 else 0
+        total_requests = self.hits + self.misses
+        hit_rate = self.hits / total_requests if total_requests > 0 else 0
         
         return {
-            "entries": len(self._cache),
-            "size_mb": self.current_size / 1024 / 1024,
-            "hit_count": self.hit_count,
-            "miss_count": self.miss_count,
+            "memory_entries": len(self.memory_cache),
+            "memory_size_mb": self.current_memory_size / 1024 / 1024,
+            "disk_entries": len(self.disk_cache),
+            "disk_size_mb": self.disk_cache.volume() / 1024 / 1024,
             "hit_rate": hit_rate,
-            "max_size_mb": self.max_size_bytes / 1024 / 1024,
             "total_requests": total_requests
         }
 
-# Create singleton with settings from config
+# Create singleton
 from app.core.config import settings
-cache = EnhancedInMemoryCache(
-    max_size_mb=settings.CACHE_SIZE_MB, 
-    ttl_seconds=settings.CACHE_TTL_SECONDS
+cache = HybridCache(
+    memory_size_mb=settings.CACHE_SIZE_MB // 2,
+    disk_size_mb=settings.CACHE_SIZE_MB * 2
 )

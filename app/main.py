@@ -1,4 +1,4 @@
-# app/main.py - Optimized version
+# app/main.py - Main FastAPI application
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -7,109 +7,109 @@ import time
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.core.rag_pipeline import HybridFastTrackRAGPipeline
+from app.core.rag_pipeline import HybridRAGPipeline
 from app.api.endpoints import query
 from app.core.cache import cache
 
-# Set up logging
+# Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    # --- Startup ---
-    logger.info("Starting Optimized RAG Pipeline...")
+    # Startup
+    logger.info("Starting Hybrid Optimized RAG Pipeline...")
     
     try:
         # Load embedding model
         embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
         logger.info(f"Loaded embedding model: {settings.EMBEDDING_MODEL_NAME}")
+        
+        # Initialize pipeline
+        app.state.rag_pipeline = HybridRAGPipeline(embedding_model)
+        logger.info("RAG Pipeline initialized successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to load embedding model: {e}")
-        raise RuntimeError("Failed to initialize")
-    
-    # Initialize pipeline
-    app.state.rag_pipeline = HybridFastTrackRAGPipeline(embedding_model)
-    logger.info("Optimized RAG Pipeline ready")
+        logger.error(f"Failed to initialize: {e}")
+        raise
     
     yield
     
-    # --- Shutdown ---
+    # Shutdown
     logger.info("Shutting down...")
     cache.clear()
-    logger.info(f"Cache stats at shutdown: {cache.get_stats()}")
+    logger.info(f"Final cache stats: {cache.get_stats()}")
     logger.info("Shutdown complete")
 
-# Middleware for logging
+# Create FastAPI app
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="High-performance document query system with balanced speed and accuracy",
+    version="6.0.0",
+    lifespan=lifespan
+)
+
+# Middleware for request logging
+@app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
     
-    if request.url.path.startswith("/api/v1/hackrx"):
+    if request.url.path.startswith("/api"):
         logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.2f}s")
     
     return response
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    description="High-performance document query system optimized for speed and accuracy",
-    version="5.0.0",
-    lifespan=lifespan
-)
-
-app.middleware("http")(log_requests)
-
-# Include API router
+# Include routers
 app.include_router(query.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    """Root endpoint"""
+    """Root endpoint with system information"""
     return {
-        "message": f"Welcome to {settings.APP_NAME}", 
-        "version": "5.0.0",
+        "message": f"Welcome to {settings.APP_NAME}",
+        "version": "6.0.0",
         "features": [
-            "Optimized for <20s processing time",
-            "Handles binary and non-text files gracefully",
-            "Smart adaptive chunking",
-            "Enhanced caching with compression",
-            "Parallel question processing",
-            "Support for PDF, DOCX, Excel, PowerPoint",
-            "Image processing with OCR (PNG, JPG, etc.)",
-            "ZIP archive processing (extracts and handles multiple files)"
+            "Balanced speed and accuracy optimization",
+            "Hybrid memory and disk caching",
+            "Comprehensive format support (PDF, DOCX, Excel, PPT, Images, ZIP)",
+            "Smart context-aware chunking",
+            "Multi-strategy retrieval (BM25, TF-IDF, Semantic)",
+            "Adaptive answer generation",
+            "Parallel question processing"
         ],
         "performance": {
-            "target_accuracy": "80%+",
+            "target_accuracy": "85%+",
             "target_speed": "<20s for 10 questions",
-            "max_document_size": "200MB"
+            "max_document_size": f"{settings.MAX_DOCUMENT_SIZE_MB}MB"
+        },
+        "models": {
+            "embedding": settings.EMBEDDING_MODEL_NAME,
+            "llm_fast": settings.LLM_MODEL_NAME,
+            "llm_accurate": settings.LLM_MODEL_NAME_PRECISE
         }
     }
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Health check with cache stats"""
+    """Health check endpoint"""
     cache_stats = cache.get_stats()
     
     return {
         "status": "healthy",
-        "pipeline": "optimized-hybrid-v5",
-        "cache": cache_stats,
-        "models": {
-            "embedding": settings.EMBEDDING_MODEL_NAME,
-            "llm": settings.LLM_MODEL_NAME,
-            "llm_precise": settings.LLM_MODEL_NAME_PRECISE
-        }
+        "pipeline": "hybrid-optimized-v6",
+        "cache": cache_stats
     }
 
 @app.get("/cache/stats", tags=["Cache"])
-async def cache_stats():
-    """Detailed cache statistics"""
+async def get_cache_stats():
+    """Get detailed cache statistics"""
     return cache.get_stats()
 
 @app.post("/cache/clear", tags=["Cache"])
 async def clear_cache():
-    """Clear the cache"""
+    """Clear all caches"""
     cache.clear()
     return {"message": "Cache cleared successfully"}
