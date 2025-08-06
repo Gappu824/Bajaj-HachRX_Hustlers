@@ -100,6 +100,8 @@ class OptimizedVectorStore:
 
     def search(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
         """Hybrid search combining semantic and keyword search"""
+        if not self.enhanced_retriever:
+            return []
         
         # Semantic search
         query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')

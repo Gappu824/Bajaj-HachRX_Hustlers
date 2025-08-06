@@ -43,8 +43,8 @@ class DocumentParser:
             return DocumentParser.parse_powerpoint(content)
         elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
             return DocumentParser.parse_image(content)
-        elif file_extension == '.zip':
-            return DocumentParser.parse_zip(content)
+        # elif file_extension == '.zip':
+        #     return DocumentParser.parse_zip(content)
         elif file_extension == '.odt':
             return DocumentParser.parse_odt(content)
         else:
