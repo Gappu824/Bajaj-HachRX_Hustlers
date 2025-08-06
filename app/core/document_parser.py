@@ -3,6 +3,9 @@ import io
 import re
 import logging
 import zipfile
+import tempfile
+import shutil
+import os
 from typing import Tuple, List, Dict, Optional
 import pandas as pd
 import numpy as np
@@ -293,37 +296,95 @@ class DocumentParser:
             logger.error(f"Image parsing failed: {e}")
             return "Unable to process image", [{'type': 'error'}]
     
+    # @staticmethod
+    # def parse_zip(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Parse ZIP archive"""
+    #     text_parts = []
+    #     metadata = []
+    #     temp_dir = tempfile.mkdtemp()
+        
+    #     try:
+    #         zip_path = os.path.join(temp_dir, 'source.zip')
+    #         with open(zip_path, 'wb') as f:
+    #             f.write(content)
+
+    #         # --- ADDED: Block to extract the on-disk zip to a separate directory ---
+    #         extract_dir = os.path.join(temp_dir, 'extracted')
+    #         os.makedirs(extract_dir)
+    #         with zipfile.ZipFile(io.BytesIO(content)) as zf:
+    #             for file_info in zf.filelist:
+    #                 if file_info.filename.startswith('__MACOSX') or file_info.is_dir():
+    #                     continue
+                    
+    #                 # Extract and parse each file
+    #                 file_content = zf.read(file_info.filename)
+    #                 file_ext = '.' + file_info.filename.split('.')[-1] if '.' in file_info.filename else ''
+                    
+    #                 text_parts.append(f"\n=== FILE: {file_info.filename} ===")
+                    
+    #                 # Recursively parse
+    #                 try:
+    #                     file_text, file_meta = DocumentParser.parse_document(file_content, file_ext)
+    #                     text_parts.append(file_text)
+    #                     metadata.extend(file_meta)
+    #                 except:
+    #                     text_parts.append(f"Could not parse {file_info.filename}")
+            
+    #         return "\n".join(text_parts), metadata
+            
+    #     except Exception as e:
+    #         logger.error(f"ZIP parsing failed: {e}")
+    #         return f"Error parsing ZIP: {str(e)}", [{'type': 'error'}]
     @staticmethod
     def parse_zip(content: bytes) -> Tuple[str, List[Dict]]:
-        """Parse ZIP archive"""
+        """Parse ZIP by extracting to a temporary directory to save memory.""" # --- MODIFIED ---
         text_parts = []
         metadata = []
-        
+        temp_dir = tempfile.mkdtemp() # --- ADDED: Create a temporary directory to work in.
+
         try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                for file_info in zf.filelist:
-                    if file_info.filename.startswith('__MACOSX') or file_info.is_dir():
+            # --- ADDED: Block to write the zip to a temp file on disk ---
+            zip_path = os.path.join(temp_dir, 'source.zip')
+            with open(zip_path, 'wb') as f:
+                f.write(content)
+
+            # --- ADDED: Block to extract the on-disk zip to a separate directory ---
+            extract_dir = os.path.join(temp_dir, 'extracted')
+            os.makedirs(extract_dir)
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract_dir)
+
+            # --- MODIFIED: Loop through the extracted files on disk instead of in-memory ---
+            for root, _, files in os.walk(extract_dir):
+                for filename in files:
+                    # --- ADDED: Skip common junk files ---
+                    if filename.startswith('__MACOSX') or filename.startswith('.'):
                         continue
                     
-                    # Extract and parse each file
-                    file_content = zf.read(file_info.filename)
-                    file_ext = '.' + file_info.filename.split('.')[-1] if '.' in file_info.filename else ''
+                    file_path = os.path.join(root, filename)
+                    file_ext = os.path.splitext(filename)[1].lower()
+
+                    text_parts.append(f"\n=== FILE: {filename} ===")
                     
-                    text_parts.append(f"\n=== FILE: {file_info.filename} ===")
-                    
-                    # Recursively parse
                     try:
-                        file_text, file_meta = DocumentParser.parse_document(file_content, file_ext)
-                        text_parts.append(file_text)
-                        metadata.extend(file_meta)
-                    except:
-                        text_parts.append(f"Could not parse {file_info.filename}")
-            
+                        # --- MODIFIED: Open and read each file from disk one by one ---
+                        with open(file_path, 'rb') as file_content:
+                            # Recursively parse the file content
+                            file_text, file_meta = DocumentParser.parse_document(file_content.read(), file_ext)
+                            text_parts.append(file_text)
+                            metadata.extend(file_meta)
+                    except Exception as parse_error:
+                        logger.warning(f"Could not parse {filename}: {parse_error}")
+                        text_parts.append(f"Could not parse {filename}")
+
             return "\n".join(text_parts), metadata
-            
+
         except Exception as e:
             logger.error(f"ZIP parsing failed: {e}")
             return f"Error parsing ZIP: {str(e)}", [{'type': 'error'}]
+        finally:
+            # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
+            shutil.rmtree(temp_dir)
     
     @staticmethod
     def parse_odt(content: bytes) -> Tuple[str, List[Dict]]:
