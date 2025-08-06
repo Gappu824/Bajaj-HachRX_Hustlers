@@ -1,13 +1,13 @@
-# app/main.py - Updated with enhanced pipeline
+# app/main.py - Main FastAPI application
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from sentence_transformers import SentenceTransformer, CrossEncoder
+from sentence_transformers import SentenceTransformer
 import time
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.core.enhanced_rag_pipeline import EnhancedRAGPipeline
+from app.core.rag_pipeline import HybridRAGPipeline
 from app.api.endpoints import query
 from app.core.cache import cache
 
@@ -19,27 +19,16 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     # Startup
-    logger.info("Starting Enhanced RAG Pipeline v2...")
+    logger.info("Starting Hybrid Optimized RAG Pipeline...")
     
     try:
-        # Load models
-        logger.info("Loading embedding model...")
+        # Load embedding model
         embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-        
-        logger.info("Loading re-ranker model...")
-        reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
-        
-        logger.info("Models loaded successfully")
+        logger.info(f"Loaded embedding model: {settings.EMBEDDING_MODEL_NAME}")
         
         # Initialize pipeline
-        app.state.rag_pipeline = EnhancedRAGPipeline(embedding_model, reranker_model)
-        logger.info("Enhanced RAG Pipeline initialized successfully")
-        
-        # Download NLTK data
-        import nltk
-        nltk.download('punkt', quiet=True)
-        nltk.download('stopwords', quiet=True)
-        nltk.download('wordnet', quiet=True)
+        app.state.rag_pipeline = HybridRAGPipeline(embedding_model)
+        logger.info("RAG Pipeline initialized successfully")
         
     except Exception as e:
         logger.error(f"Failed to initialize: {e}")
@@ -56,8 +45,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Advanced document query system with 80%+ accuracy target",
-    version="2.0.0",
+    description="High-performance document query system with balanced speed and accuracy",
+    version="6.0.0",
     lifespan=lifespan
 )
 
@@ -81,27 +70,23 @@ async def read_root():
     """Root endpoint with system information"""
     return {
         "message": f"Welcome to {settings.APP_NAME}",
-        "version": "2.0.0",
+        "version": "6.0.0",
         "features": [
-            "Universal document parsing with Tika",
-            "Hierarchical chunking for better context",
-            "Cross-encoder re-ranking for accuracy",
-            "Multi-step reasoning for complex questions",
-            "Query expansion for better retrieval",
-            "Answer validation and correction",
-            "Question type detection and routing",
-            "Support for 100+ file formats",
-            "Binary file handling",
-            "Advanced table extraction"
+            "Balanced speed and accuracy optimization",
+            "Hybrid memory and disk caching",
+            "Comprehensive format support (PDF, DOCX, Excel, PPT, Images, ZIP)",
+            "Smart context-aware chunking",
+            "Multi-strategy retrieval (BM25, TF-IDF, Semantic)",
+            "Adaptive answer generation",
+            "Parallel question processing"
         ],
         "performance": {
-            "target_accuracy": "80%+",
-            "target_speed": "<30s for 10 questions",
+            "target_accuracy": "85%+",
+            "target_speed": "<20s for 10 questions",
             "max_document_size": f"{settings.MAX_DOCUMENT_SIZE_MB}MB"
         },
         "models": {
             "embedding": settings.EMBEDDING_MODEL_NAME,
-            "reranker": settings.RERANKER_MODEL_NAME,
             "llm_fast": settings.LLM_MODEL_NAME,
             "llm_accurate": settings.LLM_MODEL_NAME_PRECISE
         }
@@ -114,7 +99,7 @@ async def health_check():
     
     return {
         "status": "healthy",
-        "pipeline": "enhanced-v2",
+        "pipeline": "hybrid-optimized-v6",
         "cache": cache_stats
     }
 

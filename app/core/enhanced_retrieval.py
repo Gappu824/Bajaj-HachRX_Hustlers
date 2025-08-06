@@ -77,6 +77,45 @@ class EnhancedRetriever:
         
         self.bm25 = BM25Okapi(tokenized_chunks)
     
+    # def _init_tfidf(self):
+    #     """Initialize TF-IDF for term frequency analysis"""
+    #     if len(self.chunks) < 2:
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    #         return
+        
+    #     try:
+    #         # self.tfidf_vectorizer = TfidfVectorizer(
+    #         #     max_features=min(5000, len(self.chunks) * 10),
+    #         #     ngram_range=(1, 2),
+    #         #     stop_words='english',
+    #         #     min_df=1,
+    #         #     max_df=0.95
+    #         # )
+    #         # Adjust parameters based on collection size
+    #         if len(self.chunks) < 10:
+    #             # Very small collections - be more permissive
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(100, len(self.chunks) * 20),
+    #                 ngram_range=(1, 1),  # Only unigrams for small collections
+    #                 stop_words=None,     # Don't remove stop words for small collections
+    #                 min_df=1,
+    #                 max_df=1.0           # Allow all terms
+    #             )
+    #         else:
+    #             # Larger collections - use original settings
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(5000, len(self.chunks) * 10),
+    #                 ngram_range=(1, 2),
+    #                 stop_words='english',
+    #                 min_df=1,
+    #                 max_df=0.95
+    #             )
+    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+    #     except Exception as e:
+    #         logger.warning(f"TF-IDF initialization failed: {e}")
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
     def _init_tfidf(self):
         """Initialize TF-IDF for term frequency analysis"""
         if len(self.chunks) < 2:
@@ -85,13 +124,6 @@ class EnhancedRetriever:
             return
         
         try:
-            # self.tfidf_vectorizer = TfidfVectorizer(
-            #     max_features=min(5000, len(self.chunks) * 10),
-            #     ngram_range=(1, 2),
-            #     stop_words='english',
-            #     min_df=1,
-            #     max_df=0.95
-            # )
             # Adjust parameters based on collection size
             if len(self.chunks) < 10:
                 # Very small collections - be more permissive

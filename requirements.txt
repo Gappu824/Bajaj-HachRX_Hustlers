@@ -16,7 +16,7 @@ transformers
 faiss-cpu
 torch
 
-# Enhanced retrieval and re-ranking
+# Enhanced retrieval
 rank-bm25
 nltk
 
@@ -26,32 +26,22 @@ tenacity
 aiohttp
 aiofiles
 
-# Universal document processing
-tika
-unstructured
-python-magic
-
 # Document processing
 pdfplumber
 python-docx
 odfpy
 PyPDF2
 pypdf
-docx2txt
-striprtf
-chardet
 
 # Spreadsheet and presentation handling
 pandas
 openpyxl
 python-pptx
 xlrd
-tabulate
 
 # Image processing
 Pillow
 pytesseract
-pdf2image
 
 # Cloud storage
 google-cloud-storage
@@ -64,20 +54,8 @@ python-multipart
 msgpack
 lz4
 diskcache
-cachetools
 
 # Numpy and computation
 numpy
 scipy
 scikit-learn
-
-# Advanced NLP
-spacy
-textstat
-rapidfuzz
-langdetect
-
-# Structured data extraction
-tabula-py
-camelot-py[cv]
-easyocr

@@ -26,6 +26,33 @@ logger = logging.getLogger(__name__)
 class DocumentParser:
     """Unified document parser with format-specific optimizations"""
     
+    # @staticmethod
+    # def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
+    #     """Route to appropriate parser based on file type"""
+        
+    #     # Normalize extension
+    #     file_extension = file_extension.lower()
+    #     if not file_extension.startswith('.'):
+    #         file_extension = '.' + file_extension
+        
+    #     # Route to appropriate parser
+    #     if file_extension == '.pdf':
+    #         return DocumentParser.parse_pdf(content)
+    #     elif file_extension in ['.xlsx', '.xls', '.csv']:
+    #         return DocumentParser.parse_spreadsheet(content, file_extension)
+    #     elif file_extension in ['.docx', '.doc']:
+    #         return DocumentParser.parse_word(content)
+    #     elif file_extension in ['.pptx', '.ppt']:
+    #         return DocumentParser.parse_powerpoint(content)
+    #     elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+    #         return DocumentParser.parse_image(content)
+    #     # elif file_extension == '.zip':
+    #     #     return DocumentParser.parse_zip(content)
+    #     elif file_extension == '.odt':
+    #         return DocumentParser.parse_odt(content)
+    #     else:
+    #         # Try text extraction
+    #         return DocumentParser.parse_text(content)
     @staticmethod
     def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
         """Route to appropriate parser based on file type"""
@@ -46,6 +73,8 @@ class DocumentParser:
             return DocumentParser.parse_powerpoint(content)
         elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
             return DocumentParser.parse_image(content)
+        elif file_extension == '.bin':
+            return DocumentParser.parse_binary(content)
         # elif file_extension == '.zip':
         #     return DocumentParser.parse_zip(content)
         elif file_extension == '.odt':
@@ -53,6 +82,27 @@ class DocumentParser:
         else:
             # Try text extraction
             return DocumentParser.parse_text(content)
+    @staticmethod
+    def parse_binary(content: bytes) -> Tuple[str, List[Dict]]:
+        """Extracts printable strings from a binary file."""
+        try:
+            # Decode with error handling, replacing non-UTF-8 sequences
+            text = content.decode('utf-8', errors='replace')
+            
+            # Further clean up and extract sequences of printable characters
+            # This regex finds sequences of 4 or more "word" characters
+            printable_strings = re.findall(r'\w{4,}', text)
+            
+            if printable_strings:
+                extracted_text = " ".join(printable_strings)
+                logger.info(f"Extracted {len(extracted_text)} characters of text from binary file.")
+                return extracted_text, [{'type': 'binary_extract'}]
+            else:
+                return "No printable text found in the binary file.", [{'type': 'binary_extract'}]
+
+        except Exception as e:
+            logger.error(f"Binary file parsing failed: {e}")
+            return "Unable to process binary file.", [{'type': 'error'}]    
     
     @staticmethod
     def parse_pdf(content: bytes) -> Tuple[str, List[Dict]]:
