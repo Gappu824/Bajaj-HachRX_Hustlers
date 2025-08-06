@@ -1,47 +1,29 @@
-# Core FastAPI and web framework
 fastapi
 uvicorn[standard]
-
-# Configuration and data models
 pydantic
 pydantic-settings
-
-# Google AI and LLM
 google-generativeai
-
-# ML and embeddings
 sentence-transformers
 faiss-cpu
-transformers  # Added for better tokenization
-
-# Enhanced retrieval
-rank-bm25  # Added for BM25 retrieval
-nltk  # Added for text processing
-
-# HTTP requests and async
+transformers
+rank-bm25
+nltk
 requests
 tenacity
-aiohttp  # Added for async downloads
-
-# Document processing
+aiohttp
 pdfplumber
 python-docx
 odfpy
 PyPDF2
-pypdf  # Added as alternative PDF parser
-
-# Cloud storage (if needed)
+pypdf
+pandas
+openpyxl
+python-pptx
 google-cloud-storage
-
-# Environment and utilities
 python-dotenv
 python-multipart
-
-# Performance
-msgpack  # Added for efficient serialization
-lz4  # Added for compression
-
-# Numpy and computation
+msgpack
+lz4
 numpy
-scipy  # Added for advanced computations
-scikit-learn  # Added for TF-IDF
+scipy
+scikit-learn

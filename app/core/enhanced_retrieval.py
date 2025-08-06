@@ -25,12 +25,17 @@ class EnhancedRetriever:
     def __init__(self, chunks: List[str], chunk_metadata: List[Dict]):
         self.chunks = chunks
         self.chunk_metadata = chunk_metadata
-        self.stop_words = set(stopwords.words('english'))
+        
+        # Initialize stop words
+        try:
+            self.stop_words = set(stopwords.words('english'))
+        except:
+            self.stop_words = set()
         
         # Initialize BM25
         self._init_bm25()
         
-        # Initialize TF-IDF
+        # Initialize TF-IDF with safeguards
         self._init_tfidf()
         
         # Build specialized indexes
@@ -40,24 +45,53 @@ class EnhancedRetriever:
     
     def _init_bm25(self):
         """Initialize BM25 index"""
+        if len(self.chunks) < 1:
+            self.bm25 = None
+            return
+            
         tokenized_chunks = []
         for chunk in self.chunks:
-            tokens = word_tokenize(chunk.lower())
-            tokens = [t for t in tokens if t.isalnum() and t not in self.stop_words]
-            tokenized_chunks.append(tokens)
+            try:
+                tokens = word_tokenize(chunk.lower())
+                tokens = [t for t in tokens if t.isalnum() and t not in self.stop_words]
+                tokenized_chunks.append(tokens if tokens else ['empty'])
+            except:
+                tokenized_chunks.append(['empty'])
         
-        self.bm25 = BM25Okapi(tokenized_chunks)
+        try:
+            self.bm25 = BM25Okapi(tokenized_chunks)
+        except Exception as e:
+            logger.warning(f"BM25 initialization failed: {e}")
+            self.bm25 = None
     
     def _init_tfidf(self):
-        """Initialize TF-IDF vectorizer"""
-        self.tfidf_vectorizer = TfidfVectorizer(
-            max_features=5000,
-            ngram_range=(1, 3),
-            stop_words='english',
-            min_df=1,
-            max_df=0.95
-        )
-        self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+        """Initialize TF-IDF vectorizer with safeguards for small documents"""
+        n_chunks = len(self.chunks)
+        
+        if n_chunks < 2:
+            # Skip TF-IDF for single chunk documents
+            self.tfidf_vectorizer = None
+            self.tfidf_matrix = None
+            return
+        
+        # Dynamic parameters based on document size
+        min_df = 1
+        max_df = min(0.95, max(0.5, (n_chunks - 1) / n_chunks))
+        max_features = min(5000, n_chunks * 10)
+        
+        try:
+            self.tfidf_vectorizer = TfidfVectorizer(
+                max_features=max_features,
+                ngram_range=(1, 2) if n_chunks < 50 else (1, 3),
+                stop_words='english',
+                min_df=min_df,
+                max_df=max_df
+            )
+            self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+        except Exception as e:
+            logger.warning(f"TF-IDF initialization failed: {e}, skipping TF-IDF")
+            self.tfidf_vectorizer = None
+            self.tfidf_matrix = None
     
     def _build_specialized_indexes(self):
         """Build indexes for specific types of information"""
@@ -80,64 +114,64 @@ class EnhancedRetriever:
                 r'"([^"]+)"\s+(?:means|is|refers to)'
             ]
             for pattern in definition_patterns:
-                matches = re.findall(pattern, chunk_lower)
-                for match in matches:
-                    term = match if isinstance(match, str) else match[0]
-                    if term not in self.indexes['definitions']:
-                        self.indexes['definitions'][term] = []
-                    self.indexes['definitions'][term].append(idx)
+                try:
+                    matches = re.findall(pattern, chunk_lower)
+                    for match in matches:
+                        term = match if isinstance(match, str) else match[0]
+                        if term not in self.indexes['definitions']:
+                            self.indexes['definitions'][term] = []
+                        self.indexes['definitions'][term].append(idx)
+                except:
+                    pass
             
-            # Number patterns with context
-            number_patterns = [
-                r'(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:%|percent|km|kg|lakh|crore|days?|years?|months?)',
-                r'(?:Rs\.?|INR|₹)\s*(\d+(?:,\d{3})*(?:\.\d+)?)',
-                r'(\d+(?:\.\d+)?)\s*(?:to|and|-)\s*(\d+(?:\.\d+)?)'
-            ]
-            for pattern in number_patterns:
-                matches = re.findall(pattern, chunk)
-                for match in matches:
-                    if match not in self.indexes['numbers']:
-                        self.indexes['numbers'][match] = []
-                    self.indexes['numbers'][match].append(idx)
+            # Number patterns
+            try:
+                numbers = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', chunk)
+                for num in numbers:
+                    if num not in self.indexes['numbers']:
+                        self.indexes['numbers'][num] = []
+                    self.indexes['numbers'][num].append(idx)
+            except:
+                pass
             
             # Table detection
             if metadata.get('type') == 'table' or '|' in chunk:
-                if 'tables' not in self.indexes['tables']:
+                if 'all' not in self.indexes['tables']:
                     self.indexes['tables']['all'] = []
                 self.indexes['tables']['all'].append(idx)
-            
-            # Procedure/steps detection
-            if any(marker in chunk_lower for marker in ['step 1', 'step 2', 'firstly', 'secondly', 'procedure:', 'process:']):
-                if 'procedures' not in self.indexes['procedures']:
-                    self.indexes['procedures']['all'] = []
-                self.indexes['procedures']['all'].append(idx)
-            
-            # List detection
-            if any(marker in chunk for marker in ['•', '1.', '2.', '- ', '* ', 'following:', 'includes:']):
-                if 'lists' not in self.indexes['lists']:
-                    self.indexes['lists']['all'] = []
-                self.indexes['lists']['all'].append(idx)
     
     def retrieve(self, query: str, k: int = 30, question_type: str = 'general') -> List[Tuple[int, float]]:
         """Multi-stage retrieval combining different methods"""
+        if not self.chunks:
+            return []
+            
         query_lower = query.lower()
         scores = np.zeros(len(self.chunks))
         
-        # Stage 1: Exact phrase matching
+        # Stage 1: Exact phrase matching (highest priority)
         for idx, chunk in enumerate(self.chunks):
             if query_lower in chunk.lower():
                 scores[idx] += 5.0
         
         # Stage 2: BM25 retrieval
-        query_tokens = word_tokenize(query_lower)
-        query_tokens = [t for t in query_tokens if t.isalnum() and t not in self.stop_words]
-        bm25_scores = self.bm25.get_scores(query_tokens)
-        scores += np.array(bm25_scores) * 2.0
+        if self.bm25:
+            try:
+                query_tokens = word_tokenize(query_lower)
+                query_tokens = [t for t in query_tokens if t.isalnum() and t not in self.stop_words]
+                if query_tokens:
+                    bm25_scores = self.bm25.get_scores(query_tokens)
+                    scores += np.array(bm25_scores) * 2.0
+            except Exception as e:
+                logger.warning(f"BM25 scoring failed: {e}")
         
         # Stage 3: TF-IDF similarity
-        query_vec = self.tfidf_vectorizer.transform([query])
-        tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
-        scores += tfidf_scores * 1.5
+        if self.tfidf_vectorizer and self.tfidf_matrix is not None:
+            try:
+                query_vec = self.tfidf_vectorizer.transform([query])
+                tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
+                scores += tfidf_scores * 1.5
+            except Exception as e:
+                logger.warning(f"TF-IDF scoring failed: {e}")
         
         # Stage 4: Specialized index boosting
         if question_type == 'definitional':
@@ -147,26 +181,18 @@ class EnhancedRetriever:
                         scores[idx] += 3.0
         
         elif question_type == 'computational':
-            # Extract numbers from query
             numbers = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', query)
             for num in numbers:
-                for key in self.indexes['numbers']:
-                    if num in str(key):
-                        for idx in self.indexes['numbers'][key]:
-                            scores[idx] += 2.0
-        
-        elif question_type == 'list_based':
-            if 'all' in self.indexes['lists']:
-                for idx in self.indexes['lists']['all']:
-                    scores[idx] += 1.5
-        
-        elif question_type == 'procedural':
-            if 'all' in self.indexes['procedures']:
-                for idx in self.indexes['procedures']['all']:
-                    scores[idx] += 1.5
+                if num in self.indexes['numbers']:
+                    for idx in self.indexes['numbers'][num]:
+                        scores[idx] += 2.0
         
         # Get top-k indices
         top_indices = np.argsort(scores)[-k:][::-1]
         results = [(idx, scores[idx]) for idx in top_indices if scores[idx] > 0]
+        
+        # If no results, return all chunks with equal score
+        if not results and self.chunks:
+            results = [(i, 1.0) for i in range(min(k, len(self.chunks)))]
         
         return results

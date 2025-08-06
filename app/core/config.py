@@ -4,21 +4,31 @@ import os
 
 class Settings(BaseSettings):
     """Manages application configuration using environment variables."""
-    APP_NAME: str = "Bajaj HackRx 6.0 - Intelligent Query-Retrieval System"
+    APP_NAME: str = "Bajaj HackRx 6.0 - Optimized RAG System"
     API_V1_STR: str = "/api/v1"
     
     # Security Token provided in the problem statement
-    BEARER_TOKEN: str
-
-    # Model Configuration - can be easily swapped
-    EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'
-    LLM_MODEL_NAME: str = 'gemini-1.5-pro-latest'
-    GOOGLE_API_KEY: str
-
+    BEARER_TOKEN: str = ""  # Will be loaded from .env
+    
+    # Model Configuration - optimized for speed and accuracy
+    EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'  # Fast and efficient
+    LLM_MODEL_NAME: str = 'gemini-1.5-flash'  # Faster model by default
+    LLM_MODEL_NAME_PRECISE: str = 'gemini-1.5-pro-latest'  # For complex questions
+    GOOGLE_API_KEY: str = ""  # Will be loaded from .env
+    
+    # Performance settings
+    MAX_CHUNKS_PER_QUERY: int = 10  # Reduced for speed
+    MAX_CONCURRENT_QUESTIONS: int = 5  # Parallel processing limit
+    ANSWER_TIMEOUT_SECONDS: int = 10  # Per question timeout
+    TOTAL_TIMEOUT_SECONDS: int = 25  # Total processing timeout
+    
+    # Cache settings
+    CACHE_SIZE_MB: int = 2000  # Increased cache size
+    CACHE_TTL_SECONDS: int = 7200  # 2 hours
+    
     class Config:
-        # Pydantic will automatically look for a .env file
         env_file = ".env"
         env_file_encoding = 'utf-8'
 
-# Create a single settings instance to be used across the application
+# Create singleton
 settings = Settings()

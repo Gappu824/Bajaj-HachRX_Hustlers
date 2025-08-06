@@ -1,4 +1,4 @@
-# app/core/cache.py - Enhanced caching
+# app/core/cache.py - Enhanced caching with larger size
 import logging
 import time
 import sys
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class EnhancedInMemoryCache:
     """Enhanced cache with compression and better serialization"""
     
-    def __init__(self, max_size_mb: int = 1000, ttl_seconds: int = 7200):
+    def __init__(self, max_size_mb: int = 2000, ttl_seconds: int = 7200):
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self.ttl_seconds = ttl_seconds
@@ -39,8 +39,8 @@ class EnhancedInMemoryCache:
                 try:
                     decompressed = lz4.frame.decompress(entry['value'])
                     return pickle.loads(decompressed)
-                except:
-                    logger.error(f"Failed to decompress cache entry {key}")
+                except Exception as e:
+                    logger.error(f"Failed to decompress cache entry {key}: {e}")
                     await self.delete(key)
                     return None
             
@@ -67,7 +67,8 @@ class EnhancedInMemoryCache:
             else:
                 value_to_store = value
                 is_compressed = False
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to serialize/compress value: {e}")
             # Fallback to uncompressed
             value_to_store = value
             size = sys.getsizeof(value)
@@ -116,8 +117,13 @@ class EnhancedInMemoryCache:
             "hit_count": self.hit_count,
             "miss_count": self.miss_count,
             "hit_rate": hit_rate,
-            "max_size_mb": self.max_size_bytes / 1024 / 1024
+            "max_size_mb": self.max_size_bytes / 1024 / 1024,
+            "total_requests": total_requests
         }
 
-# Create singleton with larger size for better performance
-cache = EnhancedInMemoryCache(max_size_mb=1000, ttl_seconds=7200)
+# Create singleton with settings from config
+from app.core.config import settings
+cache = EnhancedInMemoryCache(
+    max_size_mb=settings.CACHE_SIZE_MB, 
+    ttl_seconds=settings.CACHE_TTL_SECONDS
+)
