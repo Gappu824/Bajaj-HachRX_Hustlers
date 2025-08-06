@@ -9,6 +9,8 @@ import hashlib
 from typing import List, Tuple, Dict, Optional, Any
 from collections import defaultdict
 import numpy as np
+import tempfile
+import aiofiles
 
 # External imports
 import aiohttp
