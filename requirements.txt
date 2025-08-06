@@ -19,7 +19,7 @@ torch
 # Enhanced retrieval and re-ranking
 rank-bm25
 nltk
-ms-marco-MiniLM-L-12-v2
+
 
 # HTTP requests and async
 requests
