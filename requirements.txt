@@ -27,5 +27,5 @@ lz4
 numpy
 scipy
 scikit-learn
-+pytesseract
-+Pillow
+pytesseract
+Pillow
