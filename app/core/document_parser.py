@@ -160,21 +160,88 @@ class DocumentParser:
             logger.error(f"Spreadsheet parsing failed: {e}")
             return f"Error parsing spreadsheet: {str(e)}", [{'type': 'error'}]
     
+    # @staticmethod
+    # def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Enhanced Word document parsing"""
+    #     try:
+    #         doc = Document(io.BytesIO(content))
+    #         text_parts = []
+    #         metadata = []
+            
+    #         # Document properties
+    #         if doc.core_properties.title:
+    #             text_parts.append(f"Title: {doc.core_properties.title}")
+    #         if doc.core_properties.subject:
+    #             text_parts.append(f"Subject: {doc.core_properties.subject}")
+            
+    #         # Process paragraphs with style preservation
+    #         for para in doc.paragraphs:
+    #             if para.text.strip():
+    #                 if para.style.name.startswith('Heading'):
+    #                     level = para.style.name[-1] if para.style.name[-1].isdigit() else '1'
+    #                     text_parts.append(f"\n{'#' * int(level)} {para.text}")
+    #                     metadata.append({'type': 'heading', 'level': int(level)})
+    #                 else:
+    #                     text_parts.append(para.text)
+    #                     metadata.append({'type': 'paragraph'})
+            
+    #         # Process tables
+    #         for i, table in enumerate(doc.tables):
+    #             text_parts.append(f"\n=== TABLE {i+1} ===")
+    #             table_data = []
+                
+    #             for row in table.rows:
+    #                 row_text = [cell.text.strip() for cell in row.cells]
+    #                 if any(row_text):
+    #                     table_data.append(" | ".join(row_text))
+                
+    #             text_parts.extend(table_data)
+    #             text_parts.append("=== END TABLE ===\n")
+    #             metadata.append({'type': 'table', 'table_id': i+1})
+    #         if text_parts:
+    #             return "\n".join(text_parts), metadata
+    #         else:
+    #             raise ValueError("No text extracted with python-docx, trying fallback.")    
+            
+    #         # return "\n".join(text_parts), metadata
+            
+    #     except Exception as e:
+    #     # --- MODIFIED: This block now triggers the fallback instead of returning an error ---
+    #         logger.warning(f"python-docx failed: {e}. Trying pypdf fallback.")
+            
+    #         # --- ADDED: The entire fallback block using pypdf ---
+    #         try:
+    #             reader = pypdf.PdfReader(io.BytesIO(content))
+    #             text_parts = []
+    #             metadata = []
+    #             for i, page in enumerate(reader.pages):
+    #                 page_text = page.extract_text()
+    #                 if page_text:
+    #                     text_parts.append(page_text)
+    #                     metadata.append({'page': i+1, 'type': 'text_fallback'})
+                
+    #             if text_parts:
+    #                 return "\n\n".join(text_parts), metadata
+    #             else:
+    #                 return "Unable to parse Word document with any method.", [{'type': 'error'}]
+                    
+    #         except Exception as e2:
+    #             logger.error(f"Word parsing failed with all methods: {e2}")
+    #             return "Error parsing Word document.", [{'type': 'error'}]
+    # +++ New, Correct Version +++
     @staticmethod
     def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
-        """Enhanced Word document parsing"""
+        """Enhanced Word document parsing with pypdf fallback"""
         try:
             doc = Document(io.BytesIO(content))
             text_parts = []
             metadata = []
             
-            # Document properties
             if doc.core_properties.title:
                 text_parts.append(f"Title: {doc.core_properties.title}")
             if doc.core_properties.subject:
                 text_parts.append(f"Subject: {doc.core_properties.subject}")
             
-            # Process paragraphs with style preservation
             for para in doc.paragraphs:
                 if para.text.strip():
                     if para.style.name.startswith('Heading'):
@@ -185,11 +252,9 @@ class DocumentParser:
                         text_parts.append(para.text)
                         metadata.append({'type': 'paragraph'})
             
-            # Process tables
             for i, table in enumerate(doc.tables):
                 text_parts.append(f"\n=== TABLE {i+1} ===")
                 table_data = []
-                
                 for row in table.rows:
                     row_text = [cell.text.strip() for cell in row.cells]
                     if any(row_text):
@@ -198,33 +263,21 @@ class DocumentParser:
                 text_parts.extend(table_data)
                 text_parts.append("=== END TABLE ===\n")
                 metadata.append({'type': 'table', 'table_id': i+1})
+
             if text_parts:
                 return "\n".join(text_parts), metadata
             else:
-                raise ValueError("No text extracted with python-docx, trying fallback.")    
-            
-            # return "\n".join(text_parts), metadata
-            
+                raise ValueError("No text extracted with python-docx, trying fallback.")
+                
         except Exception as e:
-        # --- MODIFIED: This block now triggers the fallback instead of returning an error ---
             logger.warning(f"python-docx failed: {e}. Trying pypdf fallback.")
-            
-            # --- ADDED: The entire fallback block using pypdf ---
             try:
                 reader = pypdf.PdfReader(io.BytesIO(content))
-                text_parts = []
-                metadata = []
-                for i, page in enumerate(reader.pages):
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_parts.append(page_text)
-                        metadata.append({'page': i+1, 'type': 'text_fallback'})
-                
+                text_parts = [page.extract_text() for page in reader.pages if page.extract_text()]
                 if text_parts:
-                    return "\n\n".join(text_parts), metadata
+                    return "\n\n".join(text_parts), [{'type': 'text_fallback'}] * len(text_parts)
                 else:
                     return "Unable to parse Word document with any method.", [{'type': 'error'}]
-                    
             except Exception as e2:
                 logger.error(f"Word parsing failed with all methods: {e2}")
                 return "Error parsing Word document.", [{'type': 'error'}]
@@ -335,57 +388,106 @@ class DocumentParser:
     #     except Exception as e:
     #         logger.error(f"ZIP parsing failed: {e}")
     #         return f"Error parsing ZIP: {str(e)}", [{'type': 'error'}]
+    # @staticmethod
+    # def parse_zip(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Parse ZIP by extracting to a temporary directory to save memory.""" # --- MODIFIED ---
+    #     text_parts = []
+    #     metadata = []
+    #     temp_dir = tempfile.mkdtemp() # --- ADDED: Create a temporary directory to work in.
+
+    #     try:
+    #         # --- ADDED: Block to write the zip to a temp file on disk ---
+    #         zip_path = os.path.join(temp_dir, 'source.zip')
+    #         with open(zip_path, 'wb') as f:
+    #             f.write(content)
+
+    #         # --- ADDED: Block to extract the on-disk zip to a separate directory ---
+    #         extract_dir = os.path.join(temp_dir, 'extracted')
+    #         os.makedirs(extract_dir)
+    #         with zipfile.ZipFile(zip_path, 'r') as zf:
+    #             zf.extractall(extract_dir)
+
+    #         # --- MODIFIED: Loop through the extracted files on disk instead of in-memory ---
+    #         for root, _, files in os.walk(extract_dir):
+    #             for filename in files:
+    #                 # --- ADDED: Skip common junk files ---
+    #                 if filename.startswith('__MACOSX') or filename.startswith('.'):
+    #                     continue
+                    
+    #                 file_path = os.path.join(root, filename)
+    #                 file_ext = os.path.splitext(filename)[1].lower()
+
+    #                 text_parts.append(f"\n=== FILE: {filename} ===")
+                    
+    #                 try:
+    #                     # --- MODIFIED: Open and read each file from disk one by one ---
+    #                     with open(file_path, 'rb') as file_content:
+    #                         # Recursively parse the file content
+    #                         file_text, file_meta = DocumentParser.parse_document(file_content.read(), file_ext)
+    #                         text_parts.append(file_text)
+    #                         metadata.extend(file_meta)
+    #                 except Exception as parse_error:
+    #                     logger.warning(f"Could not parse {filename}: {parse_error}")
+    #                     text_parts.append(f"Could not parse {filename}")
+
+    #         return "\n".join(text_parts), metadata
+
+    #     except Exception as e:
+    #         logger.error(f"ZIP parsing failed: {e}")
+    #         return f"Error parsing ZIP: {str(e)}", [{'type': 'error'}]
+    #     finally:
+    #         # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
+    #         shutil.rmtree(temp_dir)
     @staticmethod
-    def parse_zip(content: bytes) -> Tuple[str, List[Dict]]:
-        """Parse ZIP by extracting to a temporary directory to save memory.""" # --- MODIFIED ---
-        text_parts = []
-        metadata = []
-        temp_dir = tempfile.mkdtemp() # --- ADDED: Create a temporary directory to work in.
-
+    def parse_zip_incrementally(zip_path: str, vector_store: 'OptimizedVectorStore', pipeline: 'HybridRAGPipeline'):
+        """
+        Extracts a zip and processes its contents one-by-one, adding them
+        to the vector store incrementally to save memory.
+        """
+        temp_dir = tempfile.mkdtemp()
         try:
-            # --- ADDED: Block to write the zip to a temp file on disk ---
-            zip_path = os.path.join(temp_dir, 'source.zip')
-            with open(zip_path, 'wb') as f:
-                f.write(content)
-
-            # --- ADDED: Block to extract the on-disk zip to a separate directory ---
-            extract_dir = os.path.join(temp_dir, 'extracted')
-            os.makedirs(extract_dir)
             with zipfile.ZipFile(zip_path, 'r') as zf:
-                zf.extractall(extract_dir)
+                zf.extractall(temp_dir)
 
-            # --- MODIFIED: Loop through the extracted files on disk instead of in-memory ---
-            for root, _, files in os.walk(extract_dir):
+            # Walk through the extracted files
+            for root, _, files in os.walk(temp_dir):
                 for filename in files:
-                    # --- ADDED: Skip common junk files ---
-                    if filename.startswith('__MACOSX') or filename.startswith('.'):
+                    if filename.startswith('.') or filename.startswith('__MACOSX'):
                         continue
                     
                     file_path = os.path.join(root, filename)
                     file_ext = os.path.splitext(filename)[1].lower()
-
-                    text_parts.append(f"\n=== FILE: {filename} ===")
                     
+                    logger.info(f"Incrementally processing: {filename}")
                     try:
-                        # --- MODIFIED: Open and read each file from disk one by one ---
-                        with open(file_path, 'rb') as file_content:
-                            # Recursively parse the file content
-                            file_text, file_meta = DocumentParser.parse_document(file_content.read(), file_ext)
-                            text_parts.append(file_text)
-                            metadata.extend(file_meta)
-                    except Exception as parse_error:
-                        logger.warning(f"Could not parse {filename}: {parse_error}")
-                        text_parts.append(f"Could not parse {filename}")
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
 
-            return "\n".join(text_parts), metadata
+                        # INSTEAD of appending to a list, we process immediately:
+                        
+                        # 1. Parse the single file's content
+                        text, metadata = DocumentParser.parse_document(content, file_ext)
+                        if not text.strip():
+                            continue
+                        
+                        # 2. Chunk the text from just this one file
+                        chunks, chunk_meta = SmartChunker.chunk_document(
+                            text, metadata, 
+                            chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
+                            overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
+                        )
+                        
+                        # 3. Embed and add the chunks to the vector store immediately
+                        if chunks:
+                            loop = asyncio.get_event_loop()
+                            embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+                            vector_store.add(chunks, embeddings, chunk_meta)
 
-        except Exception as e:
-            logger.error(f"ZIP parsing failed: {e}")
-            return f"Error parsing ZIP: {str(e)}", [{'type': 'error'}]
+                    except Exception as e:
+                        logger.error(f"Failed to process '{filename}' in zip: {e}")
         finally:
-            # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
+            # Always clean up the temporary directory
             shutil.rmtree(temp_dir)
-    
     @staticmethod
     def parse_odt(content: bytes) -> Tuple[str, List[Dict]]:
         """Parse ODT files"""

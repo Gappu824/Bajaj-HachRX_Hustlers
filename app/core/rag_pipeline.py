@@ -31,38 +31,71 @@ logger = logging.getLogger(__name__)
 class OptimizedVectorStore:
     """Optimized vector store with hybrid search"""
     
-    def __init__(self, chunks: List[str], embeddings: np.ndarray, 
-                 model: SentenceTransformer, chunk_metadata: List[Dict]):
-        self.chunks = chunks
-        self.embeddings = embeddings
-        self.model = model
-        self.chunk_metadata = chunk_metadata
+    # def __init__(self, chunks: List[str], embeddings: np.ndarray, 
+    #              model: SentenceTransformer, chunk_metadata: List[Dict]):
+    #     self.chunks = chunks
+    #     self.embeddings = embeddings
+    #     self.model = model
+    #     self.chunk_metadata = chunk_metadata
         
-        # Build FAISS index
-        dimension = embeddings.shape[1]
+    #     # Build FAISS index
+    #     dimension = embeddings.shape[1]
         
-        # Choose index type based on size
-        if len(chunks) > 10000:
-            # Use IVF for large collections
-            nlist = min(int(np.sqrt(len(chunks))), 100)
-            self.index = faiss.IndexIVFFlat(
-                faiss.IndexFlatL2(dimension), 
-                dimension, 
-                nlist
-            )
-            self.index.train(embeddings)
-            self.index.add(embeddings)
-            self.index.nprobe = min(10, nlist // 2)
-        else:
-            # Flat index for smaller collections
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(embeddings)
+    #     # Choose index type based on size
+    #     if len(chunks) > 10000:
+    #         # Use IVF for large collections
+    #         nlist = min(int(np.sqrt(len(chunks))), 100)
+    #         self.index = faiss.IndexIVFFlat(
+    #             faiss.IndexFlatL2(dimension), 
+    #             dimension, 
+    #             nlist
+    #         )
+    #         self.index.train(embeddings)
+    #         self.index.add(embeddings)
+    #         self.index.nprobe = min(10, nlist // 2)
+    #     else:
+    #         # Flat index for smaller collections
+    #         self.index = faiss.IndexFlatL2(dimension)
+    #         self.index.add(embeddings)
         
-        # Initialize enhanced retriever
-        self.enhanced_retriever = EnhancedRetriever(chunks, chunk_metadata)
+    #     # Initialize enhanced retriever
+    #     self.enhanced_retriever = EnhancedRetriever(chunks, chunk_metadata)
         
-        logger.info(f"Created vector store with {len(chunks)} chunks")
+    #     logger.info(f"Created vector store with {len(chunks)} chunks")
     
+    def __init__(self, model: SentenceTransformer, dimension: int):
+        self.model = model
+        self.dimension = dimension
+        
+        # --- ADDED: Initialize empty containers for the data. ---
+        self.chunks: List[str] = []
+        self.chunk_metadata: List[Dict] = []
+        
+        # --- MODIFIED: Initialize an empty FAISS index. Data will be added later. ---
+        self.index = faiss.IndexFlatL2(dimension)
+        
+        # --- ADDED: The keyword retriever will be initialized later, once we have chunks. ---
+        self.enhanced_retriever = None
+        
+        logger.info("Initialized empty, incremental vector store.")
+
+    # --- ADDED: This entire 'add' method is new. ---
+    def add(self, new_chunks: List[str], new_embeddings: np.ndarray, new_metadata: List[Dict]):
+        """Incrementally adds a new batch of chunks and embeddings to the store."""
+        if not new_chunks:
+            return
+            
+        # Append the new data to the existing lists.
+        self.chunks.extend(new_chunks)
+        self.chunk_metadata.extend(new_metadata)
+        
+        # Add the new vectors to the FAISS index.
+        self.index.add(new_embeddings)
+        
+        # Re-initialize the keyword retriever with the complete, updated set of chunks.
+        self.enhanced_retriever = EnhancedRetriever(self.chunks, self.chunk_metadata)
+        logger.info(f"Added {len(new_chunks)} new chunks. Total chunks are now {len(self.chunks)}.")
+
     def search(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
         """Hybrid search combining semantic and keyword search"""
         
@@ -159,13 +192,65 @@ class HybridRAGPipeline:
                 logger.error(f"Sync download also failed: {e2}")
                 raise
     
+    # async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
+    #     """Get or create vector store with smart caching"""
+        
+    #     # Generate cache key
+    #     cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+        
+    #     # Check cache
+    #     cached_store = await cache.get(cache_key)
+    #     if cached_store:
+    #         logger.info(f"Using cached vector store for {url}")
+    #         return cached_store
+        
+    #     logger.info(f"Creating new vector store for {url}")
+        
+    #     # Download document
+    #     content = await self.download_document(url)
+        
+    #     # Parse document
+    #     file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+    #     text, metadata = DocumentParser.parse_document(content, file_extension)
+        
+    #     # Check if parsing was successful
+    #     if not text or len(text) < 10:
+    #         logger.error(f"Document parsing failed or empty: {url}")
+    #         text = "Document could not be parsed or is empty."
+    #         metadata = [{'type': 'error'}]
+        
+    #     # Smart chunking
+    #     chunks, chunk_metadata = SmartChunker.chunk_document(
+    #         text, 
+    #         metadata,
+    #         chunk_size=settings.CHUNK_SIZE_CHARS,
+    #         overlap=settings.CHUNK_OVERLAP_CHARS
+    #     )
+        
+    #     logger.info(f"Created {len(chunks)} chunks")
+        
+    #     # Generate embeddings
+    #     embeddings = await self._generate_embeddings(chunks)
+        
+    #     # Create vector store
+    #     vector_store = OptimizedVectorStore(
+    #         chunks, 
+    #         embeddings, 
+    #         self.embedding_model,
+    #         chunk_metadata
+    #     )
+        
+    #     # Cache for large documents only
+    #     if len(content) > 1024 * 1024:  # > 1MB
+    #         await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+    #         logger.info(f"Cached vector store for large document")
+        
+    #     return vector_store
     async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
-        """Get or create vector store with smart caching"""
+        """Get or create vector store, with special handling for large ZIP files.""" # --- MODIFIED ---
         
-        # Generate cache key
+        # --- This cache check logic remains the same ---
         cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
-        
-        # Check cache
         cached_store = await cache.get(cache_key)
         if cached_store:
             logger.info(f"Using cached vector store for {url}")
@@ -173,46 +258,96 @@ class HybridRAGPipeline:
         
         logger.info(f"Creating new vector store for {url}")
         
-        # Download document
-        content = await self.download_document(url)
-        
-        # Parse document
+        # --- ADDED: Detect file type to decide on processing strategy ---
         file_extension = os.path.splitext(url.split('?')[0])[1].lower()
-        text, metadata = DocumentParser.parse_document(content, file_extension)
         
-        # Check if parsing was successful
-        if not text or len(text) < 10:
-            logger.error(f"Document parsing failed or empty: {url}")
-            text = "Document could not be parsed or is empty."
-            metadata = [{'type': 'error'}]
-        
-        # Smart chunking
-        chunks, chunk_metadata = SmartChunker.chunk_document(
-            text, 
-            metadata,
-            chunk_size=settings.CHUNK_SIZE_CHARS,
-            overlap=settings.CHUNK_OVERLAP_CHARS
-        )
-        
-        logger.info(f"Created {len(chunks)} chunks")
-        
-        # Generate embeddings
-        embeddings = await self._generate_embeddings(chunks)
-        
-        # Create vector store
-        vector_store = OptimizedVectorStore(
-            chunks, 
-            embeddings, 
-            self.embedding_model,
-            chunk_metadata
-        )
-        
-        # Cache for large documents only
-        if len(content) > 1024 * 1024:  # > 1MB
-            await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
-            logger.info(f"Cached vector store for large document")
+        # --- ADDED: Conditional logic to handle ZIPs differently ---
+        if file_extension == '.zip':
+            # Use the new memory-safe incremental process for ZIPs
+            vector_store = await self._process_zip_incrementally(url)
+        else:
+            # --- MODIFIED: This is your original logic, now used for non-ZIP files ---
+            # Note: Assumes you have a download function that returns bytes for these files.
+            content = await self.download_document(url) 
+            
+            text, metadata = DocumentParser.parse_document(content, file_extension)
+            
+            if not text or len(text) < 10:
+                logger.error(f"Document parsing failed or empty: {url}")
+                text = "Document could not be parsed or is empty."
+                metadata = [{'type': 'error'}]
+            
+            chunks, chunk_metadata = SmartChunker.chunk_document(
+                text, metadata,
+                chunk_size=settings.CHUNK_SIZE_CHARS,
+                overlap=settings.CHUNK_OVERLAP_CHARS
+            )
+            
+            logger.info(f"Created {len(chunks)} chunks")
+            embeddings = await self._generate_embeddings(chunks)
+            
+            # --- MODIFIED: Create the vector store using the new incremental approach ---
+            # Note: Assumes self.embedding_model.get_sentence_embedding_dimension() exists
+            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+            # Add all data in one batch
+            vector_store.add(chunks, embeddings, chunk_metadata)
+
+        # --- MODIFIED: Caching is now done at the end, regardless of file type ---
+        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+        logger.info(f"Cached vector store for document: {url}")
         
         return vector_store
+    
+
+    # Add these methods inside the HybridRAGPipeline class
+
+    async def download_document_path(self, url: str) -> str:
+        """
+        Downloads a document by streaming it to a temporary file on disk
+        and returns the file path. This is essential for large files.
+        """
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        try:
+            timeout = aiohttp.ClientTimeout(total=600)  # 10 minute timeout for large downloads
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    
+                    # Use a temporary file to save memory
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+                        file_path = tmp_file.name
+                        async with aiofiles.open(file_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
+                                await f.write(chunk)
+                        logger.info(f"Downloaded large file to temporary path: {file_path}")
+                        return file_path
+        except Exception as e:
+            logger.error(f"Streaming download to disk failed: {e}")
+            raise
+
+    async def _process_zip_incrementally(self, url: str) -> 'OptimizedVectorStore':
+        """
+        Orchestrates the memory-safe processing of a single ZIP file.
+        """
+        # 1. Initialize an empty vector store
+        dimension = self.embedding_model.get_sentence_embedding_dimension()
+        vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+        
+        file_path = None
+        try:
+            # 2. Download the ZIP to a temporary file path on disk
+            file_path = await self.download_document_path(url)
+            
+            # 3. The parser will now populate the vector store directly
+            DocumentParser.parse_zip_incrementally(file_path, vector_store, self)
+            
+            return vector_store
+        finally:
+            # 4. CRITICAL: Clean up the temporary file from disk
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Cleaned up temporary file: {file_path}")
     
     async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
         """Generate embeddings in batches"""
