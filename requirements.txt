@@ -20,7 +20,6 @@ torch
 rank-bm25
 nltk
 
-
 # HTTP requests and async
 requests
 tenacity
@@ -29,9 +28,8 @@ aiofiles
 
 # Universal document processing
 tika
-unstructured[all-docs]
+unstructured
 python-magic
-python-magic-bin
 
 # Document processing
 pdfplumber
@@ -40,7 +38,6 @@ odfpy
 PyPDF2
 pypdf
 docx2txt
-ebooklib
 striprtf
 chardet
 
@@ -55,7 +52,6 @@ tabulate
 Pillow
 pytesseract
 pdf2image
-easyocr
 
 # Cloud storage
 google-cloud-storage
@@ -68,7 +64,6 @@ python-multipart
 msgpack
 lz4
 diskcache
-redis
 cachetools
 
 # Numpy and computation
@@ -83,5 +78,4 @@ rapidfuzz
 langdetect
 
 # Structured data extraction
-camelot-py[cv]
 tabula-py
