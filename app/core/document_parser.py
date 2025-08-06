@@ -18,6 +18,7 @@ from pptx import Presentation
 from odf.text import P
 from odf.opendocument import load
 from app.core.smart_chunker import SmartChunker
+from app.core.config import settings
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -440,8 +441,9 @@ class DocumentParser:
     #     finally:
     #         # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
     #         shutil.rmtree(temp_dir)
+    # Line 278 in document_parser.py
     @staticmethod
-    def parse_zip_incrementally(zip_path: str, vector_store: 'OptimizedVectorStore', pipeline: 'HybridRAGPipeline'):
+    async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
         """
         Extracts a zip and processes its contents one-by-one, adding them
         to the vector store incrementally to save memory.
@@ -473,16 +475,55 @@ class DocumentParser:
                             continue
                         
                         # 2. Chunk the text from just this one file
+                        # chunks, chunk_meta = SmartChunker.chunk_document(
+                        #     text, metadata, 
+                        #     chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
+                        #     overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
+                        # )
                         chunks, chunk_meta = SmartChunker.chunk_document(
-                            text, metadata, 
-                            chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
-                            overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
+                        text, metadata, 
+                        chunk_size=settings.CHUNK_SIZE_CHARS, 
+                        overlap=settings.CHUNK_OVERLAP_CHARS
                         )
                         
                         # 3. Embed and add the chunks to the vector store immediately
+                        # if chunks:
+                        #     # loop = asyncio.get_event_loop()
+                        #     # embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+                        #     # Line 296 in document_parser.py
+                        #     try:
+                        #         loop = asyncio.get_event_loop()
+                        #         embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+                        #     except RuntimeError:
+                        #         # Already in async context
+                        #         embeddings = await pipeline._generate_embeddings(chunks)
+                        #     vector_store.add(chunks, embeddings, chunk_meta)
+                        # 3. Embed and add the chunks to the vector store immediately
+                        # if chunks:
+                        #     try:
+                        #         loop = asyncio.get_event_loop()
+                        #         if loop.is_running():
+                        #             # We're already in an async context, create a task
+                        #             import concurrent.futures
+                        #             with concurrent.futures.ThreadPoolExecutor() as executor:
+                        #                 future = executor.submit(
+                        #                     lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+                        #                 )
+                        #                 embeddings = future.result()
+                        #         else:
+                        #             embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+                        #     except RuntimeError:
+                        #         # Fallback: run in new event loop
+                        #         import concurrent.futures
+                        #         with concurrent.futures.ThreadPoolExecutor() as executor:
+                        #             future = executor.submit(
+                        #                 lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+                        #             )
+                        #             embeddings = future.result()
+                            
+                        #     vector_store.add(chunks, embeddings, chunk_meta)
                         if chunks:
-                            loop = asyncio.get_event_loop()
-                            embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+                            embeddings = await pipeline._generate_embeddings(chunks)
                             vector_store.add(chunks, embeddings, chunk_meta)
 
                     except Exception as e:

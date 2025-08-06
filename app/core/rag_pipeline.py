@@ -293,7 +293,13 @@ class HybridRAGPipeline:
             
             # --- MODIFIED: Create the vector store using the new incremental approach ---
             # Note: Assumes self.embedding_model.get_sentence_embedding_dimension() exists
-            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # # Line 375 in rag_pipeline.py  
+            # dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # Line 375 in rag_pipeline.py
+# Get dimension by encoding a sample text
+            sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+            dimension = sample_embedding.shape[1]
             vector_store = OptimizedVectorStore(self.embedding_model, dimension)
             # Add all data in one batch
             vector_store.add(chunks, embeddings, chunk_metadata)
@@ -345,7 +351,8 @@ class HybridRAGPipeline:
             file_path = await self.download_document_path(url)
             
             # 3. The parser will now populate the vector store directly
-            DocumentParser.parse_zip_incrementally(file_path, vector_store, self)
+            # DocumentParser.parse_zip_incrementally(file_path, vector_store, self)
+            await DocumentParser.parse_zip_incrementally(file_path, vector_store, self)
             
             return vector_store
         finally:
