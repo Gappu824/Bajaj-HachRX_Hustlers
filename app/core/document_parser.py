@@ -25,42 +25,42 @@ logger = logging.getLogger(__name__)
 
 class DocumentParser:
     """Unified document parser with format-specific optimizations"""
-    @staticmethod
-    async def parse_bin_incrementally(file_path: str, vector_store, pipeline):
-        """
-        Reads a large binary file in chunks from disk, extracts text,
-        and adds it to the vector store incrementally.
-        """
-        READ_CHUNK_SIZE = 1024 * 1024  # Read 1MB at a time
+    # @staticmethod
+    # async def parse_bin_incrementally(file_path: str, vector_store, pipeline):
+    #     """
+    #     Reads a large binary file in chunks from disk, extracts text,
+    #     and adds it to the vector store incrementally.
+    #     """
+    #     READ_CHUNK_SIZE = 1024 * 1024  # Read 1MB at a time
         
-        try:
-            with open(file_path, 'rb') as f:
-                while True:
-                    byte_chunk = f.read(READ_CHUNK_SIZE)
-                    if not byte_chunk:
-                        break  # End of file
+    #     try:
+    #         with open(file_path, 'rb') as f:
+    #             while True:
+    #                 byte_chunk = f.read(READ_CHUNK_SIZE)
+    #                 if not byte_chunk:
+    #                     break  # End of file
 
-                    # 1. Use existing binary parsing logic on the small chunk of bytes
-                    text, _ = DocumentParser.parse_binary(byte_chunk)
-                    if not text.strip():
-                        continue
+    #                 # 1. Use existing binary parsing logic on the small chunk of bytes
+    #                 text, _ = DocumentParser.parse_binary(byte_chunk)
+    #                 if not text.strip():
+    #                     continue
                     
-                    # 2. Chunk the extracted text from this small piece
-                    # The metadata is generic since we're streaming
-                    chunks, chunk_meta = SmartChunker.chunk_document(
-                        text, 
-                        [{'type': 'binary_stream'}],
-                        chunk_size=settings.CHUNK_SIZE_CHARS,
-                        overlap=settings.CHUNK_OVERLAP_CHARS
-                    )
+    #                 # 2. Chunk the extracted text from this small piece
+    #                 # The metadata is generic since we're streaming
+    #                 chunks, chunk_meta = SmartChunker.chunk_document(
+    #                     text, 
+    #                     [{'type': 'binary_stream'}],
+    #                     chunk_size=settings.CHUNK_SIZE_CHARS,
+    #                     overlap=settings.CHUNK_OVERLAP_CHARS
+    #                 )
                     
-                    # 3. Embed and add the resulting smaller chunks to the vector store
-                    if chunks:
-                        embeddings = await pipeline._generate_embeddings(chunks)
-                        vector_store.add(chunks, embeddings, chunk_meta)
+    #                 # 3. Embed and add the resulting smaller chunks to the vector store
+    #                 if chunks:
+    #                     embeddings = await pipeline._generate_embeddings(chunks)
+    #                     vector_store.add(chunks, embeddings, chunk_meta)
 
-        except Exception as e:
-            logger.error(f"Failed to process binary file stream at '{file_path}': {e}")
+    #     except Exception as e:
+    #         logger.error(f"Failed to process binary file stream at '{file_path}': {e}")
     
     # @staticmethod
     # def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:

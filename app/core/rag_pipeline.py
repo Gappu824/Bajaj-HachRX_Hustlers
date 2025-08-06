@@ -356,29 +356,94 @@ class HybridRAGPipeline:
             logger.info(f"Cached vector store for document: {url}")
             
             return vector_store
+    # async def _process_bin_incrementally(self, url: str) -> 'OptimizedVectorStore':
+    #     """
+    #     Orchestrates the memory-safe streaming and processing of a single large binary file.
+    #     """
+    #     # 1. Initialize an empty vector store
+    #     sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+    #     dimension = sample_embedding.shape[1]
+    #     vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+        
+    #     file_path = None
+    #     try:
+    #         # 2. Download the large file to a temporary path on disk
+    #         file_path = await self.download_document_path(url)
+            
+    #         # 3. The parser will now read the file in chunks and populate the vector store
+    #         await DocumentParser.parse_bin_incrementally(file_path, vector_store, self)
+            
+    #         return vector_store
+    #     finally:
+    #         # 4. CRITICAL: Clean up the temporary file from disk
+    #         if file_path and os.path.exists(file_path):
+    #             os.remove(file_path)
+    #             logger.info(f"Cleaned up temporary file: {file_path}")
+    async def _download_producer(self, url: str, queue: asyncio.Queue):
+        """Producer: Downloads a file in chunks and puts them in a queue."""
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        try:
+            timeout = aiohttp.ClientTimeout(total=1800) # 30-minute timeout
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    # Stream the file chunk by chunk
+                    async for chunk in response.content.iter_chunked(1024 * 1024): # 1MB chunks
+                        await queue.put(chunk)
+        except Exception as e:
+            logger.error(f"Download producer failed: {e}", exc_info=True)
+            await queue.put(None) # Signal consumer to stop
+        finally:
+            # Signal the end of the download
+            await queue.put(None)
+
+    async def _processing_consumer(self, queue: asyncio.Queue, vector_store: 'OptimizedVectorStore'):
+        """Consumer: Gets byte chunks from a queue, processes, and adds them to the vector store."""
+        while True:
+            byte_chunk = await queue.get()
+            if byte_chunk is None: # End of queue signal
+                break
+
+            try:
+                # 1. Use existing binary parsing logic on the small chunk
+                text, _ = DocumentParser.parse_binary(byte_chunk)
+                if not text.strip():
+                    continue
+                
+                # 2. Chunk the extracted text from this small piece
+                chunks, chunk_meta = SmartChunker.chunk_document(
+                    text, [{'type': 'binary_stream'}],
+                    chunk_size=settings.CHUNK_SIZE_CHARS,
+                    overlap=settings.CHUNK_OVERLAP_CHARS
+                )
+                
+                # 3. Embed and add the smaller chunks to the vector store
+                if chunks:
+                    embeddings = await self._generate_embeddings(chunks)
+                    vector_store.add(chunks, embeddings, chunk_meta)
+            except Exception as e:
+                logger.error(f"Processing consumer failed for a chunk: {e}")
+            finally:
+                queue.task_done()
+
     async def _process_bin_incrementally(self, url: str) -> 'OptimizedVectorStore':
-        """
-        Orchestrates the memory-safe streaming and processing of a single large binary file.
-        """
+        """Orchestrates the parallel download and processing of a large binary file."""
         # 1. Initialize an empty vector store
         sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
         dimension = sample_embedding.shape[1]
         vector_store = OptimizedVectorStore(self.embedding_model, dimension)
         
-        file_path = None
-        try:
-            # 2. Download the large file to a temporary path on disk
-            file_path = await self.download_document_path(url)
-            
-            # 3. The parser will now read the file in chunks and populate the vector store
-            await DocumentParser.parse_bin_incrementally(file_path, vector_store, self)
-            
-            return vector_store
-        finally:
-            # 4. CRITICAL: Clean up the temporary file from disk
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"Cleaned up temporary file: {file_path}")
+        # 2. Create a queue to connect the downloader and processor
+        queue = asyncio.Queue(maxsize=10) # Buffer up to 10 chunks (10MB)
+        
+        # 3. Start the producer (downloader) and consumer (processor) tasks concurrently
+        producer_task = asyncio.create_task(self._download_producer(url, queue))
+        consumer_task = asyncio.create_task(self._processing_consumer(queue, vector_store))
+        
+        # 4. Wait for both tasks to complete
+        await asyncio.gather(producer_task, consumer_task)
+        
+        return vector_store
     
 
     # Add these methods inside the HybridRAGPipeline class
