@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     
     # Cache settings - less aggressive
     CACHE_SIZE_MB: int = 1000  # Reduced from 2000
-    CACHE_TTL_SECONDS: int = 7200  # 1 hour instead of 2
+    CACHE_TTL_SECONDS: int = 14400  # 1 hour instead of 2
     USE_DISK_CACHE: bool = True  # Enable disk cache for large docs
     
     # Document processing
