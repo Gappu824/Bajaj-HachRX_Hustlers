@@ -23,9 +23,9 @@ from app.core.config import settings
 import os
 os.environ['JAVA_HOME'] = '/usr/lib/jvm/default-java'  # Set Java home for Tika
 
-# # Initialize Tika properly
-# from tika import tika
-# tika.initVM()
+# Initialize Tika properly
+from tika import tika
+tika.initVM()
 
 logger = logging.getLogger(__name__)
 

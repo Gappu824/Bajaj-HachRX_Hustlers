@@ -25,70 +25,7 @@ logger = logging.getLogger(__name__)
 
 class DocumentParser:
     """Unified document parser with format-specific optimizations"""
-    # @staticmethod
-    # async def parse_bin_incrementally(file_path: str, vector_store, pipeline):
-    #     """
-    #     Reads a large binary file in chunks from disk, extracts text,
-    #     and adds it to the vector store incrementally.
-    #     """
-    #     READ_CHUNK_SIZE = 1024 * 1024  # Read 1MB at a time
-        
-    #     try:
-    #         with open(file_path, 'rb') as f:
-    #             while True:
-    #                 byte_chunk = f.read(READ_CHUNK_SIZE)
-    #                 if not byte_chunk:
-    #                     break  # End of file
-
-    #                 # 1. Use existing binary parsing logic on the small chunk of bytes
-    #                 text, _ = DocumentParser.parse_binary(byte_chunk)
-    #                 if not text.strip():
-    #                     continue
-                    
-    #                 # 2. Chunk the extracted text from this small piece
-    #                 # The metadata is generic since we're streaming
-    #                 chunks, chunk_meta = SmartChunker.chunk_document(
-    #                     text, 
-    #                     [{'type': 'binary_stream'}],
-    #                     chunk_size=settings.CHUNK_SIZE_CHARS,
-    #                     overlap=settings.CHUNK_OVERLAP_CHARS
-    #                 )
-                    
-    #                 # 3. Embed and add the resulting smaller chunks to the vector store
-    #                 if chunks:
-    #                     embeddings = await pipeline._generate_embeddings(chunks)
-    #                     vector_store.add(chunks, embeddings, chunk_meta)
-
-    #     except Exception as e:
-    #         logger.error(f"Failed to process binary file stream at '{file_path}': {e}")
     
-    # @staticmethod
-    # def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
-    #     """Route to appropriate parser based on file type"""
-        
-    #     # Normalize extension
-    #     file_extension = file_extension.lower()
-    #     if not file_extension.startswith('.'):
-    #         file_extension = '.' + file_extension
-        
-    #     # Route to appropriate parser
-    #     if file_extension == '.pdf':
-    #         return DocumentParser.parse_pdf(content)
-    #     elif file_extension in ['.xlsx', '.xls', '.csv']:
-    #         return DocumentParser.parse_spreadsheet(content, file_extension)
-    #     elif file_extension in ['.docx', '.doc']:
-    #         return DocumentParser.parse_word(content)
-    #     elif file_extension in ['.pptx', '.ppt']:
-    #         return DocumentParser.parse_powerpoint(content)
-    #     elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
-    #         return DocumentParser.parse_image(content)
-    #     # elif file_extension == '.zip':
-    #     #     return DocumentParser.parse_zip(content)
-    #     elif file_extension == '.odt':
-    #         return DocumentParser.parse_odt(content)
-    #     else:
-    #         # Try text extraction
-    #         return DocumentParser.parse_text(content)
     @staticmethod
     def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
         """Route to appropriate parser based on file type"""
@@ -109,8 +46,6 @@ class DocumentParser:
             return DocumentParser.parse_powerpoint(content)
         elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
             return DocumentParser.parse_image(content)
-        elif file_extension == '.bin':
-            return DocumentParser.parse_binary(content)
         # elif file_extension == '.zip':
         #     return DocumentParser.parse_zip(content)
         elif file_extension == '.odt':
@@ -118,27 +53,6 @@ class DocumentParser:
         else:
             # Try text extraction
             return DocumentParser.parse_text(content)
-    @staticmethod
-    def parse_binary(content: bytes) -> Tuple[str, List[Dict]]:
-        """Extracts printable strings from a binary file."""
-        try:
-            # Decode with error handling, replacing non-UTF-8 sequences
-            text = content.decode('utf-8', errors='replace')
-            
-            # Further clean up and extract sequences of printable characters
-            # This regex finds sequences of 4 or more "word" characters
-            printable_strings = re.findall(r'\w{4,}', text)
-            
-            if printable_strings:
-                extracted_text = " ".join(printable_strings)
-                logger.info(f"Extracted {len(extracted_text)} characters of text from binary file.")
-                return extracted_text, [{'type': 'binary_extract'}]
-            else:
-                return "No printable text found in the binary file.", [{'type': 'binary_extract'}]
-
-        except Exception as e:
-            logger.error(f"Binary file parsing failed: {e}")
-            return "Unable to process binary file.", [{'type': 'error'}]    
     
     @staticmethod
     def parse_pdf(content: bytes) -> Tuple[str, List[Dict]]:
@@ -528,95 +442,151 @@ class DocumentParser:
     #         # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
     #         shutil.rmtree(temp_dir)
     # Line 278 in document_parser.py
+    # @staticmethod
+    # async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
+    #     """
+    #     Extracts a zip and processes its contents one-by-one, adding them
+    #     to the vector store incrementally to save memory.
+    #     """
+    #     temp_dir = tempfile.mkdtemp()
+    #     try:
+    #         with zipfile.ZipFile(zip_path, 'r') as zf:
+    #             zf.extractall(temp_dir)
+
+    #         # Walk through the extracted files
+    #         for root, _, files in os.walk(temp_dir):
+    #             for filename in files:
+    #                 if filename.startswith('.') or filename.startswith('__MACOSX'):
+    #                     continue
+                    
+    #                 file_path = os.path.join(root, filename)
+    #                 file_ext = os.path.splitext(filename)[1].lower()
+                    
+    #                 logger.info(f"Incrementally processing: {filename}")
+    #                 try:
+    #                     with open(file_path, 'rb') as f:
+    #                         content = f.read()
+
+    #                     # INSTEAD of appending to a list, we process immediately:
+                        
+    #                     # 1. Parse the single file's content
+    #                     text, metadata = DocumentParser.parse_document(content, file_ext)
+    #                     if not text.strip():
+    #                         continue
+                        
+    #                     # 2. Chunk the text from just this one file
+    #                     # chunks, chunk_meta = SmartChunker.chunk_document(
+    #                     #     text, metadata, 
+    #                     #     chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
+    #                     #     overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
+    #                     # )
+    #                     chunks, chunk_meta = SmartChunker.chunk_document(
+    #                     text, metadata, 
+    #                     chunk_size=settings.CHUNK_SIZE_CHARS, 
+    #                     overlap=settings.CHUNK_OVERLAP_CHARS
+    #                     )
+                        
+    #                     # 3. Embed and add the chunks to the vector store immediately
+    #                     # if chunks:
+    #                     #     # loop = asyncio.get_event_loop()
+    #                     #     # embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     # Line 296 in document_parser.py
+    #                     #     try:
+    #                     #         loop = asyncio.get_event_loop()
+    #                     #         embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     except RuntimeError:
+    #                     #         # Already in async context
+    #                     #         embeddings = await pipeline._generate_embeddings(chunks)
+    #                     #     vector_store.add(chunks, embeddings, chunk_meta)
+    #                     # 3. Embed and add the chunks to the vector store immediately
+    #                     # if chunks:
+    #                     #     try:
+    #                     #         loop = asyncio.get_event_loop()
+    #                     #         if loop.is_running():
+    #                     #             # We're already in an async context, create a task
+    #                     #             import concurrent.futures
+    #                     #             with concurrent.futures.ThreadPoolExecutor() as executor:
+    #                     #                 future = executor.submit(
+    #                     #                     lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+    #                     #                 )
+    #                     #                 embeddings = future.result()
+    #                     #         else:
+    #                     #             embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     except RuntimeError:
+    #                     #         # Fallback: run in new event loop
+    #                     #         import concurrent.futures
+    #                     #         with concurrent.futures.ThreadPoolExecutor() as executor:
+    #                     #             future = executor.submit(
+    #                     #                 lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+    #                     #             )
+    #                     #             embeddings = future.result()
+                            
+    #                     #     vector_store.add(chunks, embeddings, chunk_meta)
+    #                     if chunks:
+    #                         embeddings = await pipeline._generate_embeddings(chunks)
+    #                         vector_store.add(chunks, embeddings, chunk_meta)
+
+    #                 except Exception as e:
+    #                     logger.error(f"Failed to process '{filename}' in zip: {e}")
+    #     finally:
+    #         # Always clean up the temporary directory
+    #         shutil.rmtree(temp_dir)
     @staticmethod
     async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
         """
-        Extracts a zip and processes its contents one-by-one, adding them
-        to the vector store incrementally to save memory.
+        Extracts a zip and processes its contents iteratively to save memory
+        and handle arbitrarily deep nested archives.
         """
-        temp_dir = tempfile.mkdtemp()
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                zf.extractall(temp_dir)
+        processing_queue = [zip_path]
+        
+        while processing_queue:
+            current_zip_path = processing_queue.pop(0)
+            temp_dir = tempfile.mkdtemp()
 
-            # Walk through the extracted files
-            for root, _, files in os.walk(temp_dir):
-                for filename in files:
-                    if filename.startswith('.') or filename.startswith('__MACOSX'):
-                        continue
-                    
-                    file_path = os.path.join(root, filename)
-                    file_ext = os.path.splitext(filename)[1].lower()
-                    
-                    logger.info(f"Incrementally processing: {filename}")
-                    try:
-                        with open(file_path, 'rb') as f:
-                            content = f.read()
-
-                        # INSTEAD of appending to a list, we process immediately:
-                        
-                        # 1. Parse the single file's content
-                        text, metadata = DocumentParser.parse_document(content, file_ext)
-                        if not text.strip():
+            try:
+                with zipfile.ZipFile(current_zip_path, 'r') as zf:
+                    zf.extractall(temp_dir)
+                
+                for root, _, files in os.walk(temp_dir):
+                    for filename in files:
+                        if filename.startswith('.') or filename.startswith('__MACOSX'):
                             continue
                         
-                        # 2. Chunk the text from just this one file
-                        # chunks, chunk_meta = SmartChunker.chunk_document(
-                        #     text, metadata, 
-                        #     chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
-                        #     overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
-                        # )
-                        chunks, chunk_meta = SmartChunker.chunk_document(
-                        text, metadata, 
-                        chunk_size=settings.CHUNK_SIZE_CHARS, 
-                        overlap=settings.CHUNK_OVERLAP_CHARS
-                        )
-                        
-                        # 3. Embed and add the chunks to the vector store immediately
-                        # if chunks:
-                        #     # loop = asyncio.get_event_loop()
-                        #     # embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     # Line 296 in document_parser.py
-                        #     try:
-                        #         loop = asyncio.get_event_loop()
-                        #         embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     except RuntimeError:
-                        #         # Already in async context
-                        #         embeddings = await pipeline._generate_embeddings(chunks)
-                        #     vector_store.add(chunks, embeddings, chunk_meta)
-                        # 3. Embed and add the chunks to the vector store immediately
-                        # if chunks:
-                        #     try:
-                        #         loop = asyncio.get_event_loop()
-                        #         if loop.is_running():
-                        #             # We're already in an async context, create a task
-                        #             import concurrent.futures
-                        #             with concurrent.futures.ThreadPoolExecutor() as executor:
-                        #                 future = executor.submit(
-                        #                     lambda: asyncio.run(pipeline._generate_embeddings(chunks))
-                        #                 )
-                        #                 embeddings = future.result()
-                        #         else:
-                        #             embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     except RuntimeError:
-                        #         # Fallback: run in new event loop
-                        #         import concurrent.futures
-                        #         with concurrent.futures.ThreadPoolExecutor() as executor:
-                        #             future = executor.submit(
-                        #                 lambda: asyncio.run(pipeline._generate_embeddings(chunks))
-                        #             )
-                        #             embeddings = future.result()
-                            
-                        #     vector_store.add(chunks, embeddings, chunk_meta)
-                        if chunks:
-                            embeddings = await pipeline._generate_embeddings(chunks)
-                            vector_store.add(chunks, embeddings, chunk_meta)
+                        file_path = os.path.join(root, filename)
+                        file_ext = os.path.splitext(filename)[1].lower()
 
-                    except Exception as e:
-                        logger.error(f"Failed to process '{filename}' in zip: {e}")
-        finally:
-            # Always clean up the temporary directory
-            shutil.rmtree(temp_dir)
+                        if file_ext == '.zip':
+                            # Add nested zips to the queue for later processing
+                            processing_queue.append(file_path)
+                            continue
+
+                        logger.info(f"Incrementally processing: {filename}")
+                        try:
+                            with open(file_path, 'rb') as f:
+                                content = f.read()
+
+                            # 1. Parse the file content
+                            text, metadata = DocumentParser.parse_document(content, file_ext)
+                            if not text.strip():
+                                continue
+                            
+                            # 2. Chunk the text
+                            chunks, chunk_meta = SmartChunker.chunk_document(
+                                text, metadata,
+                                chunk_size=settings.CHUNK_SIZE_CHARS,
+                                overlap=settings.CHUNK_OVERLAP_CHARS
+                            )
+                            
+                            # 3. Embed and add to the vector store
+                            if chunks:
+                                embeddings = await pipeline._generate_embeddings(chunks)
+                                vector_store.add(chunks, embeddings, chunk_meta)
+
+                        except Exception as e:
+                            logger.error(f"Failed to process '{filename}' in zip: {e}")
+            finally:
+                # Clean up the temporary directory for the current zip
+                shutil.rmtree(temp_dir)
     @staticmethod
     def parse_odt(content: bytes) -> Tuple[str, List[Dict]]:
         """Parse ODT files"""
