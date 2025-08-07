@@ -22,6 +22,8 @@ import requests
 from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
 from tenacity import retry, stop_after_attempt, wait_exponential
 import nltk
 from rapidfuzz import fuzz
@@ -71,6 +73,38 @@ class AdvancedVectorStore:
         self.enhanced_retriever = None
         
         logger.info("Initialized advanced vector store with hierarchical chunking")
+    def add_documents(self, texts: List[str], embeddings: np.ndarray, metadata: List[Dict]):
+        """
+        Adds a batch of documents, their embeddings, and metadata to the store.
+        This is the primary method for populating the store in the new hierarchical strategy.
+        """
+        if len(texts) == 0:
+            return
+
+        # --- NEW: Append new data to existing lists ---
+        # This allows for incrementally building the store
+        self.chunks.extend(texts)
+        self.chunk_metadata.extend(metadata)
+        
+        # --- NEW: Add the new embeddings to the FAISS index ---
+        # The FAISS index is designed for efficient, incremental additions.
+        self.index.add(embeddings.astype('float32'))
+
+        logger.info(f"Added {len(texts)} new chunks. Total chunks now: {len(self.chunks)}")  
+
+    def finalize_indexing(self):
+        """
+        Should be called after all documents have been added.
+        This method builds the keyword retriever (TF-IDF) on the complete set of chunks.
+        """
+        # --- NEW: Build the keyword retriever once all chunks are present ---
+        # This is much more efficient than rebuilding it after every batch.
+        if self.chunks:
+            logger.info("Finalizing index by building the keyword retriever (TF-IDF).")
+            self.enhanced_retriever = EnhancedRetriever(self.chunks)
+        else:
+            logger.warning("No chunks to index in keyword retriever.")
+      
 
     def clear(self):
         """Clear memory and disk cache"""
@@ -156,90 +190,163 @@ class AdvancedVectorStore:
         
         logger.info(f"Evicted {evict_count} chunks to disk")    
     
-    def search_with_reranking(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
-        """Advanced search with re-ranking"""
+    # def search_with_reranking(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
+    #     """Advanced search with re-ranking"""
         
-        # 1. Initial retrieval - get more candidates
-        candidates_k = min(k * 3, len(self.small_chunks))
+    #     # 1. Initial retrieval - get more candidates
+    #     candidates_k = min(k * 3, len(self.small_chunks))
         
-        # Encode query
+    #     # Encode query
+    #     query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
+        
+    #     # Semantic search on small chunks
+    #     distances, indices = self.small_index.search(query_embedding, candidates_k)
+        
+    #     # Keyword search
+    #     keyword_results = []
+    #     if self.enhanced_retriever:
+    #         keyword_results = self.enhanced_retriever.retrieve(query, k=candidates_k)
+        
+    #     # 2. Combine candidates
+    #     candidate_indices = set()
+    #     for idx in indices[0]:
+    #         if 0 <= idx < len(self.small_chunks):
+    #             candidate_indices.add(idx)
+        
+    #     for idx, _ in keyword_results:
+    #         if 0 <= idx < len(self.small_chunks):
+    #             candidate_indices.add(idx)
+        
+    #     # 3. Include context from large chunks
+    #     enriched_candidates = []
+    #     for idx in candidate_indices:
+    #         small_chunk = self.small_chunks[idx]
+            
+    #         # Get corresponding large chunk for context
+    #         large_idx = self.chunk_to_large_mapping.get(idx)
+    #         if large_idx is not None and large_idx < len(self.large_chunks):
+    #             context = self.large_chunks[large_idx]
+    #             # Combine small chunk with partial context
+    #             enriched_text = f"{small_chunk}\n\n[CONTEXT]: {context[:500]}"
+    #         else:
+    #             enriched_text = small_chunk
+            
+    #         enriched_candidates.append((idx, enriched_text))
+        
+    #     # 4. Re-rank with cross-encoder
+    #     if enriched_candidates and self.reranker:
+    #         # Prepare pairs for re-ranking
+    #         pairs = [[query, text] for _, text in enriched_candidates]
+            
+    #         try:
+    #             # Get re-ranking scores
+    #             scores = self.reranker.predict(pairs)
+                
+    #             # Combine with indices
+    #             scored_candidates = [
+    #                 (enriched_candidates[i][0], scores[i], enriched_candidates[i][1])
+    #                 for i in range(len(enriched_candidates))
+    #             ]
+                
+    #             # Sort by score
+    #             scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                
+    #             # Return top-k with metadata
+    #             results = []
+    #             for idx, score, text in scored_candidates[:k]:
+    #                 results.append((
+    #                     self.small_chunks[idx],  # Return original small chunk
+    #                     float(score),
+    #                     self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
+    #                 ))
+                
+    #             return results
+                
+    #         except Exception as e:
+    #             logger.warning(f"Re-ranking failed: {e}, falling back to basic search")
+        
+    #     # Fallback to basic search if re-ranking fails
+    #     results = []
+    #     for idx in list(candidate_indices)[:k]:
+    #         results.append((
+    #             self.small_chunks[idx],
+    #            1.0,
+    #            self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
+    #        ))
+       
+    #     return results
+    # In your AdvancedVectorStore class definition
+
+# --- MODIFIED: Added `filter_dict` argument for hierarchical search ---
+    def search_with_reranking(self, query: str, k: int = 15, filter_dict: Dict = None) -> List[Tuple[str, float, Dict]]:
+        """
+        Advanced search with re-ranking, now with support for metadata filtering.
+        """
+        # --- This initial retrieval part is the same ---
+        candidates_k = min(k * 5, len(self.chunks)) # Increased candidate pool for better filtering
         query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
-        
-        # Semantic search on small chunks
-        distances, indices = self.small_index.search(query_embedding, candidates_k)
-        
-        # Keyword search
+        distances, indices = self.index.search(query_embedding, candidates_k)
         keyword_results = []
         if self.enhanced_retriever:
             keyword_results = self.enhanced_retriever.retrieve(query, k=candidates_k)
-        
-        # 2. Combine candidates
-        candidate_indices = set()
-        for idx in indices[0]:
-            if 0 <= idx < len(self.small_chunks):
-                candidate_indices.add(idx)
-        
+            
+        candidate_indices = set(idx for idx in indices[0] if 0 <= idx < len(self.chunks))
         for idx, _ in keyword_results:
-            if 0 <= idx < len(self.small_chunks):
+            if 0 <= idx < len(self.chunks):
                 candidate_indices.add(idx)
-        
-        # 3. Include context from large chunks
+
+        # --- NEW: FILTERING LOGIC ---
+        # This is the critical new block for the hierarchical strategy.
+        # It filters down the candidate chunks to only those that match the filter_dict.
+        if filter_dict and candidate_indices:
+            filtered_indices = set()
+            # We expect a filter like {'parent_chunk_id': [1, 5, 12]}
+            for key, allowed_values in filter_dict.items():
+                for idx in candidate_indices:
+                    # Check if the chunk's metadata has the key and its value is in the allowed list
+                    if self.chunk_metadata[idx].get(key) in allowed_values:
+                        filtered_indices.add(idx)
+            
+            # Overwrite the candidate list with the much smaller, filtered list.
+            candidate_indices = filtered_indices
+            logger.info(f"Applied filter, reduced candidates to {len(candidate_indices)} chunks.")
+        # --- END OF NEW FILTERING LOGIC ---
+
+        # The rest of the re-ranking logic now operates on the filtered set of candidates.
         enriched_candidates = []
         for idx in candidate_indices:
-            small_chunk = self.small_chunks[idx]
-            
-            # Get corresponding large chunk for context
-            large_idx = self.chunk_to_large_mapping.get(idx)
-            if large_idx is not None and large_idx < len(self.large_chunks):
-                context = self.large_chunks[large_idx]
-                # Combine small chunk with partial context
-                enriched_text = f"{small_chunk}\n\n[CONTEXT]: {context[:500]}"
-            else:
-                enriched_text = small_chunk
-            
-            enriched_candidates.append((idx, enriched_text))
+            enriched_candidates.append((idx, self.chunks[idx])) # Simplified enrichment for this example
         
-        # 4. Re-rank with cross-encoder
         if enriched_candidates and self.reranker:
-            # Prepare pairs for re-ranking
             pairs = [[query, text] for _, text in enriched_candidates]
-            
             try:
-                # Get re-ranking scores
                 scores = self.reranker.predict(pairs)
-                
-                # Combine with indices
-                scored_candidates = [
-                    (enriched_candidates[i][0], scores[i], enriched_candidates[i][1])
-                    for i in range(len(enriched_candidates))
-                ]
-                
-                # Sort by score
-                scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                scored_candidates = sorted(
+                    [(enriched_candidates[i][0], scores[i]) for i in range(len(enriched_candidates))],
+                    key=lambda x: x[1],
+                    reverse=True
+                )
                 
                 # Return top-k with metadata
                 results = []
-                for idx, score, text in scored_candidates[:k]:
+                for idx, score in scored_candidates[:k]:
                     results.append((
-                        self.small_chunks[idx],  # Return original small chunk
+                        self.chunks[idx],
                         float(score),
                         self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
                     ))
-                
                 return results
-                
             except Exception as e:
-                logger.warning(f"Re-ranking failed: {e}, falling back to basic search")
+                logger.warning(f"Re-ranking failed: {e}, falling back to basic search on filtered candidates.")
         
-        # Fallback to basic search if re-ranking fails
+        # Fallback if re-ranking fails or is not available
         results = []
         for idx in list(candidate_indices)[:k]:
             results.append((
-                self.small_chunks[idx],
-               1.0,
-               self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
-           ))
-       
+                self.chunks[idx],
+                1.0, # Default score
+                self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
+            ))
         return results
 
 class EnhancedRAGPipeline:
@@ -635,8 +742,16 @@ class EnhancedRAGPipeline:
         full_text_cache_key = f"full_text_store_{document_hash}"
 
         # ---> MODIFIED: Check the cache for BOTH stores.
-        summary_store = await cache.get(summary_cache_key)
-        full_text_store = await cache.get(full_text_cache_key)
+        # summary_store = await cache.get(summary_cache_key)
+        # full_text_store = await cache.get(full_text_cache_key)
+        logger.info(f"Creating new hierarchical vector stores for {url}")
+    
+    # Download the document content ONCE.
+        content = await self.download_document(url)
+
+        # Pass the content directly to the processing function.
+        summary_store, full_text_store = await self._hierarchical_processing(content, document_hash, url)
+
 
         if summary_store and full_text_store:
             logger.info(f"Using cached hierarchical vector stores for {url}")
@@ -691,13 +806,15 @@ class EnhancedRAGPipeline:
     #     return await self._create_hierarchical_store(full_text, metadata_parts)
     # In enhanced_rag_pipeline.py
 
-    async def _hierarchical_processing(self, file_path: str, document_hash: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+    # async def _hierarchical_processing(self, file_path: str, document_hash: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+    async def _hierarchical_processing(self, content: bytes, document_hash: str, filename: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
         """
         Creates two vector stores: one with summaries and one with the full text.
         """
         logger.info("Starting hierarchical processing for the document.")
         # Use the universal parser to get all text
-        full_text = await self.universal_parser.parse(file_path)
+        # full_text = await self.universal_parser.parse(file_path)
+        full_text, _ = self.universal_parser.parse_any_document(content, filename)
 
         # --- Create Layer 1: The Parent Chunks and Summary Store ---
         parent_chunker = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
