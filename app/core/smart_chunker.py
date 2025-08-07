@@ -13,6 +13,21 @@ class SmartChunker:
                       chunk_size: int = 1000, 
                       overlap: int = 200) -> Tuple[List[str], List[Dict]]:
         """Smart chunking based on document structure"""
+        doc_length = len(text)
+    
+    # Adjust chunk size for large documents
+        if doc_length > 100000:  # > 100k chars
+            chunk_size = min(2000, chunk_size * 2)  # Double chunk size
+            overlap = min(400, overlap * 2)
+            logger.info(f"Using larger chunks for document with {doc_length} chars")
+        
+        # Limit total chunks
+        max_chunks = settings.MAX_TOTAL_CHUNKS
+        min_chunk_size = max(chunk_size, doc_length // max_chunks)
+        
+        if min_chunk_size > chunk_size:
+            chunk_size = min_chunk_size
+            logger.warning(f"Increased chunk size to {chunk_size} to stay under {max_chunks} chunks")
         
         # Detect document type from metadata
         doc_type = SmartChunker._detect_document_type(metadata)

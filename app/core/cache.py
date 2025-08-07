@@ -9,6 +9,7 @@ from collections import OrderedDict
 import diskcache
 import hashlib
 import os
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +100,28 @@ class HybridCache:
         except:
             pass
     
+    # def clear(self):
+    #     """Clear both caches"""
+    #     self.memory_cache.clear()
+    #     self.current_memory_size = 0
+    #     self.disk_cache.clear()
+    #     self.hits = 0
+    #     self.misses = 0
     def clear(self):
-        """Clear both caches"""
-        self.memory_cache.clear()
-        self.current_memory_size = 0
-        self.disk_cache.clear()
-        self.hits = 0
-        self.misses = 0
+        """Clear memory and disk cache"""
+        # OLD: No cleanup
+        # NEW: Proper cleanup
+        
+        self.small_chunks.clear()
+        self.large_chunks.clear()
+        self.chunk_metadata.clear()
+        self.chunk_to_large_mapping.clear()
+        
+        # Clean disk cache
+        if os.path.exists(self.disk_cache_dir):
+            shutil.rmtree(self.disk_cache_dir)
+        
+        logger.info("Vector store cleared")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
@@ -122,7 +138,7 @@ class HybridCache:
         }
 
 # Create singleton
-from app.core.config import settings
+
 cache = HybridCache(
     memory_size_mb=settings.CACHE_SIZE_MB // 2,
     disk_size_mb=settings.CACHE_SIZE_MB * 2

@@ -66,12 +66,33 @@ ENV PYTHONUNBUFFERED=1
 ENV TOKENIZERS_PARALLELISM=false
 ENV JAVA_HOME=/usr/lib/jvm/default-java
 
-# Create startup script
+# # Create startup script
+# # Replace the startup script section in Dockerfile with:
+# RUN echo '#!/bin/bash\n\
+# java -jar /opt/tika/tika-server.jar --port 9998 > /dev/null 2>&1 &\n\
+# sleep 10\n\
+# exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1\n\
+# ' > /code/start.sh && chmod +x /code/start.sh
 # Replace the startup script section in Dockerfile with:
 RUN echo '#!/bin/bash\n\
-java -jar /opt/tika/tika-server.jar --port 9998 > /dev/null 2>&1 &\n\
-sleep 10\n\
-exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1\n\
+echo "Starting Tika server..."\n\
+java -jar /opt/tika/tika-server.jar --port 9998 > /var/log/tika.log 2>&1 &\n\
+TIKA_PID=$!\n\
+echo "Waiting for Tika to be ready..."\n\
+for i in {1..30}; do\n\
+    if curl -s http://localhost:9998/tika > /dev/null 2>&1; then\n\
+        echo "Tika server ready!"\n\
+        break\n\
+    fi\n\
+    sleep 1\n\
+done\n\
+if ! curl -s http://localhost:9998/tika > /dev/null 2>&1; then\n\
+    echo "Error: Tika server failed to start"\n\
+    cat /var/log/tika.log\n\
+    exit 1\n\
+fi\n\
+echo "Starting FastAPI application..."\n\
+exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 --timeout-keep-alive 120\n\
 ' > /code/start.sh && chmod +x /code/start.sh
 
 # Run application

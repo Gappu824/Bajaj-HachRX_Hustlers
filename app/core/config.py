@@ -18,11 +18,13 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     
     # Performance settings - balanced for accuracy
-    MAX_CHUNKS_PER_QUERY: int = 25  # Increased for better context
-    MAX_RERANK_CHUNKS: int = 50  # Initial retrieval before reranking
-    MAX_CONCURRENT_QUESTIONS: int = 3
-    ANSWER_TIMEOUT_SECONDS: int = 45
-    TOTAL_TIMEOUT_SECONDS: int = 1200
+    MAX_CHUNKS_PER_QUERY: int = 15  # Increased for better context
+    MAX_RERANK_CHUNKS: int = 30  # Initial retrieval before reranking
+    MAX_CONCURRENT_QUESTIONS: int = 1
+    ANSWER_TIMEOUT_SECONDS: int = 1800
+    TOTAL_TIMEOUT_SECONDS: int = 3600
+    MAX_TOTAL_CHUNKS: int = 1000  # New limit for total chunks
+
     
     # Cache settings
     CACHE_SIZE_MB: int = 1500
@@ -30,8 +32,8 @@ class Settings(BaseSettings):
     USE_DISK_CACHE: bool = True
     
     # Document processing
-    MAX_DOCUMENT_SIZE_MB: int = 500
-    CHUNK_SIZE_CHARS: int = 800  # Smaller for precision
+    MAX_DOCUMENT_SIZE_MB: int = None
+    CHUNK_SIZE_CHARS: int = 1000  # Smaller for precision
     CHUNK_OVERLAP_CHARS: int = 200
     LARGE_CHUNK_SIZE_CHARS: int = 2000  # For hierarchical chunking
     LARGE_CHUNK_OVERLAP_CHARS: int = 400
@@ -45,6 +47,11 @@ class Settings(BaseSettings):
     ENABLE_QUERY_EXPANSION: bool = True
     ENABLE_MULTI_STEP_REASONING: bool = True
     CONFIDENCE_THRESHOLD: float = 0.7
+
+
+    EMBEDDING_CACHE_TTL: int = 86400  # 24 hours
+    EMBEDDING_BATCH_SIZE: int = 16  # Optimized batch size
+    USE_EMBEDDING_CACHE: bool = True
     
     class Config:
         env_file = ".env"

@@ -15,74 +15,212 @@ class AnswerValidator:
                 chunks: List[str]) -> Dict[str, Any]:
         """Validate answer and correct if needed"""
         
+        # validation_result = {
+        #     'answer': answer,
+        #     'validation_passed': True,
+        #     'corrections': [],
+        #     'sources': [],
+        #     'notes': ''
+        # }
         validation_result = {
             'answer': answer,
             'validation_passed': True,
             'corrections': [],
             'sources': [],
-            'notes': ''
+            'notes': '',
+            'confidence': 0.5
         }
+        if self._is_error_response(answer):
+            validation_result['validation_passed'] = False
+            validation_result['answer'] = self._generate_fallback_answer(question, chunks)
+            validation_result['notes'] = 'Generated fallback answer'
+            return validation_result
         
-        # Type-specific validation
+        # # Type-specific validation
+        # if question_info['type'] == 'numerical':
+        #     validation_result = self._validate_numerical(
+        #         question, answer, chunks, validation_result
+        #     )
+        # elif question_info['type'] == 'yes_no':
+        #     validation_result = self._validate_yes_no(
+        #         answer, validation_result
+        #     )
+        # elif question_info['type'] == 'list':
+        #     validation_result = self._validate_list(
+        #         question, answer, chunks, validation_result
+        #     )
+        
+        # # General validations
+        # validation_result = self._validate_completeness(
+        #     answer, question_info, validation_result
+        # )
+        
+        # validation_result = self._validate_consistency(
+        #     answer, chunks, validation_result
+        # )
+        
+        # return validation_result
         if question_info['type'] == 'numerical':
-            validation_result = self._validate_numerical(
+            validation_result = self._validate_numerical_enhanced(
                 question, answer, chunks, validation_result
             )
         elif question_info['type'] == 'yes_no':
-            validation_result = self._validate_yes_no(
-                answer, validation_result
+            validation_result = self._validate_yes_no_enhanced(
+                question, answer, chunks, validation_result
             )
         elif question_info['type'] == 'list':
-            validation_result = self._validate_list(
+            validation_result = self._validate_list_enhanced(
                 question, answer, chunks, validation_result
             )
         
-        # General validations
-        validation_result = self._validate_completeness(
-            answer, question_info, validation_result
-        )
-        
-        validation_result = self._validate_consistency(
+        # Calculate confidence
+        validation_result['confidence'] = self._calculate_answer_confidence(
             answer, chunks, validation_result
         )
         
         return validation_result
-    
-    def _validate_numerical(self, question: str, answer: str, chunks: List[str],
-                           result: Dict) -> Dict:
-        """Validate numerical answers"""
+    def _is_error_response(self, answer: str) -> bool:
+        """Check if answer is an error response"""
+        # NEW: Better error detection
         
-        # Extract numbers from answer
-        answer_numbers = re.findall(r'[-+]?\d*\.?\d+', answer)
+        error_phrases = [
+            'unable to', 'cannot find', 'not found', 'error',
+            'timeout', 'failed', 'processing error', 'document processing error'
+        ]
+        
+        answer_lower = answer.lower()
+        return any(phrase in answer_lower for phrase in error_phrases) or len(answer) < 10
+    
+    # def _validate_numerical(self, question: str, answer: str, chunks: List[str],
+    #                        result: Dict) -> Dict:
+    #     """Validate numerical answers"""
+        
+    #     # Extract numbers from answer
+    #     answer_numbers = re.findall(r'[-+]?\d*\.?\d+', answer)
+        
+    #     if not answer_numbers:
+    #         result['validation_passed'] = False
+    #         result['notes'] = 'No numerical value found in answer'
+    #         return result
+        
+    #     # Check if numbers appear in context
+    #     context_text = ' '.join(chunks[:5])
+    #     context_numbers = re.findall(r'[-+]?\d*\.?\d+', context_text)
+        
+    #     # Verify calculation if needed
+    #     if 'calculate' in question.lower() or 'total' in question.lower():
+    #         # Try to verify the calculation
+    #         try:
+    #             # Extract operation
+    #             if 'sum' in question.lower() or 'total' in question.lower():
+    #                 numbers = [float(n) for n in context_numbers]
+    #                 expected = sum(numbers)
+    #                 actual = float(answer_numbers[0])
+                    
+    #                 if abs(expected - actual) > 0.01:
+    #                     result['corrections'].append(
+    #                         f"Calculation verification: expected {expected}, got {actual}"
+    #                     )
+    #                     result['answer'] = f"The correct total is {expected}"
+    #         except:
+    #             pass
+        
+    #     return result
+    def _validate_numerical_enhanced(self, question: str, answer: str, 
+                                    chunks: List[str], result: Dict) -> Dict:
+        """Enhanced numerical validation"""
+        # OLD: Basic number extraction
+        # NEW: Better number validation and calculation verification
+        
+        # Extract all numbers from answer
+        answer_numbers = re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?', answer)
         
         if not answer_numbers:
-            result['validation_passed'] = False
-            result['notes'] = 'No numerical value found in answer'
-            return result
+            # Try to find numbers in context
+            context_text = ' '.join(chunks[:3])
+            context_numbers = re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?', context_text)
+            
+            if context_numbers:
+                # Use first number found as answer
+                result['answer'] = f"The value is {context_numbers[0]}"
+                result['corrections'].append('Extracted number from context')
+            else:
+                result['validation_passed'] = False
+                result['notes'] = 'No numerical value found'
         
-        # Check if numbers appear in context
-        context_text = ' '.join(chunks[:5])
-        context_numbers = re.findall(r'[-+]?\d*\.?\d+', context_text)
-        
-        # Verify calculation if needed
+        # Verify calculations
         if 'calculate' in question.lower() or 'total' in question.lower():
-            # Try to verify the calculation
-            try:
-                # Extract operation
-                if 'sum' in question.lower() or 'total' in question.lower():
-                    numbers = [float(n) for n in context_numbers]
-                    expected = sum(numbers)
-                    actual = float(answer_numbers[0])
-                    
-                    if abs(expected - actual) > 0.01:
-                        result['corrections'].append(
-                            f"Calculation verification: expected {expected}, got {actual}"
-                        )
-                        result['answer'] = f"The correct total is {expected}"
-            except:
-                pass
+            result = self._verify_calculation(question, answer, chunks, result)
         
         return result
+    def _verify_calculation(self, question: str, answer: str, 
+                           chunks: List[str], result: Dict) -> Dict:
+        """Verify mathematical calculations"""
+        # NEW: Calculation verification
+        
+        context_text = ' '.join(chunks[:5])
+        numbers = re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?', context_text)
+        
+        # Convert to floats
+        try:
+            float_numbers = [float(n.replace(',', '')) for n in numbers]
+            
+            # Detect operation
+            if 'sum' in question.lower() or 'total' in question.lower():
+                expected = sum(float_numbers)
+                operation = 'sum'
+            elif 'average' in question.lower() or 'mean' in question.lower():
+                expected = sum(float_numbers) / len(float_numbers) if float_numbers else 0
+                operation = 'average'
+            elif 'multiply' in question.lower() or 'product' in question.lower():
+                expected = 1
+                for n in float_numbers:
+                    expected *= n
+                operation = 'product'
+            else:
+                return result
+            
+            # Extract answer number
+            answer_numbers = re.findall(r'[-+]?\d+(?:,\d{3})*(?:\.\d+)?', answer)
+            if answer_numbers:
+                actual = float(answer_numbers[0].replace(',', ''))
+                
+                # Check if close enough (within 1%)
+                if abs(expected - actual) / max(abs(expected), 1) > 0.01:
+                    result['answer'] = f"The {operation} is {expected:.2f}"
+                    result['corrections'].append(f'Corrected {operation}: {expected:.2f}')
+                    
+        except Exception as e:
+            logger.debug(f"Calculation verification failed: {e}")
+        
+        return result
+    
+    def _calculate_answer_confidence(self, answer: str, chunks: List[str], 
+                                    validation_result: Dict) -> float:
+        """Calculate confidence in the answer"""
+        # NEW: Better confidence calculation
+        
+        confidence = 0.5
+        
+        # Length check
+        if len(answer) > 20:
+            confidence += 0.1
+        if len(answer) > 100:
+            confidence += 0.1
+        
+        # Validation passed
+        if validation_result.get('validation_passed', False):
+            confidence += 0.2
+        
+        # No corrections needed
+        if not validation_result.get('corrections', []):
+            confidence += 0.1
+        
+        # Answer has supporting evidence
+        if validation_result.get('sources', []):
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
     
     def _validate_yes_no(self, answer: str, result: Dict) -> Dict:
         """Validate yes/no answers"""
@@ -224,7 +362,7 @@ class AnswerValidator:
     
     def _fuzzy_match_in_context(self, fact: str, context: str) -> bool:
         """Check if fact appears in context with fuzzy matching"""
-        from rapidfuzz import fuzz
+        
         
         # Split context into sentences
         sentences = re.split(r'[.!?]', context)

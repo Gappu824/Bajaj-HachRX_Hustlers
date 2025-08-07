@@ -77,33 +77,70 @@ class EnhancedRetriever:
         
         self.bm25 = BM25Okapi(tokenized_chunks)
     
+    # def _init_tfidf(self):
+    #     """Initialize TF-IDF for term frequency analysis"""
+    #     if len(self.chunks) < 2:
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    #         return
+        
+    #     try:
+    #         # self.tfidf_vectorizer = TfidfVectorizer(
+    #         #     max_features=min(5000, len(self.chunks) * 10),
+    #         #     ngram_range=(1, 2),
+    #         #     stop_words='english',
+    #         #     min_df=1,
+    #         #     max_df=0.95
+    #         # )
+    #         # Adjust parameters based on collection size
+    #         if len(self.chunks) < 10:
+    #             # Very small collections - be more permissive
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(100, len(self.chunks) * 20),
+    #                 ngram_range=(1, 1),  # Only unigrams for small collections
+    #                 stop_words=None,     # Don't remove stop words for small collections
+    #                 min_df=1,
+    #                 max_df=1.0           # Allow all terms
+    #             )
+    #         else:
+    #             # Larger collections - use original settings
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(5000, len(self.chunks) * 10),
+    #                 ngram_range=(1, 2),
+    #                 stop_words='english',
+    #                 min_df=1,
+    #                 max_df=0.95
+    #             )
+    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+    #     except Exception as e:
+    #         logger.warning(f"TF-IDF initialization failed: {e}")
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
     def _init_tfidf(self):
-        """Initialize TF-IDF for term frequency analysis"""
+        """Initialize TF-IDF with error handling"""
+        # OLD: Fails on small collections
+        # NEW: Adaptive initialization
+        
         if len(self.chunks) < 2:
             self.tfidf_vectorizer = None
             self.tfidf_matrix = None
+            logger.warning("Not enough chunks for TF-IDF (need at least 2)")
             return
         
         try:
-            # self.tfidf_vectorizer = TfidfVectorizer(
-            #     max_features=min(5000, len(self.chunks) * 10),
-            #     ngram_range=(1, 2),
-            #     stop_words='english',
-            #     min_df=1,
-            #     max_df=0.95
-            # )
             # Adjust parameters based on collection size
             if len(self.chunks) < 10:
-                # Very small collections - be more permissive
+                # Very small collections
                 self.tfidf_vectorizer = TfidfVectorizer(
                     max_features=min(100, len(self.chunks) * 20),
-                    ngram_range=(1, 1),  # Only unigrams for small collections
-                    stop_words=None,     # Don't remove stop words for small collections
+                    ngram_range=(1, 1),  # Only unigrams
+                    stop_words=None,     # Keep all words
                     min_df=1,
-                    max_df=1.0           # Allow all terms
+                    max_df=1.0,
+                    token_pattern=r'(?u)\b\w+\b'  # Single character tokens allowed
                 )
             else:
-                # Larger collections - use original settings
+                # Normal collections
                 self.tfidf_vectorizer = TfidfVectorizer(
                     max_features=min(5000, len(self.chunks) * 10),
                     ngram_range=(1, 2),
@@ -111,7 +148,10 @@ class EnhancedRetriever:
                     min_df=1,
                     max_df=0.95
                 )
+            
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+            logger.info(f"TF-IDF initialized with {self.tfidf_matrix.shape[0]} documents, {self.tfidf_matrix.shape[1]} features")
+            
         except Exception as e:
             logger.warning(f"TF-IDF initialization failed: {e}")
             self.tfidf_vectorizer = None

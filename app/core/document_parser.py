@@ -34,36 +34,151 @@ class DocumentParser:
         file_extension = file_extension.lower()
         if not file_extension.startswith('.'):
             file_extension = '.' + file_extension
+
+        try:    
         
         # Route to appropriate parser
-        if file_extension == '.pdf':
-            return DocumentParser.parse_pdf(content)
-        elif file_extension in ['.xlsx', '.xls', '.csv']:
-            return DocumentParser.parse_spreadsheet(content, file_extension)
-        elif file_extension in ['.docx', '.doc']:
-            return DocumentParser.parse_word(content)
-        elif file_extension in ['.pptx', '.ppt']:
-            return DocumentParser.parse_powerpoint(content)
-        elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
-            return DocumentParser.parse_image(content)
-        # elif file_extension == '.zip':
-        #     return DocumentParser.parse_zip(content)
-        elif file_extension == '.odt':
-            return DocumentParser.parse_odt(content)
+            if file_extension == '.pdf':
+                return DocumentParser.parse_pdf(content)
+            elif file_extension in ['.xlsx', '.xls', '.csv']:
+                return DocumentParser.parse_spreadsheet(content, file_extension)
+            elif file_extension in ['.docx', '.doc']:
+                return DocumentParser.parse_word(content)
+            elif file_extension in ['.pptx', '.ppt']:
+                return DocumentParser.parse_powerpoint(content)
+            elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+                return DocumentParser.parse_image(content)
+            # elif file_extension == '.zip':
+            #     return DocumentParser.parse_zip(content)
+            elif file_extension == '.odt':
+                return DocumentParser.parse_odt(content)
+            else:
+                # Try text extraction
+                return DocumentParser.parse_text(content)
+        except Exception as e:
+            logger.warning(f"Primary parser failed for {file_extension}: {e}")
+            
+            # Try Tika as fallback
+            try:
+                return DocumentParser._parse_with_tika_fallback(content)
+            except:
+                pass
+            
+            # Last resort: extract any text
+            return DocumentParser._extract_any_text(content)
+        
+    @staticmethod
+    def _parse_with_tika_fallback(content: bytes) -> Tuple[str, List[Dict]]:
+        """Fallback to Tika parser"""
+        # NEW: Tika fallback
+        
+        try:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            
+            # Try Tika
+            from tika import parser
+            parsed = parser.from_file(tmp_path)
+            text = parsed.get('content', '').strip()
+            
+            os.unlink(tmp_path)
+            
+            if text:
+                return text, [{'type': 'tika_fallback'}]
+        except:
+            pass
+        
+        return "", [{'type': 'error'}]    
+    @staticmethod
+    def _extract_any_text(content: bytes) -> Tuple[str, List[Dict]]:
+        """Extract whatever text possible"""
+        # NEW: Last resort text extraction
+        
+        text_parts = []
+        
+        # Try different encodings
+        for encoding in ['utf-8', 'latin-1', 'cp1252', 'ascii']:
+            try:
+                text = content.decode(encoding, errors='ignore')
+                if len(text) > len(''.join(text_parts)):
+                    text_parts = [text]
+            except:
+                continue
+        
+        # Extract ASCII strings from binary
+        if not text_parts:
+            ascii_strings = []
+            current = []
+            for byte in content:
+                if 32 <= byte <= 126:
+                    current.append(chr(byte))
+                else:
+                    if len(current) >= 4:
+                        ascii_strings.append(''.join(current))
+                    current = []
+            
+            if ascii_strings:
+                text_parts = ascii_strings[:1000]  # Limit output
+        
+        if text_parts:
+            return '\n'.join(text_parts), [{'type': 'extracted_text'}]
         else:
-            # Try text extraction
-            return DocumentParser.parse_text(content)
+            return "Unable to extract any text from document", [{'type': 'error'}]
+
     
+    # @staticmethod
+    # def parse_pdf(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Enhanced PDF parsing with table extraction"""
+    #     full_text = []
+    #     metadata = []
+        
+    #     try:
+    #         with pdfplumber.open(io.BytesIO(content)) as pdf:
+    #             for i, page in enumerate(pdf.pages):
+    #                 # Extract text
+    #                 page_text = page.extract_text() or ""
+    #                 if page_text.strip():
+    #                     full_text.append(f"\n=== PAGE {i+1} ===\n{page_text}")
+    #                     metadata.append({'page': i+1, 'type': 'text'})
+                    
+    #                 # Extract tables
+    #                 tables = page.extract_tables()
+    #                 for j, table in enumerate(tables):
+    #                     if table and len(table) > 1:  # Valid table
+    #                         table_text = DocumentParser._format_table(table)
+    #                         full_text.append(f"\n=== TABLE {j+1} (Page {i+1}) ===\n{table_text}")
+    #                         metadata.append({'page': i+1, 'type': 'table', 'table_id': j+1})
+        
+    #     except Exception as e:
+    #         logger.warning(f"pdfplumber failed: {e}, trying pypdf")
+    #         # Fallback to pypdf
+    #         try:
+    #             reader = pypdf.PdfReader(io.BytesIO(content))
+    #             for i, page in enumerate(reader.pages):
+    #                 page_text = page.extract_text()
+    #                 if page_text:
+    #                     full_text.append(f"\n=== PAGE {i+1} ===\n{page_text}")
+    #                     metadata.append({'page': i+1, 'type': 'text_fallback'})
+    #         except Exception as e2:
+    #             logger.error(f"PDF parsing failed: {e2}")
+    #             return "Unable to parse PDF document", [{'type': 'error'}]
+        
+    #     return "\n".join(full_text), metadata
     @staticmethod
     def parse_pdf(content: bytes) -> Tuple[str, List[Dict]]:
-        """Enhanced PDF parsing with table extraction"""
+        """Enhanced PDF parsing with page-by-page processing"""
+        # OLD: Load entire PDF at once
+        # NEW: Process page by page with memory limits
+        
         full_text = []
         metadata = []
+        MAX_PAGES = 100  # Process max 100 pages initially
         
         try:
             with pdfplumber.open(io.BytesIO(content)) as pdf:
-                for i, page in enumerate(pdf.pages):
-                    # Extract text
+                for i, page in enumerate(pdf.pages[:MAX_PAGES]):  # Limit pages
+                    # Process each page individually
                     page_text = page.extract_text() or ""
                     if page_text.strip():
                         full_text.append(f"\n=== PAGE {i+1} ===\n{page_text}")
@@ -72,11 +187,14 @@ class DocumentParser:
                     # Extract tables
                     tables = page.extract_tables()
                     for j, table in enumerate(tables):
-                        if table and len(table) > 1:  # Valid table
+                        if table and len(table) > 1:
                             table_text = DocumentParser._format_table(table)
                             full_text.append(f"\n=== TABLE {j+1} (Page {i+1}) ===\n{table_text}")
                             metadata.append({'page': i+1, 'type': 'table', 'table_id': j+1})
-        
+                    
+                    # Clear page from memory
+                    page.close()
+                    
         except Exception as e:
             logger.warning(f"pdfplumber failed: {e}, trying pypdf")
             # Fallback to pypdf
@@ -99,7 +217,12 @@ class DocumentParser:
         try:
             # Read the spreadsheet
             if file_extension == '.csv':
-                df = pd.read_csv(io.BytesIO(content))
+                # df = pd.read_csv(io.BytesIO(content))
+                chunks = []
+                for chunk_df in pd.read_csv(io.BytesIO(content), chunksize=1000):
+                    chunks.append(chunk_df)
+                df = pd.concat(chunks, ignore_index=True)
+            
             else:
                 df = pd.read_excel(io.BytesIO(content), engine='openpyxl' if file_extension == '.xlsx' else None)
             
@@ -162,6 +285,9 @@ class DocumentParser:
         except Exception as e:
             logger.error(f"Spreadsheet parsing failed: {e}")
             return f"Error parsing spreadsheet: {str(e)}", [{'type': 'error'}]
+    
+    
+
     
     # @staticmethod
     # def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
@@ -266,25 +392,52 @@ class DocumentParser:
                 text_parts.extend(table_data)
                 text_parts.append("=== END TABLE ===\n")
                 metadata.append({'type': 'table', 'table_id': i+1})
-
             if text_parts:
                 return "\n".join(text_parts), metadata
             else:
-                raise ValueError("No text extracted with python-docx, trying fallback.")
+                # Return error if python-docx fails
+                return "Unable to parse Word document", [{'type': 'error'}]
                 
         except Exception as e:
-            logger.warning(f"python-docx failed: {e}. Trying pypdf fallback.")
-            try:
-                reader = pypdf.PdfReader(io.BytesIO(content))
-                text_parts = [page.extract_text() for page in reader.pages if page.extract_text()]
-                if text_parts:
-                    return "\n\n".join(text_parts), [{'type': 'text_fallback'}] * len(text_parts)
-                else:
-                    return "Unable to parse Word document with any method.", [{'type': 'error'}]
-            except Exception as e2:
-                logger.error(f"Word parsing failed with all methods: {e2}")
-                return "Error parsing Word document.", [{'type': 'error'}]
-    
+            logger.error(f"Word parsing failed: {e}")
+            return "Error parsing Word document", [{'type': 'error'}]    
+
+        #     if text_parts:
+        #         return "\n".join(text_parts), metadata
+        #     else:
+        #         raise ValueError("No text extracted with python-docx, trying fallback.")
+                
+        # except Exception as e:
+        #     logger.warning(f"python-docx failed: {e}. Trying pypdf fallback.")
+        #     try:
+        #         reader = pypdf.PdfReader(io.BytesIO(content))
+        #         text_parts = [page.extract_text() for page in reader.pages if page.extract_text()]
+        #         if text_parts:
+        #             return "\n\n".join(text_parts), [{'type': 'text_fallback'}] * len(text_parts)
+        #         else:
+        #             return "Unable to parse Word document with any method.", [{'type': 'error'}]
+        #     except Exception as e2:
+        #         logger.error(f"Word parsing failed with all methods: {e2}")
+        #         return "Error parsing Word document.", [{'type': 'error'}]
+    # @staticmethod
+    # def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Enhanced Word document parsing"""
+    #     try:
+    #         doc = Document(io.BytesIO(content))
+    #         text_parts = []
+    #         metadata = []
+            
+    #         # Process content...
+            
+    #         if text_parts:
+    #             return "\n".join(text_parts), metadata
+    #         else:
+    #             # Return error if python-docx fails
+    #             return "Unable to parse Word document", [{'type': 'error'}]
+                
+    #     except Exception as e:
+    #         logger.error(f"Word parsing failed: {e}")
+    #         return "Error parsing Word document", [{'type': 'error'}]
     @staticmethod
     def parse_powerpoint(content: bytes) -> Tuple[str, List[Dict]]:
         """Enhanced PowerPoint parsing"""
@@ -531,62 +684,186 @@ class DocumentParser:
     #     finally:
     #         # Always clean up the temporary directory
     #         shutil.rmtree(temp_dir)
+    # @staticmethod
+    # async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
+    #     """
+    #     Extracts a zip and processes its contents iteratively to save memory
+    #     and handle arbitrarily deep nested archives.
+    #     """
+    #     processing_queue = [zip_path]
+        
+    #     while processing_queue:
+    #         current_zip_path = processing_queue.pop(0)
+    #         temp_dir = tempfile.mkdtemp()
+
+    #         try:
+    #             with zipfile.ZipFile(current_zip_path, 'r') as zf:
+    #                 zf.extractall(temp_dir)
+                
+    #             for root, _, files in os.walk(temp_dir):
+    #                 for filename in files:
+    #                     if filename.startswith('.') or filename.startswith('__MACOSX'):
+    #                         continue
+                        
+    #                     file_path = os.path.join(root, filename)
+    #                     file_ext = os.path.splitext(filename)[1].lower()
+
+    #                     if file_ext == '.zip':
+    #                         # Add nested zips to the queue for later processing
+    #                         processing_queue.append(file_path)
+    #                         continue
+
+    #                     logger.info(f"Incrementally processing: {filename}")
+    #                     try:
+    #                         with open(file_path, 'rb') as f:
+    #                             content = f.read()
+
+    #                         # 1. Parse the file content
+    #                         text, metadata = DocumentParser.parse_document(content, file_ext)
+    #                         if not text.strip():
+    #                             continue
+                            
+    #                         # 2. Chunk the text
+    #                         chunks, chunk_meta = SmartChunker.chunk_document(
+    #                             text, metadata,
+    #                             chunk_size=settings.CHUNK_SIZE_CHARS,
+    #                             overlap=settings.CHUNK_OVERLAP_CHARS
+    #                         )
+                            
+    #                         # 3. Embed and add to the vector store
+    #                         if chunks:
+    #                             embeddings = await pipeline._generate_embeddings(chunks)
+    #                             vector_store.add(chunks, embeddings, chunk_meta)
+
+    #                     except Exception as e:
+    #                         logger.error(f"Failed to process '{filename}' in zip: {e}")
+    #         finally:
+    #             # Clean up the temporary directory for the current zip
+    #             shutil.rmtree(temp_dir)
+
+    # @staticmethod
+    # async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
+    #     """Fixed incremental ZIP processing"""
+    #     # OLD: Broken parse_zip_incrementally
+    #     # NEW: Working implementation
+        
+    #     temp_dir = tempfile.mkdtemp()
+        
+    #     try:
+    #         # Extract ZIP
+    #         with zipfile.ZipFile(zip_path, 'r') as zf:
+    #             # Only process reasonable number of files
+    #             file_list = [f for f in zf.filelist 
+    #                         if not f.is_dir() 
+    #                         and not f.filename.startswith('__MACOSX')
+    #                         and f.file_size < 10 * 1024 * 1024][:50]  # Max 50 files, < 10MB each
+                
+    #             for file_info in file_list:
+    #                 try:
+    #                     # Extract single file
+    #                     file_path = zf.extract(file_info, temp_dir)
+                        
+    #                     # Read and parse
+    #                     with open(file_path, 'rb') as f:
+    #                         content = f.read()
+                        
+    #                     file_ext = os.path.splitext(file_info.filename)[1]
+    #                     text, metadata = DocumentParser.parse_document(content, file_ext)
+                        
+    #                     if not text.strip():
+    #                         continue
+                        
+    #                     # Chunk and add to vector store
+    #                     chunks, chunk_meta = SmartChunker.chunk_document(
+    #                         text, metadata,
+    #                         chunk_size=settings.CHUNK_SIZE_CHARS,
+    #                         overlap=settings.CHUNK_OVERLAP_CHARS
+    #                     )
+                        
+    #                     if chunks:
+    #                         # Generate embeddings and add
+    #                         embeddings = await pipeline._generate_embeddings(chunks)
+    #                         vector_store.add(chunks, embeddings, chunk_meta)
+                        
+    #                     # Clean up extracted file
+    #                     os.unlink(file_path)
+                        
+    #                 except Exception as e:
+    #                     logger.error(f"Failed to process {file_info.filename}: {e}")
+                        
+    #     finally:
+    #         # Clean up
+    #         shutil.rmtree(temp_dir)
     @staticmethod
     async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
-        """
-        Extracts a zip and processes its contents iteratively to save memory
-        and handle arbitrarily deep nested archives.
-        """
-        processing_queue = [zip_path]
+        """Fixed async ZIP processing"""
+        # OLD: Async context issues
+        # NEW: Proper async handling
         
-        while processing_queue:
-            current_zip_path = processing_queue.pop(0)
-            temp_dir = tempfile.mkdtemp()
-
-            try:
-                with zipfile.ZipFile(current_zip_path, 'r') as zf:
-                    zf.extractall(temp_dir)
+        temp_dir = tempfile.mkdtemp()
+        pipeline.temp_dirs.append(temp_dir)  # Track for cleanup
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                file_list = [f for f in zf.filelist 
+                            if not f.is_dir() 
+                            and not f.filename.startswith('__MACOSX')
+                            and not f.filename.startswith('.')
+                            and f.file_size < 10 * 1024 * 1024][:50]
                 
-                for root, _, files in os.walk(temp_dir):
-                    for filename in files:
-                        if filename.startswith('.') or filename.startswith('__MACOSX'):
+                for file_info in file_list:
+                    try:
+                        file_path = zf.extract(file_info, temp_dir)
+                        
+                        # Read file
+                        async with aiofiles.open(file_path, 'rb') as f:
+                            content = await f.read()
+                        
+                        # Parse document
+                        file_ext = os.path.splitext(file_info.filename)[1]
+                        text, metadata = DocumentParser.parse_document(content, file_ext)
+                        
+                        if not text.strip():
                             continue
                         
-                        file_path = os.path.join(root, filename)
-                        file_ext = os.path.splitext(filename)[1].lower()
-
-                        if file_ext == '.zip':
-                            # Add nested zips to the queue for later processing
-                            processing_queue.append(file_path)
-                            continue
-
-                        logger.info(f"Incrementally processing: {filename}")
-                        try:
-                            with open(file_path, 'rb') as f:
-                                content = f.read()
-
-                            # 1. Parse the file content
-                            text, metadata = DocumentParser.parse_document(content, file_ext)
-                            if not text.strip():
-                                continue
+                        # Chunk text
+                        chunks, chunk_meta = SmartChunker.chunk_document(
+                            text, metadata,
+                            chunk_size=settings.CHUNK_SIZE_CHARS,
+                            overlap=settings.CHUNK_OVERLAP_CHARS
+                        )
+                        
+                        if chunks:
+                            # Generate embeddings properly in async context
+                            embeddings = await pipeline._generate_embeddings(chunks)
                             
-                            # 2. Chunk the text
-                            chunks, chunk_meta = SmartChunker.chunk_document(
-                                text, metadata,
-                                chunk_size=settings.CHUNK_SIZE_CHARS,
-                                overlap=settings.CHUNK_OVERLAP_CHARS
-                            )
-                            
-                            # 3. Embed and add to the vector store
-                            if chunks:
-                                embeddings = await pipeline._generate_embeddings(chunks)
+                            # Add to vector store
+                            if hasattr(vector_store, 'add'):
                                 vector_store.add(chunks, embeddings, chunk_meta)
-
-                        except Exception as e:
-                            logger.error(f"Failed to process '{filename}' in zip: {e}")
-            finally:
-                # Clean up the temporary directory for the current zip
+                            else:
+                                # For AdvancedVectorStore
+                                vector_store.add_hierarchical(
+                                    chunks, embeddings, 
+                                    chunks, embeddings,  # Use same for both small and large
+                                    chunk_meta, {}
+                                )
+                        
+                        # Clean up file
+                        os.unlink(file_path)
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to process {file_info.filename}: {e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"ZIP processing failed: {e}")
+        finally:
+            # Clean up temp directory
+            try:
                 shutil.rmtree(temp_dir)
+                pipeline.temp_dirs.remove(temp_dir)
+            except:
+                pass
     @staticmethod
     def parse_odt(content: bytes) -> Tuple[str, List[Dict]]:
         """Parse ODT files"""

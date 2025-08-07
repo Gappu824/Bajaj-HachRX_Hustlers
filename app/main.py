@@ -19,27 +19,65 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     # Startup
+    # logger.info("Starting Enhanced RAG Pipeline v2...")
+    
+    # try:
+    #     # Load models
+    #     logger.info("Loading embedding model...")
+    #     embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        
+    #     logger.info("Loading re-ranker model...")
+    #     reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
+        
+    #     logger.info("Models loaded successfully")
+        
+    #     # Initialize pipeline
+    #     app.state.rag_pipeline = EnhancedRAGPipeline(embedding_model, reranker_model)
+    #     logger.info("Enhanced RAG Pipeline initialized successfully")
+        
+    #     # Download NLTK data
+    #     import nltk
+    #     nltk.download('punkt', quiet=True)
+    #     nltk.download('stopwords', quiet=True)
+    #     nltk.download('wordnet', quiet=True)
+        
+    # except Exception as e:
+    #     logger.error(f"Failed to initialize: {e}")
+    #     raise
+    
+    # yield
+    
+    # # Shutdown
+    # logger.info("Shutting down...")
+    # cache.clear()
+    # logger.info(f"Final cache stats: {cache.get_stats()}")
+    # logger.info("Shutdown complete")
+    # Startup
     logger.info("Starting Enhanced RAG Pipeline v2...")
     
     try:
-        # Load models
+        # Load models with error handling
         logger.info("Loading embedding model...")
-        embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        try:
+            embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            # Fallback to a smaller model
+            logger.info("Trying fallback embedding model...")
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         
         logger.info("Loading re-ranker model...")
-        reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
-        
-        logger.info("Models loaded successfully")
+        try:
+            reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
+        except Exception as e:
+            logger.error(f"Failed to load reranker model: {e}")
+            # Continue without reranker
+            reranker_model = None
+            logger.warning("Running without reranker model")
         
         # Initialize pipeline
         app.state.rag_pipeline = EnhancedRAGPipeline(embedding_model, reranker_model)
         logger.info("Enhanced RAG Pipeline initialized successfully")
-        
-        # Download NLTK data
-        import nltk
-        nltk.download('punkt', quiet=True)
-        nltk.download('stopwords', quiet=True)
-        nltk.download('wordnet', quiet=True)
         
     except Exception as e:
         logger.error(f"Failed to initialize: {e}")
@@ -47,10 +85,30 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
+    # Shutdown with cleanup
     logger.info("Shutting down...")
+    
+    # Clean up pipeline resources
+    if hasattr(app.state, 'rag_pipeline'):
+        await app.state.rag_pipeline.cleanup()
+    
+    # Final cache cleanup
     cache.clear()
     logger.info(f"Final cache stats: {cache.get_stats()}")
+    
+    # Clean any remaining temp files
+    temp_dir = tempfile.gettempdir()
+    for filename in os.listdir(temp_dir):
+        if filename.startswith('vecstore_') or filename.startswith('tmp'):
+            try:
+                filepath = os.path.join(temp_dir, filename)
+                if os.path.isdir(filepath):
+                    shutil.rmtree(filepath)
+                else:
+                    os.unlink(filepath)
+            except:
+                pass
+    
     logger.info("Shutdown complete")
 
 # Create FastAPI app

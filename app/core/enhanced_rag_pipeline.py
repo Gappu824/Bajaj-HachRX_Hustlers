@@ -33,7 +33,7 @@ from app.core.question_analyzer import QuestionAnalyzer
 from app.core.answer_validator import AnswerValidator
 # Add these imports at the top of enhanced_rag_pipeline.py
 import aiofiles  # Missing import
-from typing import List, Tuple, Dict, Optional, Any
+# from typing import List, Tuple, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,9 @@ class AdvancedVectorStore:
         self.model = model
         self.reranker = reranker
         self.dimension = dimension
+
+        self.max_chunks_in_memory = 500  # Keep only top 500 chunks in memory
+        self.disk_cache_dir = tempfile.mkdtemp(prefix="vecstore_")
         
         # Hierarchical storage
         self.small_chunks: List[str] = []
@@ -64,25 +67,56 @@ class AdvancedVectorStore:
                          large_chunks: List[str], large_embeddings: np.ndarray,
                          metadata: List[Dict], chunk_mapping: Dict[int, int]):
         """Add hierarchical chunks to the store"""
-        
+        if len(self.small_chunks) + len(small_chunks) > self.max_chunks_in_memory:
+            self._evict_to_disk()
         # Store chunks
+        # base_idx = len(self.small_chunks)
+        # self.small_chunks.extend(small_chunks)
+        # self.large_chunks.extend(large_chunks)
+        # self.chunk_metadata.extend(metadata)
         base_idx = len(self.small_chunks)
-        self.small_chunks.extend(small_chunks)
-        self.large_chunks.extend(large_chunks)
-        self.chunk_metadata.extend(metadata)
+        self.small_chunks.extend(small_chunks[:self.max_chunks_in_memory - len(self.small_chunks)])
+        self.large_chunks.extend(large_chunks[:self.max_chunks_in_memory // 2 - len(self.large_chunks)])
+        self.chunk_metadata.extend(metadata[:len(self.small_chunks) - base_idx])
         
         # Update mapping
+        # for small_idx, large_idx in chunk_mapping.items():
+        #     self.chunk_to_large_mapping[base_idx + small_idx] = large_idx
         for small_idx, large_idx in chunk_mapping.items():
-            self.chunk_to_large_mapping[base_idx + small_idx] = large_idx
+            if base_idx + small_idx < self.max_chunks_in_memory:
+                self.chunk_to_large_mapping[base_idx + small_idx] = large_idx
         
         # Add to indices
-        self.small_index.add(small_embeddings)
-        self.large_index.add(large_embeddings)
+        # self.small_index.add(small_embeddings)
+        # self.large_index.add(large_embeddings)
+        self.small_index.add(small_embeddings[:len(self.small_chunks) - base_idx])
+        self.large_index.add(large_embeddings[:len(self.large_chunks)])
         
         # Reinitialize retriever
         self.enhanced_retriever = EnhancedRetriever(self.small_chunks, self.chunk_metadata)
         
-        logger.info(f"Added {len(small_chunks)} small and {len(large_chunks)} large chunks")
+        # logger.info(f"Added {len(small_chunks)} small and {len(large_chunks)} large chunks")
+        logger.info(f"Added chunks (memory: {len(self.small_chunks)}, total: {base_idx + len(small_chunks)})")
+    def _evict_to_disk(self):
+        """Evict oldest chunks to disk"""
+        # OLD: No eviction
+        # NEW: Save to disk and clear from memory
+        
+        evict_count = len(self.small_chunks) // 2
+        
+        # Save to disk
+        disk_file = os.path.join(self.disk_cache_dir, f"chunks_{time.time()}.pkl")
+        with open(disk_file, 'wb') as f:
+            pickle.dump({
+                'chunks': self.small_chunks[:evict_count],
+                'metadata': self.chunk_metadata[:evict_count]
+            }, f)
+        
+        # Remove from memory
+        self.small_chunks = self.small_chunks[evict_count:]
+        self.chunk_metadata = self.chunk_metadata[evict_count:]
+        
+        logger.info(f"Evicted {evict_count} chunks to disk")    
     
     def search_with_reranking(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
         """Advanced search with re-ranking"""
@@ -174,25 +208,113 @@ class EnhancedRAGPipeline:
     """Complete RAG pipeline with all improvements"""
     
     def __init__(self, embedding_model: SentenceTransformer, reranker_model: CrossEncoder):
+        # self.embedding_model = embedding_model
+        # self.reranker_model = reranker_model
+        # self.settings = settings
         self.embedding_model = embedding_model
         self.reranker_model = reranker_model
         self.settings = settings
-        
+        self.active_stores = []  # Track active vector stores
+        self.temp_dirs = []  # Track temp directories
         # Initialize components
         self.universal_parser = UniversalDocumentParser()
         self.question_analyzer = QuestionAnalyzer()
         self.answer_validator = AnswerValidator()
+
+        self._configure_gemini()
+    def _configure_gemini(self):
+        """Configure Gemini with retry logic"""
+        # NEW: Robust Gemini configuration
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                genai.configure(api_key=settings.GOOGLE_API_KEY)
+                # Test the configuration
+                model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+                logger.info("Gemini AI configured successfully")
+                return
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Failed to configure Gemini after {max_retries} attempts: {e}")
+                    raise
+                logger.warning(f"Gemini configuration attempt {attempt + 1} failed, retrying...")
+                time.sleep(2 ** attempt)  # Exponential backoff   
+    async def cleanup(self):
+        """Clean up resources"""
+        # NEW: Proper resource cleanup
+        logger.info("Cleaning up pipeline resources...")
+        
+        # Clear vector stores
+        for store in self.active_stores:
+            try:
+                store.clear()
+            except:
+                pass
+        self.active_stores.clear()
+        
+        # Clean temp directories
+        for temp_dir in self.temp_dirs:
+            try:
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except:
+                pass
+        self.temp_dirs.clear()
+        
+        # Clear cache
+        cache.clear()
+        
+        logger.info("Pipeline cleanup complete")             
         
         # Configure Gemini
-        try:
-            genai.configure(api_key=settings.GOOGLE_API_KEY)
-            logger.info("Gemini AI configured successfully")
-        except Exception as e:
-            logger.error(f"Failed to configure Gemini: {e}")
-            raise
+        # try:
+        #     genai.configure(api_key=settings.GOOGLE_API_KEY)
+        #     logger.info("Gemini AI configured successfully")
+        # except Exception as e:
+        #     logger.error(f"Failed to configure Gemini: {e}")
+        #     raise
     
+    # async def download_document(self, url: str) -> bytes:
+    #     """Enhanced download with better error handling"""
+    #     headers = {
+    #         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    #         'Accept': '*/*',
+    #         'Accept-Encoding': 'gzip, deflate',
+    #         'Connection': 'keep-alive'
+    #     }
+        
+    #     try:
+    #         # Async download with retries
+    #         timeout = aiohttp.ClientTimeout(total=60)
+    #         async with aiohttp.ClientSession(timeout=timeout) as session:
+    #             async with session.get(url, headers=headers) as response:
+    #                 response.raise_for_status()
+                    
+    #                 # Stream large files
+    #                 chunks = []
+    #                 total_size = 0
+    #                 max_size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+                    
+    #                 async for chunk in response.content.iter_chunked(1024 * 1024):
+    #                     chunks.append(chunk)
+    #                     total_size += len(chunk)
+                        
+    #                     if total_size > max_size:
+    #                         logger.warning(f"Document exceeds {settings.MAX_DOCUMENT_SIZE_MB}MB limit")
+    #                         break
+                    
+    #                 content = b''.join(chunks)
+    #                 logger.info(f"Downloaded {total_size / 1024 / 1024:.1f}MB from {url}")
+    #                 return content
+                    
+    #     except Exception as e:
+    #         logger.error(f"Download failed: {e}")
+    #         raise
     async def download_document(self, url: str) -> bytes:
-        """Enhanced download with better error handling"""
+        """Enhanced download with streaming for large files"""
+        # OLD: Load entire file in memory
+        # NEW: Stream download with chunked processing
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': '*/*',
@@ -201,8 +323,7 @@ class EnhancedRAGPipeline:
         }
         
         try:
-            # Async download with retries
-            timeout = aiohttp.ClientTimeout(total=60)
+            timeout = aiohttp.ClientTimeout(total=120)  # Increased timeout
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, headers=headers) as response:
                     response.raise_for_status()
@@ -212,6 +333,7 @@ class EnhancedRAGPipeline:
                     total_size = 0
                     max_size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
                     
+                    # Process in 1MB chunks
                     async for chunk in response.content.iter_chunked(1024 * 1024):
                         chunks.append(chunk)
                         total_size += len(chunk)
@@ -227,6 +349,7 @@ class EnhancedRAGPipeline:
         except Exception as e:
             logger.error(f"Download failed: {e}")
             raise
+
     
     async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
         """Get or create advanced vector store with hierarchical chunking"""
@@ -241,57 +364,158 @@ class EnhancedRAGPipeline:
             return cached_store
         
         logger.info(f"Creating new advanced vector store for {url}")
+        content = await self.download_document(url)
+    
+    # Check document size
+        is_large_doc = len(content) > 5 * 1024 * 1024  # > 5MB
+        
+        if is_large_doc:
+            logger.info("Using two-pass strategy for large document")
+            vector_store = await self._two_pass_processing(content, url)
+        else:
+            # Standard processing for smaller documents
+            text, metadata = self.universal_parser.parse_any_document(content, url)
+            vector_store = await self._standard_processing(text, metadata)
+        
+        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+        return vector_store
+    
+    async def _two_pass_processing(self, content: bytes, url: str) -> AdvancedVectorStore:
+        """Two-pass processing for large documents"""
+        # NEW: Implement two-pass strategy
+        
+        # First pass: Quick scan for structure
+        logger.info("First pass: Extracting document structure")
+        
+        # Extract headers, TOC, summary
+        structure_info = self._extract_structure(content, url)
+        
+        # Identify important sections based on structure
+        important_sections = self._identify_important_sections(structure_info)
+        
+        logger.info(f"Identified {len(important_sections)} important sections")
+        
+        # Second pass: Detailed extraction of important parts
+        logger.info("Second pass: Detailed extraction")
+        
+        text_parts = []
+        metadata_parts = []
+        
+        for section in important_sections:
+            section_text, section_meta = self._extract_section(content, section, url)
+            text_parts.append(section_text)
+            metadata_parts.extend(section_meta)
+        
+        full_text = "\n\n".join(text_parts)
+        
+        # Create vector store with extracted content
+        return await self._create_hierarchical_store(full_text, metadata_parts)
+
+    def _extract_structure(self, content: bytes, url: str) -> Dict:
+        """Extract document structure quickly"""
+        # NEW: Fast structure extraction
+        
+        file_ext = self._get_extension(url)
+        structure = {
+            'headers': [],
+            'sections': [],
+            'tables': [],
+            'total_pages': 0
+        }
+        
+        if file_ext == '.pdf':
+            try:
+                with pdfplumber.open(io.BytesIO(content)) as pdf:
+                    structure['total_pages'] = len(pdf.pages)
+                    
+                    # Sample first 10 pages for structure
+                    for i, page in enumerate(pdf.pages[:10]):
+                        text = page.extract_text() or ""
+                        
+                        # Extract headers (lines with specific patterns)
+                        headers = re.findall(r'^[A-Z][A-Z\s]{2,}$', text, re.MULTILINE)
+                        structure['headers'].extend([(h, i+1) for h in headers])
+                        
+                        # Check for tables
+                        tables = page.extract_tables()
+                        if tables:
+                            structure['tables'].append((i+1, len(tables)))
+            except:
+                pass
+        
+        return structure
+
+    def _identify_important_sections(self, structure: Dict) -> List[Dict]:
+        """Identify important sections to process"""
+        # NEW: Smart section identification
+        
+        important = []
+        
+        # Always include first few pages (usually summary/intro)
+        important.append({'type': 'intro', 'pages': range(1, min(6, structure['total_pages'] + 1))})
+        
+        # Include pages with tables
+        for page, count in structure['tables']:
+            important.append({'type': 'table', 'pages': [page]})
+        
+        # Include sections with important headers
+        important_keywords = ['summary', 'conclusion', 'total', 'result', 'key', 'important']
+        for header, page in structure['headers']:
+            if any(kw in header.lower() for kw in important_keywords):
+                important.append({'type': 'header', 'pages': [page], 'header': header})
+        
+        return important
         
         # Download and parse document
-        content = await self.download_document(url)
-        text, metadata = self.universal_parser.parse_any_document(content, url)
+        # content = await self.download_document(url)
+        # text, metadata = self.universal_parser.parse_any_document(content, url)
         
-        if not text or len(text) < 10:
-            logger.error(f"Document parsing failed or empty: {url}")
-            text = "Document could not be parsed or is empty."
-            metadata = [{'type': 'error'}]
+        # if not text or len(text) < 10:
+        #     logger.error(f"Document parsing failed or empty: {url}")
+        #     text = "Document could not be parsed or is empty."
+        #     metadata = [{'type': 'error'}]
         
-        # Hierarchical chunking
-        small_chunks, small_metadata = SmartChunker.chunk_document(
-            text, metadata,
-            chunk_size=settings.CHUNK_SIZE_CHARS,
-            overlap=settings.CHUNK_OVERLAP_CHARS
-        )
+        # # Hierarchical chunking
+        # small_chunks, small_metadata = SmartChunker.chunk_document(
+        #     text, metadata,
+        #     chunk_size=settings.CHUNK_SIZE_CHARS,
+        #     overlap=settings.CHUNK_OVERLAP_CHARS
+        # )
         
-        large_chunks, large_metadata = SmartChunker.chunk_document(
-            text, metadata,
-            chunk_size=settings.LARGE_CHUNK_SIZE_CHARS,
-            overlap=settings.LARGE_CHUNK_OVERLAP_CHARS
-        )
+        # large_chunks, large_metadata = SmartChunker.chunk_document(
+        #     text, metadata,
+        #     chunk_size=settings.LARGE_CHUNK_SIZE_CHARS,
+        #     overlap=settings.LARGE_CHUNK_OVERLAP_CHARS
+        # )
         
-        # Create chunk mapping
-        chunk_mapping = self._create_chunk_mapping(small_chunks, large_chunks, text)
+        # # Create chunk mapping
+        # chunk_mapping = self._create_chunk_mapping(small_chunks, large_chunks, text)
         
-        logger.info(f"Created {len(small_chunks)} small and {len(large_chunks)} large chunks")
+        # logger.info(f"Created {len(small_chunks)} small and {len(large_chunks)} large chunks")
         
-        # Generate embeddings
-        small_embeddings = await self._generate_embeddings(small_chunks)
-        large_embeddings = await self._generate_embeddings(large_chunks)
+        # # Generate embeddings
+        # small_embeddings = await self._generate_embeddings(small_chunks)
+        # large_embeddings = await self._generate_embeddings(large_chunks)
         
-        # Create vector store
-        dimension = small_embeddings.shape[1]
-        vector_store = AdvancedVectorStore(
-            self.embedding_model,
-            self.reranker_model,
-            dimension
-        )
+        # # Create vector store
+        # dimension = small_embeddings.shape[1]
+        # vector_store = AdvancedVectorStore(
+        #     self.embedding_model,
+        #     self.reranker_model,
+        #     dimension
+        # )
         
-        # Add hierarchical data
-        vector_store.add_hierarchical(
-            small_chunks, small_embeddings,
-            large_chunks, large_embeddings,
-            small_metadata, chunk_mapping
-        )
+        # # Add hierarchical data
+        # vector_store.add_hierarchical(
+        #     small_chunks, small_embeddings,
+        #     large_chunks, large_embeddings,
+        #     small_metadata, chunk_mapping
+        # )
         
-        # Cache the store
-        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+        # # Cache the store
+        # await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
         
-        return vector_store
+        # return vector_store
     
     def _create_chunk_mapping(self, small_chunks: List[str], large_chunks: List[str], 
                                 full_text: str) -> Dict[int, int]:
@@ -312,73 +536,276 @@ class EnhancedRAGPipeline:
         
         return mapping
     
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """Generate embeddings in batches"""
+    #     batch_size = 32
+    #     all_embeddings = []
+        
+    #     for i in range(0, len(chunks), batch_size):
+    #         batch = chunks[i:i + batch_size]
+            
+    #         embeddings = await asyncio.get_event_loop().run_in_executor(
+    #             None,
+    #             lambda: self.embedding_model.encode(
+    #                 batch,
+    #                 convert_to_numpy=True,
+    #                 show_progress_bar=False
+    #             )
+    #         )
+    #         all_embeddings.append(embeddings)
+        
+    #     return np.vstack(all_embeddings).astype('float32')
+    # enhanced_rag_pipeline.py - Update _generate_embeddings method
     async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
-        """Generate embeddings in batches"""
-        batch_size = 32
+        """Generate embeddings in optimized batches"""
+        # OLD: Fixed batch size of 32
+        # NEW: Dynamic batch size with caching
+        
+        batch_size = 16  # Reduced from 32 for stability
         all_embeddings = []
         
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            
-            embeddings = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.embedding_model.encode(
-                    batch,
-                    convert_to_numpy=True,
-                    show_progress_bar=False
-                )
-            )
-            all_embeddings.append(embeddings)
+        # Check cache first
+        cache_key_prefix = "emb_"
+        cached_embeddings = []
+        chunks_to_embed = []
+        chunks_indices = []
         
-        return np.vstack(all_embeddings).astype('float32')
+        for i, chunk in enumerate(chunks):
+            chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
+            cache_key = f"{cache_key_prefix}{chunk_hash}"
+            
+            cached = await cache.get(cache_key)
+            if cached is not None:
+                cached_embeddings.append((i, cached))
+            else:
+                chunks_to_embed.append(chunk)
+                chunks_indices.append(i)
+        
+        # Generate embeddings for non-cached chunks
+        if chunks_to_embed:
+            for i in range(0, len(chunks_to_embed), batch_size):
+                batch = chunks_to_embed[i:i + batch_size]
+                
+                embeddings = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.embedding_model.encode(
+                        batch,
+                        convert_to_numpy=True,
+                        show_progress_bar=False,
+                        normalize_embeddings=True  # Add normalization
+                    )
+                )
+                
+                # Cache the embeddings
+                for j, emb in enumerate(embeddings):
+                    chunk_idx = chunks_indices[i + j]
+                    chunk_hash = hashlib.md5(chunks[chunk_idx].encode()).hexdigest()[:8]
+                    cache_key = f"{cache_key_prefix}{chunk_hash}"
+                    await cache.set(cache_key, emb, ttl=86400)  # Cache for 24 hours
+                
+                all_embeddings.append(embeddings)
+        
+        # Combine cached and new embeddings in correct order
+        if cached_embeddings:
+            # Merge cached and new embeddings
+            result = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()))
+            
+            for idx, emb in cached_embeddings:
+                result[idx] = emb
+            
+            if all_embeddings:
+                new_embeddings = np.vstack(all_embeddings)
+                for i, idx in enumerate(chunks_indices):
+                    result[idx] = new_embeddings[i]
+            
+            return result.astype('float32')
+        else:
+            return np.vstack(all_embeddings).astype('float32') if all_embeddings else np.array([])
     
     async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
         """Generate answer with multi-step reasoning and validation"""
         
         # 1. Analyze question type
         question_info = self.question_analyzer.analyze(question)
+        min_chunks = 3
+        max_chunks = settings.MAX_CHUNKS_PER_QUERY
         
-        # 2. Query expansion
-        expanded_queries = self._expand_query(question, question_info)
+        if question_info['type'] == 'yes_no':
+            max_chunks = 5  # Yes/no needs less context
+        elif question_info['type'] == 'numerical':
+            max_chunks = 8  # Numbers need moderate context
+        elif question_info['type'] == 'list':
+            max_chunks = 15  # Lists need more context
         
-        # 3. Retrieve relevant chunks for all queries
+        # Progressive retrieval
         all_chunks = []
         all_scores = []
+        confidence_threshold = 0.85
         
-        for query in expanded_queries:
-            search_results = vector_store.search_with_reranking(
-                query,
-                k=settings.MAX_CHUNKS_PER_QUERY
-            )
+        for k in [min_chunks, max_chunks // 2, max_chunks]:
+            search_results = vector_store.search_with_reranking(question, k=k)
             
+            new_chunks = []
             for chunk, score, meta in search_results:
-                all_chunks.append(chunk)
-                all_scores.append(score)
+                if chunk not in all_chunks:  # Avoid duplicates
+                    all_chunks.append(chunk)
+                    all_scores.append(score)
+                    new_chunks.append(chunk)
+            
+            # Check if we have enough context
+            if len(all_chunks) >= min_chunks:
+                context_quality = self._assess_context_quality(
+                    question, all_chunks, all_scores, question_info
+                )
+                
+                if context_quality > confidence_threshold:
+                    logger.info(f"Early termination with {len(all_chunks)} chunks (quality: {context_quality:.2f})")
+                    break
+        
+        # 2. Query expansion
+        # expanded_queries = self._expand_query(question, question_info)
+        
+        # 3. Retrieve relevant chunks for all queries
+        # all_chunks = []
+        # all_scores = []
+        # confidence_threshold = 0.8
+        
+        # for query in expanded_queries:
+        #     search_results = vector_store.search_with_reranking(
+        #         query,
+        #         k=settings.MAX_CHUNKS_PER_QUERY
+        #     )
+            
+        #     for chunk, score, meta in search_results:
+        #         all_chunks.append(chunk)
+        #         all_scores.append(score)
+        #         if len(all_chunks) >= 5 and np.mean(all_scores[-5:]) > confidence_threshold:
+        #             logger.info(f"Early termination with {len(all_chunks)} chunks")
+        #             break
         
         # 4. Deduplicate and rank chunks
         unique_chunks = self._deduplicate_chunks(all_chunks, all_scores)
+        return await self._generate_answer_with_validation(
+        question, unique_chunks, question_info, all_scores
+    )
         
-        # 5. Multi-step reasoning if needed
-        if question_info['requires_multi_step']:
-            answer = await self._multi_step_reasoning(question, unique_chunks, question_info)
-        else:
-            answer = await self._generate_answer(question, unique_chunks, question_info)
+        # # 5. Multi-step reasoning if needed
+        # if question_info['requires_multi_step']:
+        #     answer = await self._multi_step_reasoning(question, unique_chunks, question_info)
+        # else:
+        #     answer = await self._generate_answer(question, unique_chunks, question_info)
         
-        # 6. Validate answer
-        validated_answer = self.answer_validator.validate(
-            question, answer, question_info, unique_chunks
-        )
+        # # 6. Validate answer
+        # validated_answer = self.answer_validator.validate(
+        #     question, answer, question_info, unique_chunks
+        # )
         
-        # 7. Calculate confidence
-        confidence = self._calculate_confidence(validated_answer, all_scores)
+        # # 7. Calculate confidence
+        # confidence = self._calculate_confidence(validated_answer, all_scores)
         
-        return {
-            'answer': validated_answer['answer'],
-            'confidence': confidence,
-            'question_type': question_info['type'],
-            'sources': validated_answer.get('sources', []),
-            'validation_notes': validated_answer.get('notes', '')
-        }
+        # return {
+        #     'answer': validated_answer['answer'],
+        #     'confidence': confidence,
+        #     'question_type': question_info['type'],
+        #     'sources': validated_answer.get('sources', []),
+        #     'validation_notes': validated_answer.get('notes', '')
+        # }
+    def _assess_context_quality(self, question: str, chunks: List[str], 
+                           scores: List[float], question_info: Dict) -> float:
+        """Assess if we have enough context to answer"""
+        # NEW: Context quality assessment
+        
+        quality = 0.0
+        
+        # Factor 1: Retrieval scores
+        if scores:
+            avg_score = np.mean(scores)
+            quality += min(avg_score, 0.3)
+        
+        # Factor 2: Keyword coverage
+        question_keywords = set(question.lower().split())
+        context_text = ' '.join(chunks).lower()
+        keyword_coverage = sum(1 for kw in question_keywords if kw in context_text) / len(question_keywords)
+        quality += keyword_coverage * 0.3
+        
+        # Factor 3: Type-specific checks
+        if question_info['type'] == 'numerical':
+            # Check if numbers are present
+            numbers = re.findall(r'\d+', context_text)
+            if numbers:
+                quality += 0.2
+        
+        elif question_info['type'] == 'yes_no':
+            # Check for definitive statements
+            definitive_words = ['yes', 'no', 'true', 'false', 'correct', 'incorrect']
+            if any(word in context_text for word in definitive_words):
+                quality += 0.2
+        
+        # Factor 4: Entity coverage
+        entities = question_info.get('entities', [])
+        if entities:
+            entity_coverage = sum(1 for e in entities if e.lower() in context_text) / len(entities)
+            quality += entity_coverage * 0.2
+        
+        return min(quality, 1.0)
+    
+    def retrieve(self, query: str, k: int = 30) -> List[Tuple[int, float]]:
+        """Multi-strategy retrieval with better combination"""
+        # OLD: Simple score addition
+        # NEW: Weighted combination with normalization
+        
+        query_lower = query.lower()
+        scores = np.zeros(len(self.chunks))
+        
+        # 1. Exact phrase matching (highest weight)
+        for idx, chunk in enumerate(self.chunks):
+            if query_lower in chunk.lower():
+                scores[idx] += 10.0
+                
+                # Bonus for exact case match
+                if query in chunk:
+                    scores[idx] += 2.0
+        
+        # 2. BM25 scoring (moderate weight)
+        if hasattr(self, 'bm25'):
+            query_tokens = self._tokenize(query_lower)
+            if query_tokens:
+                bm25_scores = self.bm25.get_scores(query_tokens)
+                # Normalize BM25 scores
+                if max(bm25_scores) > 0:
+                    bm25_scores = bm25_scores / max(bm25_scores)
+                scores += bm25_scores * 5.0
+        
+        # 3. TF-IDF scoring (lower weight)
+        if self.tfidf_vectorizer and self.tfidf_matrix is not None:
+            try:
+                query_vec = self.tfidf_vectorizer.transform([query])
+                tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
+                # Normalize TF-IDF scores
+                if max(tfidf_scores) > 0:
+                    tfidf_scores = tfidf_scores / max(tfidf_scores)
+                scores += tfidf_scores * 3.0
+            except:
+                pass
+        
+        # 4. Keyword and entity matching
+        entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', query)
+        for entity in entities:
+            entity_lower = entity.lower()
+            for idx, chunk in enumerate(self.chunks):
+                if entity_lower in chunk.lower():
+                    scores[idx] += 4.0
+        
+        # Get top-k with score threshold
+        score_threshold = 0.1
+        top_indices = np.argsort(scores)[-k:][::-1]
+        results = [(idx, scores[idx]) for idx in top_indices if scores[idx] > score_threshold]
+        
+        # Ensure minimum results
+        if len(results) < 3 and len(self.chunks) > 0:
+            results = [(i, 1.0) for i in range(min(3, len(self.chunks)))]
+        
+        return results
     
     def _expand_query(self, question: str, question_info: Dict) -> List[str]:
         """Expand query for better retrieval"""
@@ -686,35 +1113,69 @@ class EnhancedRAGPipeline:
         
         return min(max(base_confidence, 0.0), 1.0)
     
+    # async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
+    #     """Process multiple questions with parallel execution"""
+        
+    #     start_time = time.time()
+    #     logger.info(f"Processing {len(questions)} questions for {document_url}")
+        
+    #     try:
+    #         # Get vector store
+    #         vector_store = await self.get_or_create_vector_store(document_url)
+            
+    #         # Process questions in parallel
+    #         semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_QUESTIONS)
+            
+    #         async def process_question(q):
+    #             async with semaphore:
+    #                 try:
+    #                     result = await self.answer_question(q, vector_store)
+    #                     return result['answer']
+    #                 except Exception as e:
+    #                     logger.error(f"Error processing question: {e}")
+    #                     return "Error processing this question."
+            
+    #         # Create tasks
+    #         tasks = [process_question(q) for q in questions]
+            
+    #         # Execute with timeout
+    #         answers = await asyncio.wait_for(
+    #             asyncio.gather(*tasks),
+    #             timeout=settings.TOTAL_TIMEOUT_SECONDS
+    #         )
+            
+    #         elapsed = time.time() - start_time
+    #         logger.info(f"Processed {len(questions)} questions in {elapsed:.2f}s")
+            
+    #         return answers
+            
+    #     except asyncio.TimeoutError:
+    #         logger.error("Overall processing timeout")
+    #         return ["Processing timeout. Please try again."] * len(questions)
+    #     except Exception as e:
+    #         logger.error(f"Critical error: {e}", exc_info=True)
+    #         return ["Document processing error."] * len(questions)
+    # enhanced_rag_pipeline.py - Add question-aware processing
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process multiple questions with parallel execution"""
+        """Process with question awareness"""
+        # OLD: Process document fully before answering
+        # NEW: Analyze questions first, then process relevant parts
         
         start_time = time.time()
         logger.info(f"Processing {len(questions)} questions for {document_url}")
         
         try:
-            # Get vector store
-            vector_store = await self.get_or_create_vector_store(document_url)
+            # Analyze all questions first
+            question_analysis = self._analyze_all_questions(questions)
             
-            # Process questions in parallel
-            semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_QUESTIONS)
+            # Get or create vector store with question context
+            vector_store = await self._get_or_create_question_aware_store(
+                document_url, question_analysis
+            )
             
-            async def process_question(q):
-                async with semaphore:
-                    try:
-                        result = await self.answer_question(q, vector_store)
-                        return result['answer']
-                    except Exception as e:
-                        logger.error(f"Error processing question: {e}")
-                        return "Error processing this question."
-            
-            # Create tasks
-            tasks = [process_question(q) for q in questions]
-            
-            # Execute with timeout
-            answers = await asyncio.wait_for(
-                asyncio.gather(*tasks),
-                timeout=settings.TOTAL_TIMEOUT_SECONDS
+            # Process questions with optimized retrieval
+            answers = await self._process_questions_optimized(
+                questions, vector_store, question_analysis
             )
             
             elapsed = time.time() - start_time
@@ -722,9 +1183,120 @@ class EnhancedRAGPipeline:
             
             return answers
             
-        except asyncio.TimeoutError:
-            logger.error("Overall processing timeout")
-            return ["Processing timeout. Please try again."] * len(questions)
         except Exception as e:
             logger.error(f"Critical error: {e}", exc_info=True)
             return ["Document processing error."] * len(questions)
+
+    def _analyze_all_questions(self, questions: List[str]) -> Dict:
+        """Analyze all questions to understand what to look for"""
+        # NEW: Comprehensive question analysis
+        
+        analysis = {
+            'types': [],
+            'keywords': set(),
+            'entities': set(),
+            'needs_tables': False,
+            'needs_numbers': False,
+            'sections_needed': set()
+        }
+        
+        for question in questions:
+            q_info = self.question_analyzer.analyze(question)
+            analysis['types'].append(q_info['type'])
+            
+            # Extract keywords
+            keywords = re.findall(r'\b[A-Za-z]{4,}\b', question.lower())
+            analysis['keywords'].update(keywords)
+            
+            # Extract entities
+            analysis['entities'].update(q_info.get('entities', []))
+            
+            # Check specific needs
+            if q_info['type'] == 'numerical':
+                analysis['needs_numbers'] = True
+            if 'table' in question.lower() or 'list' in question.lower():
+                analysis['needs_tables'] = True
+            
+            # Identify sections
+            section_keywords = ['introduction', 'summary', 'conclusion', 'method', 'result']
+            for kw in section_keywords:
+                if kw in question.lower():
+                    analysis['sections_needed'].add(kw)
+        
+        return analysis
+
+    async def _get_or_create_question_aware_store(self, url: str, question_analysis: Dict) -> AdvancedVectorStore:
+        """Create vector store focused on question needs"""
+        # NEW: Question-aware document processing
+        
+        # Create unique cache key including question context
+        context_hash = hashlib.md5(
+            str(sorted(question_analysis['keywords'])).encode()
+        ).hexdigest()[:8]
+        cache_key = f"qa_vecstore_{hashlib.md5(url.encode()).hexdigest()}_{context_hash}"
+        
+        cached_store = await cache.get(cache_key)
+        if cached_store:
+            logger.info(f"Using cached question-aware vector store")
+            return cached_store
+        
+        logger.info(f"Creating question-aware vector store")
+        
+        content = await self.download_document(url)
+        text, metadata = self.universal_parser.parse_any_document(content, url)
+        
+        # Filter and prioritize chunks based on question analysis
+        prioritized_chunks = self._prioritize_chunks_for_questions(
+            text, metadata, question_analysis
+        )
+        
+        # Create vector store with prioritized chunks
+        vector_store = await self._create_prioritized_store(prioritized_chunks)
+        
+        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS // 2)
+        return vector_store
+
+    def _prioritize_chunks_for_questions(self, text: str, metadata: List[Dict], 
+                                        question_analysis: Dict) -> List[Tuple[str, Dict, float]]:
+        """Prioritize chunks based on question needs"""
+        # NEW: Smart chunk prioritization
+        
+        chunks, chunk_meta = SmartChunker.chunk_document(
+            text, metadata,
+            chunk_size=settings.CHUNK_SIZE_CHARS,
+            overlap=settings.CHUNK_OVERLAP_CHARS
+        )
+        
+        prioritized = []
+        
+        for chunk, meta in zip(chunks, chunk_meta):
+            score = 0.0
+            
+            # Score based on keyword matches
+            chunk_lower = chunk.lower()
+            for keyword in question_analysis['keywords']:
+                if keyword in chunk_lower:
+                    score += 1.0
+            
+            # Boost tables if needed
+            if question_analysis['needs_tables'] and meta.get('type') == 'table':
+                score += 5.0
+            
+            # Boost numerical content if needed
+            if question_analysis['needs_numbers']:
+                numbers = re.findall(r'\d+', chunk)
+                score += len(numbers) * 0.5
+            
+            # Boost specific sections
+            for section in question_analysis['sections_needed']:
+                if section in chunk_lower:
+                    score += 3.0
+            
+            prioritized.append((chunk, meta, score))
+        
+        # Sort by score and keep top chunks
+        prioritized.sort(key=lambda x: x[2], reverse=True)
+        max_chunks = min(len(prioritized), settings.MAX_TOTAL_CHUNKS)
+        
+        logger.info(f"Keeping top {max_chunks} chunks out of {len(prioritized)}")
+        return prioritized[:max_chunks]
