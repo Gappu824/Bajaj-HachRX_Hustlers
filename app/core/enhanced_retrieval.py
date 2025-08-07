@@ -23,7 +23,7 @@ class EnhancedRetriever:
     
     def __init__(self, chunks: List[str], chunk_metadata: List[Dict]):
         self.chunks = chunks
-        self.chunk_metadata = chunk_metadata
+        self.chunk_metadata = chunk_metadata or []
         
         # Initialize components
         self._init_keyword_index()

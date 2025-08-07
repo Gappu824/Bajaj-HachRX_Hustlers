@@ -23,6 +23,10 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.generativeai.generative_models import GenerativeModel
+# from app.core.logger import logger
+import logging
+logger = logging.getLogger(__name__)
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 import nltk
@@ -68,11 +72,17 @@ class AdvancedVectorStore:
         # FAISS indices
         self.small_index = faiss.IndexFlatL2(dimension)
         self.large_index = faiss.IndexFlatL2(dimension)
+        self.chunks: List[str] = []  # ✅ ADDED - Main chunks storage
+        self.index = faiss.IndexFlatL2(dimension)  # ✅ ADDED - Main index
         
         # Enhanced retriever
         self.enhanced_retriever = None
         
         logger.info("Initialized advanced vector store with hierarchical chunking")
+
+    def search(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
+        """Basic search method that delegates to search_with_reranking"""
+        return self.search_with_reranking(query, k)    
     def add_documents(self, texts: List[str], embeddings: np.ndarray, metadata: List[Dict]):
         """
         Adds a batch of documents, their embeddings, and metadata to the store.
@@ -101,7 +111,8 @@ class AdvancedVectorStore:
         # This is much more efficient than rebuilding it after every batch.
         if self.chunks:
             logger.info("Finalizing index by building the keyword retriever (TF-IDF).")
-            self.enhanced_retriever = EnhancedRetriever(self.chunks)
+            # self.enhanced_retriever = EnhancedRetriever(self.chunks)
+            self.enhanced_retriever = EnhancedRetriever(self.chunks, self.chunk_metadata)
         else:
             logger.warning("No chunks to index in keyword retriever.")
       
@@ -146,6 +157,7 @@ class AdvancedVectorStore:
         self.small_chunks.extend(small_chunks[:self.max_chunks_in_memory - len(self.small_chunks)])
         self.large_chunks.extend(large_chunks[:self.max_chunks_in_memory // 2 - len(self.large_chunks)])
         self.chunk_metadata.extend(metadata[:len(self.small_chunks) - base_idx])
+        self.chunks.extend(small_chunks[:len(small_chunks)])  # ✅ ADDED
         
         # Update mapping
         # for small_idx, large_idx in chunk_mapping.items():
@@ -159,9 +171,11 @@ class AdvancedVectorStore:
         # self.large_index.add(large_embeddings)
         self.small_index.add(small_embeddings[:len(self.small_chunks) - base_idx])
         self.large_index.add(large_embeddings[:len(self.large_chunks)])
+        self.index.add(small_embeddings[:len(small_chunks)])  # ✅ ADDED
         
         # Reinitialize retriever
-        self.enhanced_retriever = EnhancedRetriever(self.small_chunks, self.chunk_metadata)
+        # self.enhanced_retriever = EnhancedRetriever(self.small_chunks, self.chunk_metadata)
+        self.enhanced_retriever = EnhancedRetriever(self.chunks, self.chunk_metadata)
         
         # logger.info(f"Added {len(small_chunks)} small and {len(large_chunks)} large chunks")
         logger.info(f"Added chunks (memory: {len(self.small_chunks)}, total: {base_idx + len(small_chunks)})")
@@ -356,6 +370,8 @@ class EnhancedRAGPipeline:
         # self.embedding_model = embedding_model
         # self.reranker_model = reranker_model
         # self.settings = settings
+        self.llm_clients = {}  # A dictionary to cache initialized models
+        self.llm_lock = asyncio.Lock()  
         self.embedding_model = embedding_model
         self.reranker_model = reranker_model
         self.settings = settings
@@ -367,6 +383,64 @@ class EnhancedRAGPipeline:
         self.answer_validator = AnswerValidator()
 
         self._configure_gemini()
+
+    def _format_table(self, table: List[List]) -> str:
+        """Format table data nicely"""
+        if not table:
+            return ""
+        
+        formatted = []
+        
+        # Headers
+        if len(table) > 0:
+            headers = [str(cell) if cell else "" for cell in table[0]]
+            formatted.append(" | ".join(headers))
+            formatted.append("-" * min(100, sum(len(h) + 3 for h in headers)))
+        
+        # Data rows
+        for row in table[1:]:
+            if row and any(cell for cell in row):
+                row_text = " | ".join([str(cell) if cell else "" for cell in row])
+                formatted.append(row_text)
+        
+        return "\n".join(formatted)    
+
+    # This is the full, robust method
+    async def _get_llm(self, model_name: str) -> 'GenerativeModel':
+        """
+        Initializes and returns a cached LLM client in a thread-safe 
+        and robust manner.
+        """
+        # First, check if the client is already initialized without locking
+        if model_name in self.llm_clients:
+            return self.llm_clients[model_name]
+
+        # If not, acquire a lock to ensure only one coroutine initializes this model
+        async with self.llm_lock:
+            # Double-check if another coroutine initialized it while we were waiting for the lock
+            if model_name in self.llm_clients:
+                return self.llm_clients[model_name]
+
+            logger.info(f"Initializing new LLM client for model: {model_name}")
+            try:
+                # Configure the API key. This is safe to call multiple times.
+                if not settings.GOOGLE_API_KEY:
+                    raise ValueError("GOOGLE_API_KEY is not set in the configuration.")
+                
+                genai.configure(api_key=settings.GOOGLE_API_KEY)
+                
+                # Create the model instance
+                model = genai.GenerativeModel(model_name)
+                
+                # Cache the successfully created model
+                self.llm_clients[model_name] = model
+                
+                return model
+
+            except Exception as e:
+                logger.critical(f"FATAL: Failed to initialize LLM model '{model_name}'. Error: {e}", exc_info=True)
+                # Re-raise the exception to halt the process, as the pipeline cannot function without an LLM.
+                raise ValueError(f"Failed to initialize LLM model '{model_name}'. Please check API key and model name validity.") from e    
 
 
     async def process_query_with_explainability(
@@ -557,7 +631,8 @@ class EnhancedRAGPipeline:
                         tables = page.extract_tables()
                         for j, table in enumerate(tables):
                             if table:
-                                table_text = self.universal_parser.fallback_parser._format_table(table)
+                                # table_text = self.universal_parser.fallback_parser._format_table(table)
+                                table_text = self._format_table(table)
                                 text_parts.append(f"--- TABLE {j+1} ON PAGE {page_num} ---\n{table_text}")
                                 metadata_parts.append({'page': page_num, 'type': 'table_section'})
                                 
@@ -731,48 +806,49 @@ class EnhancedRAGPipeline:
     # ---> MODIFIED: The function now returns a Tuple of two stores.
 # from typing import Tuple 
 
-    async def get_or_create_vector_store(self, url: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
-        """
-        Get or create a pair of vector stores using the robust Hierarchical RAG strategy.
-        Returns (summary_store, full_text_store).
-        """
-        # ---> NEW: Generate two separate cache keys, one for each store.
-        document_hash = hashlib.md5(url.encode()).hexdigest()
-        summary_cache_key = f"summary_store_{document_hash}"
-        full_text_cache_key = f"full_text_store_{document_hash}"
+    # async def get_or_create_vector_store(self, url: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+    # async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
+    #     """
+    #     Get or create a pair of vector stores using the robust Hierarchical RAG strategy.
+    #     Returns (summary_store, full_text_store).
+    #     """
+    #     # ---> NEW: Generate two separate cache keys, one for each store.
+    #     document_hash = hashlib.md5(url.encode()).hexdigest()
+    #     summary_cache_key = f"summary_store_{document_hash}"
+    #     full_text_cache_key = f"full_text_store_{document_hash}"
 
-        # ---> MODIFIED: Check the cache for BOTH stores.
-        # summary_store = await cache.get(summary_cache_key)
-        # full_text_store = await cache.get(full_text_cache_key)
-        logger.info(f"Creating new hierarchical vector stores for {url}")
+    #     # ---> MODIFIED: Check the cache for BOTH stores.
+    #     # summary_store = await cache.get(summary_cache_key)
+    #     # full_text_store = await cache.get(full_text_cache_key)
+    #     logger.info(f"Creating new hierarchical vector stores for {url}")
     
-    # Download the document content ONCE.
-        content = await self.download_document(url)
+    # # Download the document content ONCE.
+    #     content = await self.download_document(url)
 
-        # Pass the content directly to the processing function.
-        summary_store, full_text_store = await self._hierarchical_processing(content, document_hash, url)
+    #     # Pass the content directly to the processing function.
+    #     summary_store, full_text_store = await self._hierarchical_processing(content, document_hash, url)
 
 
-        if summary_store and full_text_store:
-            logger.info(f"Using cached hierarchical vector stores for {url}")
-            return summary_store, full_text_store
+    #     if summary_store and full_text_store:
+    #         logger.info(f"Using cached hierarchical vector stores for {url}")
+    #         return summary_store, full_text_store
 
-        logger.info(f"Creating new hierarchical vector stores for {url}")
-        # We now call a single, unified processing function.
-        # We pass the file path directly to avoid loading large files into memory here.
-        file_path = await self.download_document(url)
+    #     logger.info(f"Creating new hierarchical vector stores for {url}")
+    #     # We now call a single, unified processing function.
+    #     # We pass the file path directly to avoid loading large files into memory here.
+    #     file_path = await self.download_document(url)
 
-        # ---> REMOVED: The old if/else logic for document size is no longer needed.
-        # The hierarchical strategy is superior for documents of almost all sizes.
+    #     # ---> REMOVED: The old if/else logic for document size is no longer needed.
+    #     # The hierarchical strategy is superior for documents of almost all sizes.
         
-        # ---> NEW: A single call to the new, powerful hierarchical processing method.
-        summary_store, full_text_store = await self._hierarchical_processing(file_path, document_hash)
+    #     # ---> NEW: A single call to the new, powerful hierarchical processing method.
+    #     summary_store, full_text_store = await self._hierarchical_processing(file_path, document_hash)
 
-        # ---> MODIFIED: Set both stores in the cache with their respective keys.
-        await cache.set(summary_cache_key, summary_store, ttl=settings.CACHE_TTL_SECONDS)
-        await cache.set(full_text_cache_key, full_text_store, ttl=settings.CACHE_TTL_SECONDS)
+    #     # ---> MODIFIED: Set both stores in the cache with their respective keys.
+    #     await cache.set(summary_cache_key, summary_store, ttl=settings.CACHE_TTL_SECONDS)
+    #     await cache.set(full_text_cache_key, full_text_store, ttl=settings.CACHE_TTL_SECONDS)
 
-        return summary_store, full_text_store
+    #     return summary_store, full_text_store
     
     # async def _two_pass_processing(self, content: bytes, url: str) -> AdvancedVectorStore:
     #     """Two-pass processing for large documents"""
@@ -805,58 +881,77 @@ class EnhancedRAGPipeline:
     #     # Create vector store with extracted content
     #     return await self._create_hierarchical_store(full_text, metadata_parts)
     # In enhanced_rag_pipeline.py
+    async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
+        """Get or create advanced vector store with hierarchical chunking"""
+        
+        # Generate cache key
+        cache_key = f"adv_vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+        
+        # Check cache
+        cached_store = await cache.get(cache_key)
+        if cached_store:
+            logger.info(f"Using cached vector store for {url}")
+            return cached_store
+        
+        logger.info(f"Creating new advanced vector store for {url}")
+        content = await self.download_document(url)
+        text, metadata = self.universal_parser.parse_any_document(content, url)
+        vector_store = await self._standard_processing(text, metadata)
+        
+        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+        return vector_store
 
     # async def _hierarchical_processing(self, file_path: str, document_hash: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
-    async def _hierarchical_processing(self, content: bytes, document_hash: str, filename: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
-        """
-        Creates two vector stores: one with summaries and one with the full text.
-        """
-        logger.info("Starting hierarchical processing for the document.")
-        # Use the universal parser to get all text
-        # full_text = await self.universal_parser.parse(file_path)
-        full_text, _ = self.universal_parser.parse_any_document(content, filename)
+    # async def _hierarchical_processing(self, content: bytes, document_hash: str, filename: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+    #     """
+    #     Creates two vector stores: one with summaries and one with the full text.
+    #     """
+    #     logger.info("Starting hierarchical processing for the document.")
+    #     # Use the universal parser to get all text
+    #     # full_text = await self.universal_parser.parse(file_path)
+    #     full_text, _ = self.universal_parser.parse_any_document(content, filename)
 
-        # --- Create Layer 1: The Parent Chunks and Summary Store ---
-        parent_chunker = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
-        parent_chunks = parent_chunker.split_text(full_text)
+    #     # --- Create Layer 1: The Parent Chunks and Summary Store ---
+    #     parent_chunker = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
+    #     parent_chunks = parent_chunker.split_text(full_text)
 
-        summary_texts = []
-        parent_chunk_metadata = []
+    #     summary_texts = []
+    #     parent_chunk_metadata = []
 
-        # Use an LLM to summarize each large parent chunk
-        summarization_prompt = "Summarize the following text in one concise paragraph, capturing the key topics and entities: {chunk}"
-        summarization_model = self._get_llm(settings.LLM_MODEL_NAME)
+    #     # Use an LLM to summarize each large parent chunk
+    #     summarization_prompt = "Summarize the following text in one concise paragraph, capturing the key topics and entities: {chunk}"
+    #     summarization_model = self._get_llm(settings.LLM_MODEL_NAME)
 
-        for i, chunk in enumerate(parent_chunks):
-            response = await summarization_model.generate_content_async(summarization_prompt.format(chunk=chunk))
-            summary_texts.append(response.text)
-            parent_chunk_metadata.append({'parent_chunk_id': i, 'original_text_sample': chunk[:200]})
+    #     for i, chunk in enumerate(parent_chunks):
+    #         response = await summarization_model.generate_content_async(summarization_prompt.format(chunk=chunk))
+    #         summary_texts.append(response.text)
+    #         parent_chunk_metadata.append({'parent_chunk_id': i, 'original_text_sample': chunk[:200]})
 
-        # Create the fast summary store
-        summary_store = AdvancedVectorStore(document_hash + "_summary")
-        summary_embeddings = await self._generate_embeddings(summary_texts)
-        summary_store.add_documents(summary_texts, summary_embeddings, parent_chunk_metadata)
-        logger.info(f"Created summary store with {len(summary_texts)} summaries.")
+    #     # Create the fast summary store
+    #     summary_store = AdvancedVectorStore(document_hash + "_summary")
+    #     summary_embeddings = await self._generate_embeddings(summary_texts)
+    #     summary_store.add_documents(summary_texts, summary_embeddings, parent_chunk_metadata)
+    #     logger.info(f"Created summary store with {len(summary_texts)} summaries.")
 
 
-        # --- Create Layer 2: The Child Chunks and Full-Text Store ---
-        child_chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        full_text_store = AdvancedVectorStore(document_hash + "_full")
+    #     # --- Create Layer 2: The Child Chunks and Full-Text Store ---
+    #     child_chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    #     full_text_store = AdvancedVectorStore(document_hash + "_full")
 
-        for i, p_chunk in enumerate(parent_chunks):
-            child_chunks = child_chunker.split_text(p_chunk)
-            child_embeddings = await self._generate_embeddings(child_chunks)
-            # Add metadata linking child chunks back to their parent
-            child_metadata = [{'parent_chunk_id': i} for _ in child_chunks]
-            full_text_store.add_documents(child_chunks, child_embeddings, child_metadata)
+    #     for i, p_chunk in enumerate(parent_chunks):
+    #         child_chunks = child_chunker.split_text(p_chunk)
+    #         child_embeddings = await self._generate_embeddings(child_chunks)
+    #         # Add metadata linking child chunks back to their parent
+    #         child_metadata = [{'parent_chunk_id': i} for _ in child_chunks]
+    #         full_text_store.add_documents(child_chunks, child_embeddings, child_metadata)
 
-        logger.info(f"Created full-text store with {len(full_text_store.chunks)} total chunks.")
+    #     logger.info(f"Created full-text store with {len(full_text_store.chunks)} total chunks.")
 
-        # Store both vector stores in memory/cache
-        cache.set(document_hash + "_summary", summary_store)
-        cache.set(document_hash + "_full", full_text_store)
+    #     # Store both vector stores in memory/cache
+    #     cache.set(document_hash + "_summary", summary_store)
+    #     cache.set(document_hash + "_full", full_text_store)
         
-        return summary_store, full_text_store
+    #     return summary_store, full_text_store
 
     def _extract_structure(self, content: bytes, url: str) -> Dict:
         """Extract document structure quickly"""
@@ -1401,31 +1496,45 @@ class EnhancedRAGPipeline:
     # In EnhancedRAGPipeline class in app/core/enhanced_rag_pipeline.py
     # In enhanced_rag_pipeline.py -> answer_question()
 
-    async def answer_question(self, question: str, summary_store: AdvancedVectorStore, full_text_store: AdvancedVectorStore) -> Dict[str, Any]:
-        """
-        Answers a question using the hierarchical retrieval strategy.
-        """
-        # 1. Search the small summary store first to find relevant parent sections
-        summary_results = summary_store.search(question, k=5)
+    # async def answer_question(self, question: str, summary_store: AdvancedVectorStore, full_text_store: AdvancedVectorStore) -> Dict[str, Any]:
+    # async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
+    #     """
+    #     Answers a question using the hierarchical retrieval strategy.
+    #     """
+    #     # 1. Search the small summary store first to find relevant parent sections
+    #     summary_results = summary_store.search(question, k=5)
         
-        relevant_parent_ids = {res[2].get('parent_chunk_id') for res in summary_results}
-        if None in relevant_parent_ids:
-            relevant_parent_ids.remove(None)
-        logger.info(f"Found {len(relevant_parent_ids)} relevant parent sections from summaries.")
+    #     relevant_parent_ids = {res[2].get('parent_chunk_id') for res in summary_results}
+    #     if None in relevant_parent_ids:
+    #         relevant_parent_ids.remove(None)
+    #     logger.info(f"Found {len(relevant_parent_ids)} relevant parent sections from summaries.")
 
-        # 2. Now, search the large full-text store, but ONLY within the relevant parent sections
-        final_chunks = full_text_store.search_with_reranking(
-            question,
-            k=15,
-            # This filter is the key to speed and accuracy
-            filter_dict={'parent_chunk_id': list(relevant_parent_ids)}
-        )
+    #     # 2. Now, search the large full-text store, but ONLY within the relevant parent sections
+    #     final_chunks = full_text_store.search_with_reranking(
+    #         question,
+    #         k=15,
+    #         # This filter is the key to speed and accuracy
+    #         filter_dict={'parent_chunk_id': list(relevant_parent_ids)}
+    #     )
 
-        # 3. Generate the answer with the high-quality, detailed context
-        context = "\n---\n".join([chunk[0] for chunk in final_chunks])
+    #     # 3. Generate the answer with the high-quality, detailed context
+    #     context = "\n---\n".join([chunk[0] for chunk in final_chunks])
         
-        # (Call your existing _generate_answer_with_validation method)
-        return await self._generate_answer_with_validation(question, context, ...)
+    #     # (Call your existing _generate_answer_with_validation method)
+    #     return await self._generate_answer_with_validation(question, context, ...)
+    async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
+        """Generate answer with multi-step reasoning and validation"""
+        
+        # 1. Analyze question type
+        question_info = self.question_analyzer.analyze(question)
+        
+        # 2. Retrieve relevant chunks
+        search_results = vector_store.search_with_reranking(question, k=settings.MAX_CHUNKS_PER_QUERY)
+        chunks = [chunk for chunk, score, meta in search_results]
+        scores = [score for chunk, score, meta in search_results]
+        
+        # 3. Generate and validate answer
+        return await self._generate_answer_with_validation(question, chunks, question_info, scores)
 
 # --- NEW ---
     async def _generate_answer_with_validation(
@@ -1769,12 +1878,16 @@ class EnhancedRAGPipeline:
         """
         Generates an answer using the LLM, with robust error handling and safety checks.
         """
+
+        if isinstance(context, list):
+            context = "\n\n---\n\n".join(context)
         model_name = (
             settings.LLM_MODEL_NAME_PRECISE
             if question_info.get("requires_precision")
             else settings.LLM_MODEL_NAME
         )
-        model = self._get_llm(model_name)
+        # model = self._get_llm(model_name)
+        model = await self._get_llm(model_name)
 
         # --- FIX 1: Add robust safety settings to the LLM call ---
         # This reduces the chance of the LLM refusing to answer due to overly sensitive filters,
@@ -2135,7 +2248,7 @@ class EnhancedRAGPipeline:
         #         answers.append(result)
         
         # return answers   
-        # final_answers = []
+        final_answers = []
         for i, result in enumerate(results):
             # --- THIS IS THE DEFINITIVE FIX ---
             # It checks the type of the result before doing anything else.

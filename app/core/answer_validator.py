@@ -429,6 +429,14 @@ class AnswerValidator:
                 })
         
         return result
+    def _validate_yes_no_enhanced(self, question: str, answer: str, chunks: List[str], result: Dict) -> Dict:
+        """Enhanced yes/no validation"""
+        # Use the existing method for now
+        return self._validate_yes_no(answer, result)
+    def _validate_list_enhanced(self, question: str, answer: str, chunks: List[str], result: Dict) -> Dict:
+        """Enhanced list validation"""
+        # Use the existing method for now
+        return self._validate_list(question, answer, chunks, result)
     
     def _extract_facts(self, text: str) -> List[str]:
         """Extract factual statements from text"""
