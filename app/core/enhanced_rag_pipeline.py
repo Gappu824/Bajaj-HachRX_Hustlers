@@ -25,6 +25,7 @@ import google.generativeai as genai
 from tenacity import retry, stop_after_attempt, wait_exponential
 import nltk
 from rapidfuzz import fuzz
+import itertools
 
 # Local imports
 from app.core.config import settings
@@ -684,28 +685,28 @@ class EnhancedRAGPipeline:
         
         return structure
 
-    def _identify_important_sections(self, structure: Dict) -> List[Dict]:
-        """Identify important sections to process"""
-        # NEW: Smart section identification
+    # def _identify_important_sections(self, structure: Dict) -> List[Dict]:
+    #     """Identify important sections to process"""
+    #     # NEW: Smart section identification
         
-        important = []
+    #     important = []
         
-        # Always include first few pages (usually summary/intro)
-        # important.append({'type': 'intro', 'pages': range(1, min(6, structure['total_pages'] + 1))})
-        important.append({'type': 'intro', 'pages': range(1, min(25, structure['total_pages'] + 1))}) # Increased from 6 to 25
+    #     # Always include first few pages (usually summary/intro)
+    #     # important.append({'type': 'intro', 'pages': range(1, min(6, structure['total_pages'] + 1))})
+    #     important.append({'type': 'intro', 'pages': range(1, min(25, structure['total_pages'] + 1))}) # Increased from 6 to 25
 
         
-        # Include pages with tables
-        for page, count in structure['tables']:
-            important.append({'type': 'table', 'pages': [page]})
+    #     # Include pages with tables
+    #     for page, count in structure['tables']:
+    #         important.append({'type': 'table', 'pages': [page]})
         
-        # Include sections with important headers
-        important_keywords = ['summary', 'conclusion', 'total', 'result', 'key', 'important']
-        for header, page in structure['headers']:
-            if any(kw in header.lower() for kw in important_keywords):
-                important.append({'type': 'header', 'pages': [page], 'header': header})
+    #     # Include sections with important headers
+    #     important_keywords = ['summary', 'conclusion', 'total', 'result', 'key', 'important']
+    #     for header, page in structure['headers']:
+    #         if any(kw in header.lower() for kw in important_keywords):
+    #             important.append({'type': 'header', 'pages': [page], 'header': header})
         
-        return important
+    #     return important
         
         # Download and parse document
         # content = await self.download_document(url)
@@ -757,6 +758,88 @@ class EnhancedRAGPipeline:
         # await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
         
         # return vector_store
+
+    # In enhanced_rag_pipeline.py, replace the old method with this one.
+# You may need to import the 'itertools' module at the top of your file: import itertools
+
+    def _identify_important_sections(self, structure: Dict) -> List[Dict]:
+        """
+        Intelligently identifies important sections using a multi-pronged strategy,
+        including structural cues, keywords, and document boundaries.
+        """
+        if not structure.get('total_pages'):
+            # If there's no page info, we can't proceed with this strategy.
+            # This might happen with non-paginated text. Return a single section.
+            return [{'type': 'full_document', 'pages': []}]
+
+        important_pages = set()
+        total_pages = structure['total_pages']
+
+        # --- STRATEGY 1: Include Document Boundaries ---
+        # Always include the beginning and end of the document, which often contain
+        # summaries, conclusions, and appendices.
+        # We increase the page count from 6 to 25 for the start.
+        pages_at_start = min(25, total_pages)
+        for i in range(1, pages_at_start + 1):
+            important_pages.add(i)
+
+        pages_at_end = min(10, total_pages)
+        for i in range(total_pages - pages_at_end + 1, total_pages + 1):
+            important_pages.add(i)
+        logger.info(f"Strategy 1 (Boundaries): Added pages 1-{pages_at_start} and last {pages_at_end}.")
+
+
+        # --- STRATEGY 2: Prioritize Pages with Tables ---
+        # Pages containing tables are almost always important.
+        table_pages = {page for page, count in structure.get('tables', [])}
+        if table_pages:
+            important_pages.update(table_pages)
+            logger.info(f"Strategy 2 (Tables): Added {len(table_pages)} pages with tables.")
+
+
+        # --- STRATEGY 3: Use an Expanded Keyword List for Headers ---
+        # Search for a much broader set of keywords in headers.
+        important_keywords = [
+            'summary', 'abstract', 'introduction', 'conclusion',
+            'method', 'methodology', 'results', 'discussion',
+            'appendix', 'glossary', 'recommendations', 'findings'
+        ]
+        header_pages = {page for header, page in structure.get('headers', [])
+                        if any(kw in header.lower() for kw in important_keywords)}
+        if header_pages:
+            important_pages.update(header_pages)
+            logger.info(f"Strategy 3 (Keywords): Added {len(header_pages)} pages with important headers.")
+
+
+        # --- STRATEGY 4: Heuristically Detect a Table of Contents ---
+        # Look for patterns that resemble a TOC on the first 20 pages.
+        toc_pages = set()
+        for header, page in structure.get('headers', []):
+            if page > 20: continue # Limit TOC search to the beginning
+            # A simple TOC regex: looks for text followed by dots and a number.
+            if re.search(r'\.{5,}\s*\d+', header):
+                toc_pages.add(page)
+        if toc_pages:
+            important_pages.update(toc_pages)
+            logger.info(f"Strategy 4 (TOC): Added {len(toc_pages)} pages that resemble a Table of Contents.")
+
+
+        # --- FINAL STEP: Consolidate and Format the Output ---
+        # Merge all found page numbers and create structured output sections.
+        if not important_pages:
+            logger.warning("No important sections were identified. Falling back to initial pages.")
+            return [{'type': 'intro_fallback', 'pages': list(range(1, min(20, total_pages + 1)))}]
+
+        # Helper to merge consecutive pages into ranges for efficiency
+        sorted_pages = sorted(list(important_pages))
+        sections = []
+        for k, g in itertools.groupby(enumerate(sorted_pages), lambda ix : ix[0] - ix[1]):
+            page_group = (x[1] for x in g)
+            page_list = list(page_group)
+            sections.append({'type': 'identified_section', 'pages': page_list})
+
+        logger.info(f"Identified {len(sections)} distinct important section(s) spanning {len(sorted_pages)} unique pages.")
+        return sections    
     
     def _create_chunk_mapping(self, small_chunks: List[str], large_chunks: List[str], 
                                 full_text: str) -> Dict[int, int]:
@@ -1712,7 +1795,13 @@ class EnhancedRAGPipeline:
                 timeout=settings.ANSWER_TIMEOUT_SECONDS
             )
             
-            answer = result['answer']
+            # answer = result['answer']
+            if result is None:
+                logger.error(f"Received a None result for question: {question[:50]}...")
+                return "Failed to generate a valid response for this question."
+        # --- END FIX ---
+
+            answer = result.get('answer', "No answer could be generated.") # Use .get() for safet
             
             # Cache the result
             await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
