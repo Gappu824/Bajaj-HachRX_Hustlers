@@ -863,20 +863,36 @@ class DocumentParser:
                             overlap=settings.CHUNK_OVERLAP_CHARS
                         )
                         
+                        # if chunks:
+                        #     # # Generate embeddings properly in async context
+                        #     # embeddings = await pipeline._generate_embeddings(chunks)
+                            
+                        #     # # Add to vector store
+                        #     # if hasattr(vector_store, 'add'):
+                        #     #     vector_store.add(chunks, embeddings, chunk_meta)
+                        #     # else:
+                        #     #     # For AdvancedVectorStore
+                        #     #     vector_store.add_hierarchical(
+                        #     #         chunks, embeddings, 
+                        #     #         chunks, embeddings,  # Use same for both small and large
+                        #     #         chunk_meta, {}
+                        #     #     )
                         if chunks:
-                            # Generate embeddings properly in async context
+    # Generate embeddings for the chunks from the file.
                             embeddings = await pipeline._generate_embeddings(chunks)
                             
-                            # Add to vector store
-                            if hasattr(vector_store, 'add'):
-                                vector_store.add(chunks, embeddings, chunk_meta)
-                            else:
-                                # For AdvancedVectorStore
-                                vector_store.add_hierarchical(
-                                    chunks, embeddings, 
-                                    chunks, embeddings,  # Use same for both small and large
-                                    chunk_meta, {}
-                                )
+                            # Correctly add the new data to the AdvancedVectorStore.
+                            # We use the same chunks for both 'small' and 'large' hierarchies
+                            # because, in this context, we are adding self-contained data from a single file.
+                            vector_store.add_hierarchical(
+                                small_chunks=chunks,
+                                small_embeddings=embeddings,
+                                large_chunks=chunks,  # Use same chunks for context
+                                large_embeddings=embeddings, # Reuse embeddings
+                                metadata=chunk_meta,
+                                # Create a simple 1-to-1 mapping for these new chunks.
+                                chunk_mapping={i: i for i in range(len(chunks))}
+                            )
                         
                         # Clean up file
                         os.unlink(file_path)

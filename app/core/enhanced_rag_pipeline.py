@@ -408,12 +408,57 @@ class EnhancedRAGPipeline:
         tasks = [self.answer_question(q, vector_store) for q in questions]
         results = await asyncio.gather(*tasks)
         return [res.get('answer', "Processing failed.") for res in results]
+    # def _extract_section(self, content: bytes, section: Dict, url: str) -> Tuple[str, List[Dict]]:
+    #     """A placeholder for a function that would extract specific sections.
+    #     This logic would be highly dependent on the document format."""
+    #     logger.warning("Section extraction is a placeholder and not fully implemented.")
+    #     # For now, we just re-parse the whole document as a fallback.
+    #     return self.universal_parser.parse_any_document(content, url)
     def _extract_section(self, content: bytes, section: Dict, url: str) -> Tuple[str, List[Dict]]:
-        """A placeholder for a function that would extract specific sections.
-        This logic would be highly dependent on the document format."""
-        logger.warning("Section extraction is a placeholder and not fully implemented.")
-        # For now, we just re-parse the whole document as a fallback.
-        return self.universal_parser.parse_any_document(content, url)
+        """
+        Efficiently extracts text and tables only from specific pages of a PDF,
+        as identified by the two-pass strategy's structural analysis.
+        """
+        text_parts = []
+        metadata_parts = []
+        
+        # This logic is optimized for PDFs, which is the primary use case for the two-pass strategy.
+        file_ext = self._get_extension(url)
+        if file_ext != '.pdf':
+            logger.warning(f"Two-pass section extraction is optimized for PDF, but got {file_ext}. Falling back to full parse.")
+            return self.universal_parser.parse_any_document(content, url)
+
+        try:
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                pages_to_process = section.get('pages', [])
+                
+                for page_num in pages_to_process:
+                    # Page numbers are 1-based, but pdf.pages is 0-indexed.
+                    if 1 <= page_num <= len(pdf.pages):
+                        page = pdf.pages[page_num - 1]
+                        
+                        # Extract text from the specific page
+                        page_text = page.extract_text() or ""
+                        if page_text.strip():
+                            text_parts.append(f"--- START PAGE {page_num} ---\n{page_text}\n--- END PAGE {page_num} ---")
+                            metadata_parts.append({'page': page_num, 'type': 'text_section'})
+                            
+                        # Extract tables from the specific page
+                        tables = page.extract_tables()
+                        for j, table in enumerate(tables):
+                            if table:
+                                table_text = self.universal_parser.fallback_parser._format_table(table)
+                                text_parts.append(f"--- TABLE {j+1} ON PAGE {page_num} ---\n{table_text}")
+                                metadata_parts.append({'page': page_num, 'type': 'table_section'})
+                                
+        except Exception as e:
+            logger.error(f"Failed to extract section from PDF on pages {section.get('pages')}: {e}")
+            # As a last resort, fall back to parsing the whole document.
+            return self.universal_parser.parse_any_document(content, url)
+
+        return "\n\n".join(text_parts), metadata_parts
+
+
         
     def _configure_gemini(self):
         """Configure Gemini with retry logic"""
