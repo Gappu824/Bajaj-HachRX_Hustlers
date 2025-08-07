@@ -88,42 +88,65 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize: {e}")
         raise
     
+    # yield
+    
+    # # Shutdown with cleanup
+    # logger.info("Shutting down...")
+    
+    # # Clean up pipeline resources
+    # if hasattr(app.state, 'rag_pipeline'):
+    #     await app.state.rag_pipeline.cleanup()
+    # if hasattr(app.state, 'performance_monitor'):
+    #     final_stats = app.state.performance_monitor.get_stats()
+    #     logger.info(f"Final performance stats: {final_stats}")
+    
+    # # Final cache cleanup
+    # cache.clear()
+    # logger.info(f"Final cache stats: {cache.get_stats()}")
+    
+    # # Clean any remaining temp files
+    # temp_dir = tempfile.gettempdir()
+    # for filename in os.listdir(temp_dir):
+    #     if filename.startswith('vecstore_') or filename.startswith('tmp'):
+    #         try:
+    #             filepath = os.path.join(temp_dir, filename)
+    #             if os.path.isdir(filepath):
+    #                 shutil.rmtree(filepath)
+    #             else:
+    #                 os.unlink(filepath)
+    #         except:
+    #             pass
+    
+    # logger.info("Shutdown complete")
+    # In the 'lifespan' function in main.py
+
+# --- REPLACE THE ENTIRE 'yield' and 'Shutdown' BLOCK WITH THIS ---
+
     yield
     
-    # Shutdown with cleanup
+    # --- NEW: Robust Shutdown and Cleanup ---
     logger.info("Shutting down...")
     
-    # Clean up pipeline resources
+    # Step 1: Clean up resources from the RAG pipeline itself
     if hasattr(app.state, 'rag_pipeline'):
         await app.state.rag_pipeline.cleanup()
+    
+    # Step 2: Log the final performance stats
     if hasattr(app.state, 'performance_monitor'):
         final_stats = app.state.performance_monitor.get_stats()
         logger.info(f"Final performance stats: {final_stats}")
     
-    # Final cache cleanup
+    # Step 3: Clear the main application cache
     cache.clear()
     logger.info(f"Final cache stats: {cache.get_stats()}")
     
-    # Clean any remaining temp files
-    temp_dir = tempfile.gettempdir()
-    for filename in os.listdir(temp_dir):
-        if filename.startswith('vecstore_') or filename.startswith('tmp'):
-            try:
-                filepath = os.path.join(temp_dir, filename)
-                if os.path.isdir(filepath):
-                    shutil.rmtree(filepath)
-                else:
-                    os.unlink(filepath)
-            except:
-                pass
-    
-    logger.info("Shutdown complete")
-@app.get("/performance/stats", tags=["Monitoring"])
-async def get_performance_stats(request: Request):
-    """Get current performance statistics"""
-    if hasattr(request.app.state, 'performance_monitor'):
-        return request.app.state.performance_monitor.get_stats()
-    return {"error": "Performance monitor not initialized"}
+    # This old block is unsafe and has been removed.
+    # It was iterating through the global temp directory, which is not reliable.
+    # temp_dir = tempfile.gettempdir()
+    # for filename in os.listdir(temp_dir): ...
+
+    logger.info("Shutdown complete.")
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
@@ -131,6 +154,12 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan
 )
+@app.get("/performance/stats", tags=["Monitoring"])
+async def get_performance_stats(request: Request):
+    """Get current performance statistics"""
+    if hasattr(request.app.state, 'performance_monitor'):
+        return request.app.state.performance_monitor.get_stats()
+    return {"error": "Performance monitor not initialized"}
 
 # Middleware for request logging
 @app.middleware("http")

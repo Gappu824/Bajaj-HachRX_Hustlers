@@ -362,49 +362,75 @@ class DocumentParser:
     #             logger.error(f"Word parsing failed with all methods: {e2}")
     #             return "Error parsing Word document.", [{'type': 'error'}]
     # +++ New, Correct Version +++
+    # @staticmethod
+    # def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Enhanced Word document parsing with pypdf fallback"""
+    #     try:
+    #         doc = Document(io.BytesIO(content))
+    #         text_parts = []
+    #         metadata = []
+            
+    #         if doc.core_properties.title:
+    #             text_parts.append(f"Title: {doc.core_properties.title}")
+    #         if doc.core_properties.subject:
+    #             text_parts.append(f"Subject: {doc.core_properties.subject}")
+            
+    #         for para in doc.paragraphs:
+    #             if para.text.strip():
+    #                 if para.style.name.startswith('Heading'):
+    #                     level = para.style.name[-1] if para.style.name[-1].isdigit() else '1'
+    #                     text_parts.append(f"\n{'#' * int(level)} {para.text}")
+    #                     metadata.append({'type': 'heading', 'level': int(level)})
+    #                 else:
+    #                     text_parts.append(para.text)
+    #                     metadata.append({'type': 'paragraph'})
+            
+    #         for i, table in enumerate(doc.tables):
+    #             text_parts.append(f"\n=== TABLE {i+1} ===")
+    #             table_data = []
+    #             for row in table.rows:
+    #                 row_text = [cell.text.strip() for cell in row.cells]
+    #                 if any(row_text):
+    #                     table_data.append(" | ".join(row_text))
+                
+    #             text_parts.extend(table_data)
+    #             text_parts.append("=== END TABLE ===\n")
+    #             metadata.append({'type': 'table', 'table_id': i+1})
+    #         if text_parts:
+    #             return "\n".join(text_parts), metadata
+    #         else:
+    #             # Return error if python-docx fails
+    #             return "Unable to parse Word document", [{'type': 'error'}]
+                
+    #     except Exception as e:
+    #         logger.error(f"Word parsing failed: {e}")
+    #         return "Error parsing Word document", [{'type': 'error'}]    
     @staticmethod
     def parse_word(content: bytes) -> Tuple[str, List[Dict]]:
-        """Enhanced Word document parsing with pypdf fallback"""
+        """
+        Enhanced Word document parsing with a robust pypdf fallback for older formats.
+        """
         try:
+            # Primary method: python-docx (best for modern .docx files)
             doc = Document(io.BytesIO(content))
-            text_parts = []
-            metadata = []
+            text_parts = [p.text for p in doc.paragraphs if p.text.strip()]
             
-            if doc.core_properties.title:
-                text_parts.append(f"Title: {doc.core_properties.title}")
-            if doc.core_properties.subject:
-                text_parts.append(f"Subject: {doc.core_properties.subject}")
-            
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    if para.style.name.startswith('Heading'):
-                        level = para.style.name[-1] if para.style.name[-1].isdigit() else '1'
-                        text_parts.append(f"\n{'#' * int(level)} {para.text}")
-                        metadata.append({'type': 'heading', 'level': int(level)})
-                    else:
-                        text_parts.append(para.text)
-                        metadata.append({'type': 'paragraph'})
-            
-            for i, table in enumerate(doc.tables):
-                text_parts.append(f"\n=== TABLE {i+1} ===")
-                table_data = []
-                for row in table.rows:
-                    row_text = [cell.text.strip() for cell in row.cells]
-                    if any(row_text):
-                        table_data.append(" | ".join(row_text))
+            # If no text paragraphs are found, it might be an old format.
+            # We raise an error to intentionally trigger the fallback logic.
+            if not text_parts:
+                raise ValueError("No text extracted with python-docx, trying fallback.")
                 
-                text_parts.extend(table_data)
-                text_parts.append("=== END TABLE ===\n")
-                metadata.append({'type': 'table', 'table_id': i+1})
-            if text_parts:
-                return "\n".join(text_parts), metadata
-            else:
-                # Return error if python-docx fails
-                return "Unable to parse Word document", [{'type': 'error'}]
-                
+            return "\n".join(text_parts), [{'type': 'docx'}]
+
         except Exception as e:
-            logger.error(f"Word parsing failed: {e}")
-            return "Error parsing Word document", [{'type': 'error'}]    
+            # This fallback is excellent for older .doc formats.
+            logger.warning(f"python-docx failed ('{e}'), attempting pypdf fallback for Word doc.")
+            try:
+                # pypdf can often extract text where python-docx fails.
+                return DocumentParser.parse_pdf(content)
+            except Exception as pypdf_error:
+                logger.error(f"All Word parsing methods failed: {pypdf_error}")
+                return "Unable to parse Word document.", [{'type': 'error'}]
 
         #     if text_parts:
         #         return "\n".join(text_parts), metadata

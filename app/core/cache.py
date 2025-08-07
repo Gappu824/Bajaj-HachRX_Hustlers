@@ -112,38 +112,64 @@ class HybridCache:
                 
     #     self.misses += len(missing_keys)
     #     return results
-    async def get_many(self, keys: List[str]) -> Dict[str, Any]:
-        """Batch get multiple keys"""
-        results = {}
+    # async def get_many(self, keys: List[str]) -> Dict[str, Any]:
+    #     """Batch get multiple keys"""
+    #     results = {}
         
-        # Check memory cache first
+    #     # Check memory cache first
+    #     for key in keys:
+    #         if key in self.memory_cache:
+    #             self.memory_cache.move_to_end(key)  # LRU update
+    #             results[key] = self.memory_cache[key]['value']
+    #             self.hits += 1
+        
+    #     # Check disk cache for missing keys
+    #     missing_keys = [k for k in keys if k not in results]
+    #     if missing_keys and self.disk_cache:
+    #         try:
+    #             # DiskCache doesn't have get_many, use individual gets
+    #             for key in missing_keys:
+    #                 value = self.disk_cache.get(key)
+    #                 if value is not None:
+    #                     results[key] = value
+    #                     self.hits += 1
+                        
+    #                     # Promote small items to memory
+    #                     size = self._get_item_size(value)
+    #                     if size < 1024 * 1024:  # < 1MB
+    #                         await self._add_to_memory(key, value, size)
+    #         except Exception as e:
+    #             logger.warning(f"Batch disk cache error: {e}")
+        
+    #     # Track misses
+    #     self.misses += len(keys) - len(results)
+        
+    #     return results
+    async def get_many(self, keys: List[str]) -> Dict[str, Any]:
+        """Efficiently gets multiple keys, first from memory, then from disk."""
+        results = {}
+        missing_keys = []
+
+        # Step 1: Get all possible keys from the fast in-memory cache.
         for key in keys:
             if key in self.memory_cache:
-                self.memory_cache.move_to_end(key)  # LRU update
                 results[key] = self.memory_cache[key]['value']
                 self.hits += 1
-        
-        # Check disk cache for missing keys
-        missing_keys = [k for k in keys if k not in results]
-        if missing_keys and self.disk_cache:
+            else:
+                missing_keys.append(key)
+
+        # Step 2: For the remaining keys, check the slower on-disk cache.
+        if missing_keys:
             try:
-                # DiskCache doesn't have get_many, use individual gets
-                for key in missing_keys:
-                    value = self.disk_cache.get(key)
-                    if value is not None:
-                        results[key] = value
-                        self.hits += 1
-                        
-                        # Promote small items to memory
-                        size = self._get_item_size(value)
-                        if size < 1024 * 1024:  # < 1MB
-                            await self._add_to_memory(key, value, size)
+                # diskcache's get method is thread-safe but not async.
+                # We run it in a thread to avoid blocking the main application.
+                disk_results = await asyncio.to_thread(self.disk_cache.get_many, missing_keys)
+                results.update(disk_results)
+                self.hits += len(disk_results)
             except Exception as e:
-                logger.warning(f"Batch disk cache error: {e}")
-        
-        # Track misses
+                logger.warning(f"Batch disk cache get failed: {e}")
+
         self.misses += len(keys) - len(results)
-        
         return results
     
     async def set_many(self, items: Dict[str, Any], ttl: int = 3600):
