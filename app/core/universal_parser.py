@@ -39,36 +39,140 @@ class UniversalDocumentParser:
         self.fallback_parser = DocumentParser()
         self.easyocr_reader = None  # Lazy load
         
+    # def parse_any_document(self, content: bytes, url: str) -> Tuple[str, List[Dict]]:
+    #     """Parse any document format using multiple strategies"""
+        
+    #     # Detect file extension
+    #     file_extension = self._get_extension(url)
+        
+    #     # Try specialized parsers first for better quality
+    #     if file_extension in ['.xlsx', '.xls', '.csv']:
+    #         return self._parse_spreadsheet_advanced(content, file_extension)
+    #     elif file_extension == '.pdf':
+    #         return self._parse_pdf_advanced(content)
+    #     elif file_extension in ['.zip', '.tar', '.gz', '.rar', '.7z']:
+    #         return self._parse_archive_advanced(content, file_extension)
+    #     elif file_extension in ['.bin', '.dat', '.raw']:
+    #         return self._parse_binary_file(content)
+        
+    #     # Try Tika for universal parsing
+    #     try:
+    #         text, metadata = self._parse_with_tika(content)
+    #         if text and len(text) > 50:
+    #             return text, metadata
+    #     except Exception as e:
+    #         logger.warning(f"Tika parsing failed: {e}")
+        
+    #     # Fallback to original parser
+    #     try:
+    #         return self.fallback_parser.parse_document(content, file_extension)
+    #     except Exception as e:
+    #         logger.error(f"All parsing methods failed: {e}")
+    #         return self._extract_raw_text(content)
+    # Replace your existing parse_any_document method with this one
     def parse_any_document(self, content: bytes, url: str) -> Tuple[str, List[Dict]]:
-        """Parse any document format using multiple strategies"""
+        """
+        Parses any document by writing its in-memory content to a temporary
+        file and then using the disk-based parsing workflow.
+
+        Args:
+            content: The document content as bytes.
+            url: The original URL of the document.
+
+        Returns:
+            A tuple containing the extracted text and metadata.
+        """
+        temp_file_path = None
+        try:
+            # Create a temporary file to store the content
+            with tempfile.NamedTemporaryFile(delete=False, suffix=self._get_extension(url)) as tmp:
+                tmp.write(content)
+                temp_file_path = tmp.name
+
+            # Delegate to the new disk-based parsing method
+            return self.parse_document_from_path(temp_file_path, url)
+
+        finally:
+            # Ensure the temporary file is always cleaned up
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
         
-        # Detect file extension
+    # Add this new method to your UniversalDocumentParser class
+    def parse_document_from_path(self, file_path: str, url: str) -> Tuple[str, List[Dict]]:
+        """
+        Parses a document directly from a file path. This is the preferred method
+        for large files to avoid loading them into memory.
+
+        Args:
+            file_path: The local path to the document.
+            url: The original URL of the document, used to infer the file type.
+
+        Returns:
+            A tuple containing the extracted text and a list of metadata dictionaries.
+        """
         file_extension = self._get_extension(url)
-        
-        # Try specialized parsers first for better quality
-        if file_extension in ['.xlsx', '.xls', '.csv']:
-            return self._parse_spreadsheet_advanced(content, file_extension)
-        elif file_extension == '.pdf':
-            return self._parse_pdf_advanced(content)
-        elif file_extension in ['.zip', '.tar', '.gz', '.rar', '.7z']:
-            return self._parse_archive_advanced(content, file_extension)
-        elif file_extension in ['.bin', '.dat', '.raw']:
-            return self._parse_binary_file(content)
-        
-        # Try Tika for universal parsing
+        logger.info(f"Parsing document from path: {file_path} with extension: {file_extension}")
+
         try:
-            text, metadata = self._parse_with_tika(content)
-            if text and len(text) > 50:
+            # Route to a specific disk-based parser if available
+            if file_extension in ['.bin', '.dat', '.raw']:
+                return self._parse_binary_file_from_path(file_path)
+
+            # Fallback to Tika for universal parsing directly from a file path
+            # Tika is excellent at handling various formats from disk
+            if settings.USE_TIKA:
+                logger.info(f"Using Apache Tika for {file_path}")
+                parsed = tika_parser.from_file(file_path)
+                text = parsed.get('content', '').strip()
+                metadata = [{'type': 'tika_from_path', 'metadata': parsed.get('metadata', {})}]
                 return text, metadata
-        except Exception as e:
-            logger.warning(f"Tika parsing failed: {e}")
-        
-        # Fallback to original parser
-        try:
+
+            # If Tika is not used, read the content and use the in-memory parser
+            with open(file_path, 'rb') as f:
+                content = f.read()
             return self.fallback_parser.parse_document(content, file_extension)
+
         except Exception as e:
-            logger.error(f"All parsing methods failed: {e}")
-            return self._extract_raw_text(content)
+            logger.error(f"Failed to parse from path {file_path}: {e}", exc_info=True)
+            return f"Error parsing file from disk: {e}", [{'type': 'error'}]  
+    # Add this helper method to your UniversalDocumentParser class
+    def _parse_binary_file_from_path(self, file_path: str) -> Tuple[str, List[Dict]]:
+        """
+        Parses a large binary file from a path by streaming it and extracting
+        readable ASCII strings.
+
+        Args:
+            file_path: The local path to the binary file.
+
+        Returns:
+            A tuple containing the extracted strings and metadata.
+        """
+        logger.info(f"Parsing binary file from path: {file_path}")
+        text_parts = ["=== EXTRACTED STRINGS FROM BINARY FILE ==="]
+        metadata = [{'type': 'binary_stream'}]
+        max_output_chars = 5_000_000  # Limit output to ~5MB of text to not overload the LLM
+        current_chars = 0
+
+        try:
+            with open(file_path, 'rb') as f:
+                while True:
+                    # Read the file in 1MB chunks
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break  # End of file
+
+                    strings = self._extract_strings(chunk)
+                    for s in strings:
+                        if current_chars + len(s) > max_output_chars:
+                            logger.warning("Reached max character limit for binary file string extraction.")
+                            return "\n".join(text_parts), metadata
+                        text_parts.append(s)
+                        current_chars += len(s)
+
+            return "\n".join(text_parts), metadata
+        except Exception as e:
+            logger.error(f"Could not process binary file {file_path}: {e}")
+            return f"Error processing binary file: {e}", [{'type': 'error'}]      
     
     def _parse_with_tika(self, content: bytes) -> Tuple[str, List[Dict]]:
         """Parse using Apache Tika"""

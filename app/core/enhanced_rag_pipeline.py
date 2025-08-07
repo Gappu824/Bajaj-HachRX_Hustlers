@@ -53,8 +53,9 @@ class AdvancedVectorStore:
     """Advanced vector store with hierarchical chunking and re-ranking"""
     
     # def __init__(self, model: SentenceTransformer, reranker: CrossEncoder, dimension: int):
-    def __init__(self, model: SentenceTransformer, reranker: CrossEncoder, dimension: int, document_url: str = None):
+    def __init__(self, model: SentenceTransformer,pipeline: 'EnhancedRAGPipeline', reranker: CrossEncoder, dimension: int, document_url: str = None):
         self.model = model
+        self.pipeline = pipeline
         self.reranker = reranker
         self.dimension = dimension
         self.document_url = document_url
@@ -297,76 +298,217 @@ class AdvancedVectorStore:
     # In your AdvancedVectorStore class definition
 
 # --- MODIFIED: Added `filter_dict` argument for hierarchical search ---
-    def search_with_reranking(self, query: str, k: int = 15, filter_dict: Dict = None) -> List[Tuple[str, float, Dict]]:
+    # def search_with_reranking(self, query: str, k: int = 15, filter_dict: Dict = None) -> List[Tuple[str, float, Dict]]:
+    #     """
+    #     Advanced search with re-ranking, now with support for metadata filtering.
+    #     """
+    #     # --- This initial retrieval part is the same ---
+    #     candidates_k = min(k * 5, len(self.chunks)) # Increased candidate pool for better filtering
+    #     query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
+    #     distances, indices = self.index.search(query_embedding, candidates_k)
+    #     keyword_results = []
+    #     if self.enhanced_retriever:
+    #         keyword_results = self.enhanced_retriever.retrieve(query, k=candidates_k)
+            
+    #     candidate_indices = set(idx for idx in indices[0] if 0 <= idx < len(self.chunks))
+    #     for idx, _ in keyword_results:
+    #         if 0 <= idx < len(self.chunks):
+    #             candidate_indices.add(idx)
+
+    #     # --- NEW: FILTERING LOGIC ---
+    #     # This is the critical new block for the hierarchical strategy.
+    #     # It filters down the candidate chunks to only those that match the filter_dict.
+    #     if filter_dict and candidate_indices:
+    #         filtered_indices = set()
+    #         # We expect a filter like {'parent_chunk_id': [1, 5, 12]}
+    #         for key, allowed_values in filter_dict.items():
+    #             for idx in candidate_indices:
+    #                 # Check if the chunk's metadata has the key and its value is in the allowed list
+    #                 if self.chunk_metadata[idx].get(key) in allowed_values:
+    #                     filtered_indices.add(idx)
+            
+    #         # Overwrite the candidate list with the much smaller, filtered list.
+    #         candidate_indices = filtered_indices
+    #         logger.info(f"Applied filter, reduced candidates to {len(candidate_indices)} chunks.")
+    #     # --- END OF NEW FILTERING LOGIC ---
+
+    #     # The rest of the re-ranking logic now operates on the filtered set of candidates.
+    #     enriched_candidates = []
+    #     for idx in candidate_indices:
+    #         enriched_candidates.append((idx, self.chunks[idx])) # Simplified enrichment for this example
+        
+    #     if enriched_candidates and self.reranker:
+    #         pairs = [[query, text] for _, text in enriched_candidates]
+    #         try:
+    #             scores = self.reranker.predict(pairs)
+    #             scored_candidates = sorted(
+    #                 [(enriched_candidates[i][0], scores[i]) for i in range(len(enriched_candidates))],
+    #                 key=lambda x: x[1],
+    #                 reverse=True
+    #             )
+                
+    #             # Return top-k with metadata
+    #             results = []
+    #             for idx, score in scored_candidates[:k]:
+    #                 results.append((
+    #                     self.chunks[idx],
+    #                     float(score),
+    #                     self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
+    #                 ))
+    #             return results
+    #         except Exception as e:
+    #             logger.warning(f"Re-ranking failed: {e}, falling back to basic search on filtered candidates.")
+        
+    #     # Fallback if re-ranking fails or is not available
+    #     results = []
+    #     for idx in list(candidate_indices)[:k]:
+    #         results.append((
+    #             self.chunks[idx],
+    #             1.0, # Default score
+    #             self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
+    #         ))
+    #     return results
+    # async def search_with_reranking(self, query: str, k: int = 15, filter_dict: Dict = None) -> List[Tuple[str, float, Dict]]:
+    #     """
+    #     Fully asynchronous and filterable advanced search with re-ranking.
+    #     """
+    #     candidates_k = min(k * 5, len(self.chunks))
+    #     if candidates_k == 0:
+    #         return []
+
+    #     # --- MODIFIED: Use async getters and run blocking calls in a thread ---
+    #     embedding_model = await self.pipeline._get_embedding_model()
+        
+    #     query_embedding = await asyncio.to_thread(
+    #         embedding_model.encode, [query], show_progress_bar=False
+    #     )
+    #     query_embedding = query_embedding.astype('float32')
+
+    #     # Semantic search (assuming self.index.search is a fast, synchronous operation)
+    #     distances, indices = self.index.search(query_embedding, candidates_k)
+        
+    #     # Keyword search
+    #     keyword_results = []
+    #     if self.enhanced_retriever:
+    #         # --- MODIFIED: Run potentially blocking TF-IDF retrieval in a thread ---
+    #         keyword_results = await asyncio.to_thread(self.enhanced_retriever.retrieve, query, k=candidates_k)
+        
+    #     candidate_indices = set(idx for idx in indices[0] if 0 <= idx < len(self.chunks))
+    #     for idx, _ in keyword_results:
+    #         if 0 <= idx < len(self.chunks):
+    #             candidate_indices.add(idx)
+
+    #     # --- NEW: FILTERING LOGIC (This part is correct as you had it) ---
+    #     if filter_dict and candidate_indices:
+    #         filtered_indices = set()
+    #         for key, allowed_values in filter_dict.items():
+    #             for idx in candidate_indices:
+    #                 if self.chunk_metadata[idx].get(key) in allowed_values:
+    #                     filtered_indices.add(idx)
+    #         candidate_indices = filtered_indices
+    #         logger.info(f"Applied filter, reduced candidates to {len(candidate_indices)} chunks.")
+        
+    #     if not candidate_indices:
+    #         return []
+
+    #     # Re-ranking logic
+    #     enriched_candidates = [(idx, self.chunks[idx]) for idx in candidate_indices]
+        
+    #     # --- MODIFIED: Lazily get the reranker and run prediction in a thread ---
+    #     reranker = await self.pipeline._get_reranker_model()
+    #     if enriched_candidates and reranker:
+    #         pairs = [[query, text] for _, text in enriched_candidates]
+    #         try:
+    #             scores = await asyncio.to_thread(reranker.predict, pairs)
+                
+    #             scored_candidates = sorted(
+    #                 [(enriched_candidates[i][0], scores[i]) for i in range(len(enriched_candidates))],
+    #                 key=lambda x: x[1], reverse=True
+    #             )
+                
+    #             results = []
+    #             for idx, score in scored_candidates[:k]:
+    #                 results.append((
+    #                     self.chunks[idx],
+    #                     float(score),
+    #                     self.chunk_metadata[idx]
+    #                 ))
+    #             return results
+    #         except Exception as e:
+    #             logger.warning(f"Re-ranking failed: {e}, falling back to basic search.")
+        
+    #     # Fallback to basic search
+    #     return [(self.chunks[idx], 1.0, self.chunk_metadata[idx]) for idx in list(candidate_indices)[:k]]
+    # In your AdvancedVectorStore class
+
+    async def search_with_reranking(self, query: str, k: int = 15, filter_dict: Dict = None) -> List[Tuple[str, float, Dict]]:
         """
-        Advanced search with re-ranking, now with support for metadata filtering.
+        Fully asynchronous and filterable advanced search with re-ranking.
+        This version is non-blocking and uses the lazy-loading getters from the pipeline.
         """
-        # --- This initial retrieval part is the same ---
-        candidates_k = min(k * 5, len(self.chunks)) # Increased candidate pool for better filtering
-        query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
-        distances, indices = self.index.search(query_embedding, candidates_k)
+        candidates_k = min(k * 5, len(self.chunks))
+        if not self.chunks or candidates_k == 0:
+            return []
+
+        # --- 1. ASYNCHRONOUS SEMANTIC SEARCH ---
+        # Lazily get the embedding model and run the blocking encode call in a thread.
+        embedding_model = await self.pipeline._get_embedding_model()
+        query_embedding = await asyncio.to_thread(
+            embedding_model.encode, [query], show_progress_bar=False
+        )
+        # The actual FAISS search is fast and can often be run synchronously.
+        # If it were slow, it would also be wrapped in to_thread.
+        distances, indices = self.index.search(query_embedding.astype('float32'), candidates_k)
+        
+        # --- 2. ASYNCHRONOUS KEYWORD SEARCH ---
         keyword_results = []
         if self.enhanced_retriever:
-            keyword_results = self.enhanced_retriever.retrieve(query, k=candidates_k)
-            
+            # Run the potentially blocking TF-IDF retrieval in a thread.
+            keyword_results = await asyncio.to_thread(self.enhanced_retriever.retrieve, query, k=candidates_k)
+        
+        # --- 3. COMBINE AND FILTER CANDIDATES (This logic is correct) ---
         candidate_indices = set(idx for idx in indices[0] if 0 <= idx < len(self.chunks))
         for idx, _ in keyword_results:
             if 0 <= idx < len(self.chunks):
                 candidate_indices.add(idx)
 
-        # --- NEW: FILTERING LOGIC ---
-        # This is the critical new block for the hierarchical strategy.
-        # It filters down the candidate chunks to only those that match the filter_dict.
         if filter_dict and candidate_indices:
             filtered_indices = set()
-            # We expect a filter like {'parent_chunk_id': [1, 5, 12]}
             for key, allowed_values in filter_dict.items():
                 for idx in candidate_indices:
-                    # Check if the chunk's metadata has the key and its value is in the allowed list
                     if self.chunk_metadata[idx].get(key) in allowed_values:
                         filtered_indices.add(idx)
-            
-            # Overwrite the candidate list with the much smaller, filtered list.
             candidate_indices = filtered_indices
             logger.info(f"Applied filter, reduced candidates to {len(candidate_indices)} chunks.")
-        # --- END OF NEW FILTERING LOGIC ---
-
-        # The rest of the re-ranking logic now operates on the filtered set of candidates.
-        enriched_candidates = []
-        for idx in candidate_indices:
-            enriched_candidates.append((idx, self.chunks[idx])) # Simplified enrichment for this example
         
-        if enriched_candidates and self.reranker:
+        if not candidate_indices:
+            return []
+
+        # --- 4. ASYNCHRONOUS RE-RANKING ---
+        enriched_candidates = [(idx, self.chunks[idx]) for idx in candidate_indices]
+        
+        # Lazily get the reranker model.
+        reranker = await self.pipeline._get_reranker_model()
+        if enriched_candidates and reranker:
             pairs = [[query, text] for _, text in enriched_candidates]
             try:
-                scores = self.reranker.predict(pairs)
+                # Run the CPU-bound prediction in a separate thread.
+                scores = await asyncio.to_thread(reranker.predict, pairs)
+                
                 scored_candidates = sorted(
                     [(enriched_candidates[i][0], scores[i]) for i in range(len(enriched_candidates))],
-                    key=lambda x: x[1],
-                    reverse=True
+                    key=lambda x: x[1], reverse=True
                 )
                 
-                # Return top-k with metadata
-                results = []
-                for idx, score in scored_candidates[:k]:
-                    results.append((
-                        self.chunks[idx],
-                        float(score),
-                        self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
-                    ))
-                return results
+                return [
+                    (self.chunks[idx], float(score), self.chunk_metadata[idx])
+                    for idx, score in scored_candidates[:k]
+                ]
             except Exception as e:
-                logger.warning(f"Re-ranking failed: {e}, falling back to basic search on filtered candidates.")
+                logger.warning(f"Re-ranking failed: {e}, falling back to basic search.")
         
-        # Fallback if re-ranking fails or is not available
-        results = []
-        for idx in list(candidate_indices)[:k]:
-            results.append((
-                self.chunks[idx],
-                1.0, # Default score
-                self.chunk_metadata[idx] if idx < len(self.chunk_metadata) else {}
-            ))
-        return results
+        # Fallback to basic search
+        return [(self.chunks[idx], 1.0, self.chunk_metadata[idx]) for idx in list(candidate_indices)[:k]]
 
 class EnhancedRAGPipeline:
     """Complete RAG pipeline with all improvements"""
@@ -377,8 +519,10 @@ class EnhancedRAGPipeline:
         # self.settings = settings
         self.llm_clients = {}  # A dictionary to cache initialized models
         self.llm_lock = asyncio.Lock()  
-        self.embedding_model = embedding_model
-        self.reranker_model = reranker_model
+        # self.embedding_model = embedding_model
+        # self.reranker_model = reranker_model
+        self.embedding_model = None
+        self.reranker_model = None
         self.settings = settings
         self.active_stores = []  # Track active vector stores
         self.temp_dirs = []  # Track temp directories
@@ -386,8 +530,62 @@ class EnhancedRAGPipeline:
         self.universal_parser = UniversalDocumentParser()
         self.question_analyzer = QuestionAnalyzer()
         self.answer_validator = AnswerValidator()
+        self.embedding_model_lock = asyncio.Lock()
+        self.reranker_model_lock = asyncio.Lock()
+        self.llm_lock = asyncio.Lock()
 
         self._configure_gemini()
+    # In EnhancedRAGPipeline class
+    async def _download_to_temp_file(self, url: str) -> str:
+        """Downloads a large file to a temporary location on disk and returns the path."""
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        # Create a temporary file that will be automatically cleaned up
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=self._get_extension(url))
+        
+        try:
+            # Set a much longer timeout for large file downloads
+            timeout = aiohttp.ClientTimeout(total=3600) # 1 hour
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    # Stream the file to disk chunk by chunk
+                    async for chunk in response.content.iter_chunked(8192):
+                        temp_file.write(chunk)
+            
+            logger.info(f"Successfully downloaded file to temporary path: {temp_file.name}")
+            return temp_file.name
+        finally:
+            temp_file.close()    
+    async def _get_embedding_model(self):
+        """Lazily loads and returns the sentence-transformer embedding model."""
+        if self.embedding_model is None:
+            async with self.embedding_model_lock:
+                # Double-check after acquiring the lock
+                if self.embedding_model is None:
+                    logger.info("Lazily loading embedding model...")
+                    from sentence_transformers import SentenceTransformer
+                    # Run the synchronous model loading in a separate thread
+                    self.embedding_model = await asyncio.to_thread(
+                        SentenceTransformer, settings.EMBEDDING_MODEL_NAME
+                    )
+                    logger.info("Embedding model loaded.")
+        return self.embedding_model 
+    async def _get_reranker_model(self):
+        """Lazily loads and returns the cross-encoder reranker model."""
+        if self.reranker_model is None:
+            async with self.reranker_model_lock:
+                # Double-check after acquiring the lock
+                if self.reranker_model is None:
+                    logger.info("Lazily loading reranker model...")
+                    from sentence_transformers.cross_encoder import CrossEncoder
+                    # Run the synchronous model loading in a separate thread
+                    self.reranker_model = await asyncio.to_thread(
+                        CrossEncoder, settings.RERANKER_MODEL_NAME
+                    )
+                    logger.info("Reranker model loaded.")
+        return self.reranker_model   
+    
+
 
     def _format_table(self, table: List[List]) -> str:
         """Format table data nicely"""
@@ -549,6 +747,13 @@ class EnhancedRAGPipeline:
 
     async def _create_hierarchical_store(self, text: str, metadata: List[Dict]) -> AdvancedVectorStore:
         """Helper to create a vector store with hierarchical chunks."""
+        embedding_model = await self._get_embedding_model() # Ensure model is loaded
+        reranker_model = await self._get_reranker_model()   # Ensure reranker is loaded
+        # dimension = embedding_model.get_sentence_embedding_dimension()
+        dimension = embedding_model.get_sentence_embedding_dimension()
+    # Pass the loaded models to the constructor
+        store = AdvancedVectorStore(self, embedding_model, reranker_model, dimension)
+        
         small_chunks, small_meta = SmartChunker.chunk_document(
             text, metadata, settings.CHUNK_SIZE_CHARS, settings.CHUNK_OVERLAP_CHARS
         )
@@ -559,8 +764,8 @@ class EnhancedRAGPipeline:
         small_embeds = await self._generate_embeddings(small_chunks)
         large_embeds = await self._generate_embeddings(large_chunks)
         
-        dimension = self.embedding_model.get_sentence_embedding_dimension()
-        store = AdvancedVectorStore(self.embedding_model, self.reranker_model, dimension)
+        # dimension = self.embedding_model.get_sentence_embedding_dimension()
+        # store = AdvancedVectorStore(self, self.embedding_model, self.reranker_model, dimension)
         store.add_hierarchical(
             small_chunks, small_embeds, large_chunks, large_embeds, small_meta, chunk_mapping
         )
@@ -886,26 +1091,61 @@ class EnhancedRAGPipeline:
     #     # Create vector store with extracted content
     #     return await self._create_hierarchical_store(full_text, metadata_parts)
     # In enhanced_rag_pipeline.py
+    # async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
+    #     """Get or create advanced vector store with hierarchical chunking"""
+        
+    #     # Generate cache key
+    #     cache_key = f"adv_vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+        
+    #     # Check cache
+    #     cached_store = await cache.get(cache_key)
+    #     if cached_store:
+    #         logger.info(f"Using cached vector store for {url}")
+    #         return cached_store
+        
+    #     logger.info(f"Creating new advanced vector store for {url}")
+    #     content = await self.download_document(url)
+    #     text, metadata = self.universal_parser.parse_any_document(content, url)
+    #     vector_store = await self._standard_processing(text, metadata)
+        
+    #     await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+    #     return vector_store
+    # In EnhancedRAGPipeline class
     async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
-        """Get or create advanced vector store with hierarchical chunking"""
-        
-        # Generate cache key
         cache_key = f"adv_vecstore_{hashlib.md5(url.encode()).hexdigest()}"
-        
-        # Check cache
         cached_store = await cache.get(cache_key)
         if cached_store:
             logger.info(f"Using cached vector store for {url}")
             return cached_store
         
         logger.info(f"Creating new advanced vector store for {url}")
-        content = await self.download_document(url)
-        text, metadata = self.universal_parser.parse_any_document(content, url)
-        vector_store = await self._standard_processing(text, metadata)
-        
-        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
-        return vector_store
+        temp_file_path = None
+        try:
+            # Download the file to disk instead of memory
+            temp_file_path = await self._download_to_temp_file(url)
 
+            # The UniversalDocumentParser needs to be adapted to read from a file path
+            # For now, let's assume it can, or we read it chunk by chunk here.
+            # This example assumes the parser can handle a file path.
+            # NOTE: This requires modifying UniversalDocumentParser to accept a file path.
+            # For binary files like this, a specialized parser is needed anyway.
+            
+            # For a .bin file, standard parsers will fail. Let's simulate extracting text.
+            # In a real scenario, you'd have a specific parser for this binary format.
+            with open(temp_file_path, 'rb') as f:
+                # We can't process a 10GB binary file meaningfully with a generic text parser.
+                # This demonstrates the pattern, but the parsing logic itself is the next challenge.
+                content_chunk = f.read(10 * 1024 * 1024) # Read first 10MB as a sample
+                text, metadata = self.universal_parser.parse_any_document(content_chunk, url)
+            
+            vector_store = await self._standard_processing(text, metadata)
+            await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+            return vector_store
+
+        finally:
+            # Clean up the temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
     # async def _hierarchical_processing(self, file_path: str, document_hash: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
     # async def _hierarchical_processing(self, content: bytes, document_hash: str, filename: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
     #     """
@@ -1386,44 +1626,97 @@ class EnhancedRAGPipeline:
     #         final_embeddings[i] = embedding
             
     #     return final_embeddings.astype('float32')
-    async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
-        """
-        Generate embeddings with a robust caching strategy.
-        """
-        all_embeddings = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()), dtype=np.float32)
-        chunks_to_process = {}  # Maps index -> chunk
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """
+    #     Generate embeddings with a robust caching strategy.
+    #     """
+    #     all_embeddings = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()), dtype=np.float32)
+    #     chunks_to_process = {}  # Maps index -> chunk
 
-        # Step 1: Check cache for existing embeddings
-        cache_keys = {i: f"emb_{hashlib.md5(chunk.encode()).hexdigest()}" for i, chunk in enumerate(chunks)}
-        # Use the corrected get_many from your cache.py
+    #     # Step 1: Check cache for existing embeddings
+    #     cache_keys = {i: f"emb_{hashlib.md5(chunk.encode()).hexdigest()}" for i, chunk in enumerate(chunks)}
+    #     # Use the corrected get_many from your cache.py
+    #     cached_results = await cache.get_many(list(cache_keys.values()))
+
+    #     for i, chunk in enumerate(chunks):
+    #         key = cache_keys[i]
+    #         if key in cached_results and cached_results[key] is not None:
+    #             all_embeddings[i] = cached_results[key]
+    #         else:
+    #             chunks_to_process[i] = chunk
+
+    #     # Step 2: Process only the chunks that were not found in the cache
+    #     if chunks_to_process:
+    #         logger.info(f"Generating embeddings for {len(chunks_to_process)} new chunks.")
+    #         indices = list(chunks_to_process.keys())
+    #         texts_to_embed = list(chunks_to_process.values())
+
+    #         # Run the CPU-bound encoding in a separate thread
+    #         new_embeddings = await asyncio.to_thread(
+    #             self.embedding_model.encode,
+    #             texts_to_embed,
+    #             batch_size=settings.EMBEDDING_BATCH_SIZE,
+    #             show_progress_bar=False,
+    #             convert_to_numpy=True
+    #         )
+
+    #         # Step 3: Update the main embeddings array and cache the new results
+    #         items_to_cache = {}
+    #         for i, embedding in enumerate(new_embeddings):
+    #             original_index = indices[i]
+    #             all_embeddings[original_index] = embedding
+    #             items_to_cache[cache_keys[original_index]] = embedding
+            
+    #         if items_to_cache:
+    #             await cache.set_many(items_to_cache, ttl=settings.EMBEDDING_CACHE_TTL)
+                
+    #     return all_embeddings
+    # In the EnhancedRAGPipeline class
+
+    async def _generate_embeddings(self, texts: List[str]) -> np.ndarray:
+        """
+        Generates embeddings with lazy loading, a robust caching strategy,
+        and non-blocking execution.
+        """
+        if not texts:
+            return np.array([])
+
+        # --- NEW: Get the model first to ensure it's loaded before we use its properties ---
+        embedding_model = await self._get_embedding_model()
+
+        # --- FIX: Use the loaded model's dimension to initialize the array ---
+        all_embeddings = np.zeros((len(texts), embedding_model.get_sentence_embedding_dimension()), dtype=np.float32)
+        
+        chunks_to_process = {}
+
+        # --- Your excellent caching logic is preserved ---
+        cache_keys = {i: f"emb_{hashlib.md5(chunk.encode()).hexdigest()}" for i, chunk in enumerate(texts)}
         cached_results = await cache.get_many(list(cache_keys.values()))
 
-        for i, chunk in enumerate(chunks):
+        for i, chunk in enumerate(texts):
             key = cache_keys[i]
             if key in cached_results and cached_results[key] is not None:
                 all_embeddings[i] = cached_results[key]
             else:
                 chunks_to_process[i] = chunk
 
-        # Step 2: Process only the chunks that were not found in the cache
         if chunks_to_process:
             logger.info(f"Generating embeddings for {len(chunks_to_process)} new chunks.")
-            indices = list(chunks_to_process.keys())
+            indices_to_process = list(chunks_to_process.keys())
             texts_to_embed = list(chunks_to_process.values())
 
-            # Run the CPU-bound encoding in a separate thread
+            # --- Your correct non-blocking call is preserved ---
             new_embeddings = await asyncio.to_thread(
-                self.embedding_model.encode,
+                embedding_model.encode,
                 texts_to_embed,
                 batch_size=settings.EMBEDDING_BATCH_SIZE,
                 show_progress_bar=False,
                 convert_to_numpy=True
             )
 
-            # Step 3: Update the main embeddings array and cache the new results
             items_to_cache = {}
             for i, embedding in enumerate(new_embeddings):
-                original_index = indices[i]
+                original_index = indices_to_process[i]
                 all_embeddings[original_index] = embedding
                 items_to_cache[cache_keys[original_index]] = embedding
             
@@ -1534,7 +1827,7 @@ class EnhancedRAGPipeline:
         question_info = self.question_analyzer.analyze(question)
         
         # 2. Retrieve relevant chunks
-        search_results = vector_store.search_with_reranking(question, k=settings.MAX_CHUNKS_PER_QUERY)
+        search_results = await vector_store.search_with_reranking(question, k=settings.MAX_CHUNKS_PER_QUERY)
         chunks = [chunk for chunk, score, meta in search_results]
         scores = [score for chunk, score, meta in search_results]
         
@@ -1760,6 +2053,7 @@ class EnhancedRAGPipeline:
         # Answer each sub-question
         sub_answers = []
         for sub_q in sub_questions:
+            sub_q_context = "\n\n---\n\n".join(chunks)
             sub_answer = await self._generate_answer(sub_q, chunks, {'type': 'simple'})
             sub_answers.append(f"Q: {sub_q}\nA: {sub_answer}")
         
@@ -2209,18 +2503,27 @@ class EnhancedRAGPipeline:
                 timeout=settings.ANSWER_TIMEOUT_SECONDS
             )
             
-            # answer = result['answer']
-            if result is None:
-                logger.error(f"Received a None result for question: {question[:50]}...")
-                return "Failed to generate a valid response for this question."
-        # --- END FIX ---
+        #     # answer = result['answer']
+        #     if result is None:
+        #         logger.error(f"Received a None result for question: {question[:50]}...")
+        #         return "Failed to generate a valid response for this question."
+        # # --- END FIX ---
 
-            answer = result.get('answer', "No answer could be generated.") # Use .get() for safet
+        #     answer = result.get('answer', "No answer could be generated.") # Use .get() for safet
+            answer = result.get('answer') # Use .get() for safe access
+
+# Check if the answer is invalid or an error message
+            if not answer or self._is_error_answer(answer):
+                logger.error(f"Received an invalid or error answer: {answer}")
+                return answer or "Failed to generate a valid response." # Return the error or a fallback
+
+            await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
+            return answer
             
             # Cache the result
-            await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
+            # await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
             
-            return answer
+            # return answer
             
         except asyncio.TimeoutError:
             logger.warning(f"Timeout for question: {question[:50]}...")

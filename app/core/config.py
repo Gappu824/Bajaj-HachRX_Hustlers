@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     BEARER_TOKEN: str = ""
     
     # Model Configuration - optimized for accuracy
-    EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'
+    # EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'
+    EMBEDDING_MODEL_NAME: str = 'BAAI/bge-fast-en'
     RERANKER_MODEL_NAME: str = 'cross-encoder/ms-marco-MiniLM-L-12-v2'
     LLM_MODEL_NAME: str = 'gemini-1.5-flash'
     LLM_MODEL_NAME_PRECISE: str = 'gemini-1.5-pro-latest'
