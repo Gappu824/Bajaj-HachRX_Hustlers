@@ -27,8 +27,7 @@ requests
 tenacity
 aiohttp
 aiofiles
-asyncio-throttle
-nest-asyncio
+
 
 # Universal document processing
 tika
@@ -87,4 +86,3 @@ tabula-py
 camelot-py[cv]
 easyocr
 
-cross-encoder
