@@ -691,7 +691,9 @@ class EnhancedRAGPipeline:
         important = []
         
         # Always include first few pages (usually summary/intro)
-        important.append({'type': 'intro', 'pages': range(1, min(6, structure['total_pages'] + 1))})
+        # important.append({'type': 'intro', 'pages': range(1, min(6, structure['total_pages'] + 1))})
+        important.append({'type': 'intro', 'pages': range(1, min(25, structure['total_pages'] + 1))}) # Increased from 6 to 25
+
         
         # Include pages with tables
         for page, count in structure['tables']:
