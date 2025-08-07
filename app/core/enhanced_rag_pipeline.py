@@ -58,7 +58,12 @@ class AdvancedVectorStore:
         self.reranker = reranker
         self.dimension = dimension
         self.document_url = document_url
-        self.document_hash = hashlib.md5(document_url.encode()).hexdigest() if document_url else None
+        if document_url:
+            self.document_hash = hashlib.md5(document_url.encode()).hexdigest()
+        else:
+            # Create a default hash if no URL provided
+            self.document_hash = hashlib.md5(b"default_document").hexdigest()
+        # self.document_hash = hashlib.md5(document_url.encode()).hexdigest() if document_url else None
 
         self.max_chunks_in_memory = 500  # Keep only top 500 chunks in memory
         self.disk_cache_dir = tempfile.mkdtemp(prefix="vecstore_")
@@ -2189,7 +2194,9 @@ class EnhancedRAGPipeline:
         # NEW: Individual timeout per question with cache check
         
         # Check if this specific question-document pair is cached
-        cache_key = self._get_question_cache_key(vector_store.document_hash, question)
+        doc_hash = getattr(vector_store, 'document_hash', None) or "unknown"
+        cache_key = self._get_question_cache_key(doc_hash, question)
+        # cache_key = self._get_question_cache_key(vector_store.document_hash, question)
         cached_result = await cache.get(cache_key)
         
         if cached_result:
@@ -2310,9 +2317,14 @@ class EnhancedRAGPipeline:
     def _get_question_cache_key(self, doc_hash: str, question: str) -> str:
         """Generate cache key for question-document pair"""
         # NEW: Consistent cache key generation
-        
+        safe_doc_hash = doc_hash or "unknown_doc"
         question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
-        return f"qa_{doc_hash[:8]}_{question_hash}" 
+        return f"qa_{safe_doc_hash[:8]}_{question_hash}"
+        # if doc_hash is None:
+        #     doc_hash = "unknown_doc"
+        
+        # question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+        # return f"qa_{doc_hash[:8]}_{question_hash}" 
 
     def _is_error_answer(self, answer: str) -> bool:
         """Check if answer is an error response"""
