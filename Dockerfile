@@ -42,7 +42,8 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /opt/tika && \
     wget -q https://archive.apache.org/dist/tika/2.9.0/tika-server-standard-2.9.0.jar \
     -O /opt/tika/tika-server.jar
-RUN apt-get update && apt-get install -y --no-install-recommends openjdk-11-jre-headless libopenjp2-7 && rm -rf /var/lib/apt/lists/*    
+# RUN apt-get update && apt-get install -y --no-install-recommends openjdk-11-jre-headless libopenjp2-7 && rm -rf /var/lib/apt/lists/* 
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless libopenjp2-7 && rm -rf /var/lib/apt/lists/*   
 
 # Copy requirements
 COPY requirements.txt .
