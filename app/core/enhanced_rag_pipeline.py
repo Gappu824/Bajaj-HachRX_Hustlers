@@ -12,6 +12,8 @@ from collections import defaultdict
 import numpy as np
 import tempfile
 import aiofiles  # Missing import
+import shutil
+import pickle
 
 # External imports
 import aiohttp
@@ -106,6 +108,10 @@ class AdvancedVectorStore:
         
         # Save to disk
         disk_file = os.path.join(self.disk_cache_dir, f"chunks_{time.time()}.pkl")
+        # data_to_evict = {
+        #     'chunks': self.small_chunks[:evict_count],
+        #     'metadata': self.chunk_metadata[:evict_count]
+        # }
         with open(disk_file, 'wb') as f:
             pickle.dump({
                 'chunks': self.small_chunks[:evict_count],
@@ -222,6 +228,64 @@ class EnhancedRAGPipeline:
         self.answer_validator = AnswerValidator()
 
         self._configure_gemini()
+
+    async def _create_hierarchical_store(self, text: str, metadata: List[Dict]) -> AdvancedVectorStore:
+        """Helper to create a vector store with hierarchical chunks."""
+        small_chunks, small_meta = SmartChunker.chunk_document(
+            text, metadata, settings.CHUNK_SIZE_CHARS, settings.CHUNK_OVERLAP_CHARS
+        )
+        large_chunks, large_meta = SmartChunker.chunk_document(
+            text, metadata, settings.LARGE_CHUNK_SIZE_CHARS, settings.LARGE_CHUNK_OVERLAP_CHARS
+        )
+        chunk_mapping = self._create_chunk_mapping(small_chunks, large_chunks, text)
+        small_embeds = await self._generate_embeddings(small_chunks)
+        large_embeds = await self._generate_embeddings(large_chunks)
+        
+        dimension = self.embedding_model.get_sentence_embedding_dimension()
+        store = AdvancedVectorStore(self.embedding_model, self.reranker_model, dimension)
+        store.add_hierarchical(
+            small_chunks, small_embeds, large_chunks, large_embeds, small_meta, chunk_mapping
+        )
+        return store    
+    async def _standard_processing(self, text: str, metadata: List[Dict]) -> AdvancedVectorStore:
+        """Standard document processing for non-large files."""
+        return await self._create_hierarchical_store(text, metadata)
+    def _get_extension(self, url: str) -> str:
+        """Helper to extract a file extension from a URL."""
+        from urllib.parse import urlparse
+        path = urlparse(url).path
+        return os.path.splitext(path)[1].lower()
+    async def _create_prioritized_store(self, prioritized_chunks) -> AdvancedVectorStore:
+        """Creates a vector store from chunks that have already been scored and prioritized."""
+        small_chunks = [chunk for chunk, meta, score in prioritized_chunks]
+        metadata = [meta for chunk, meta, score in prioritized_chunks]
+
+        # For a prioritized store, we can simplify by using the same chunks for both hierarchies
+        embeddings = await self._generate_embeddings(small_chunks)
+        
+        dimension = self.embedding_model.get_sentence_embedding_dimension()
+        store = AdvancedVectorStore(self.embedding_model, self.reranker_model, dimension)
+        
+        # A simple 1-to-1 mapping is sufficient here
+        mapping = {i: i for i in range(len(small_chunks))}
+        
+        store.add_hierarchical(small_chunks, embeddings, small_chunks, embeddings, metadata, mapping)
+        return store
+    
+    async def _process_questions_optimized(
+    self, questions: List[str], vector_store: AdvancedVectorStore, question_analysis: Dict
+) -> List[str]:
+        """Processes questions using the optimized, question-aware vector store."""
+        tasks = [self.answer_question(q, vector_store) for q in questions]
+        results = await asyncio.gather(*tasks)
+        return [res.get('answer', "Processing failed.") for res in results]
+    def _extract_section(self, content: bytes, section: Dict, url: str) -> Tuple[str, List[Dict]]:
+        """A placeholder for a function that would extract specific sections.
+        This logic would be highly dependent on the document format."""
+        logger.warning("Section extraction is a placeholder and not fully implemented.")
+        # For now, we just re-parse the whole document as a fallback.
+        return self.universal_parser.parse_any_document(content, url)
+        
     def _configure_gemini(self):
         """Configure Gemini with retry logic"""
         # NEW: Robust Gemini configuration
@@ -331,7 +395,8 @@ class EnhancedRAGPipeline:
                     # Stream large files
                     chunks = []
                     total_size = 0
-                    max_size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+                    # max_size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+                    max_size = (settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024) if settings.MAX_DOCUMENT_SIZE_MB else float('inf')
                     
                     # Process in 1MB chunks
                     async for chunk in response.content.iter_chunked(1024 * 1024):
@@ -688,6 +753,38 @@ class EnhancedRAGPipeline:
         return await self._generate_answer_with_validation(
         question, unique_chunks, question_info, all_scores
     )
+    # In EnhancedRAGPipeline class in app/core/enhanced_rag_pipeline.py
+
+# --- NEW ---
+    async def _generate_answer_with_validation(
+        self, question: str, chunks: List[str], question_info: Dict, scores: List[float]
+    ) -> Dict[str, Any]:
+        """
+        Generates an answer, validates it, and calculates confidence in a single step.
+        This replaces the separate calls to generate, validate, and calculate confidence.
+        """
+        # Step 1: Generate the initial answer
+        if question_info['requires_multi_step']:
+            answer_text = await self._multi_step_reasoning(question, chunks, question_info)
+        else:
+            answer_text = await self._generate_answer(question, chunks, question_info)
+
+        # Step 2: Validate the generated answer
+        validated_answer = self.answer_validator.validate(
+            question, answer_text, question_info, chunks
+        )
+
+        # Step 3: Calculate a final confidence score
+        confidence = self._calculate_confidence(validated_answer, scores)
+
+        # Step 4: Assemble and return the final, detailed response object
+        return {
+            'answer': validated_answer.get('answer', "No answer could be generated."),
+            'confidence': confidence,
+            'question_type': question_info.get('type'),
+            'sources': validated_answer.get('sources', []),
+            'validation_notes': validated_answer.get('notes', '')
+        }
         
         # # 5. Multi-step reasoning if needed
         # if question_info['requires_multi_step']:

@@ -107,21 +107,33 @@ class HybridCache:
     #     self.disk_cache.clear()
     #     self.hits = 0
     #     self.misses = 0
+    # def clear(self):
+    #     """Clear memory and disk cache"""
+    #     # OLD: No cleanup
+    #     # NEW: Proper cleanup
+        
+    #     self.small_chunks.clear()
+    #     self.large_chunks.clear()
+    #     self.chunk_metadata.clear()
+    #     self.chunk_to_large_mapping.clear()
+        
+    #     # Clean disk cache
+    #     if os.path.exists(self.disk_cache_dir):
+    #         shutil.rmtree(self.disk_cache_dir)
+        
+    #     logger.info("Vector store cleared")
     def clear(self):
-        """Clear memory and disk cache"""
-        # OLD: No cleanup
-        # NEW: Proper cleanup
+        """Correctly clear the memory and disk caches."""
+        # Clears the in-memory cache
+        self.memory_cache.clear()
+        self.current_memory_size = 0
         
-        self.small_chunks.clear()
-        self.large_chunks.clear()
-        self.chunk_metadata.clear()
-        self.chunk_to_large_mapping.clear()
+        # Clears the on-disk cache provided by the diskcache library
+        self.disk_cache.clear()
         
-        # Clean disk cache
-        if os.path.exists(self.disk_cache_dir):
-            shutil.rmtree(self.disk_cache_dir)
-        
-        logger.info("Vector store cleared")
+        self.hits = 0
+        self.misses = 0
+        logger.info("HybridCache cleared successfully.")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""

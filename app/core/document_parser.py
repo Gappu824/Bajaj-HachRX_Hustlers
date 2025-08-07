@@ -20,6 +20,10 @@ from odf.opendocument import load
 from app.core.smart_chunker import SmartChunker
 from app.core.config import settings
 import asyncio
+# In document_parser.py
+
+# --- (7) ADD THIS IMPORT AT THE TOP ---
+import aiofiles
 
 logger = logging.getLogger(__name__)
 

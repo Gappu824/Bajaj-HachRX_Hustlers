@@ -2,6 +2,7 @@
 import re
 from typing import List, Tuple, Dict
 import logging
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
