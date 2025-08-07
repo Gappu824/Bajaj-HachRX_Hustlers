@@ -76,7 +76,16 @@ class Settings(BaseSettings):
     # EMBEDDING_CACHE_TTL: int = 86400  # 24 hours
     EMBEDDING_BATCH_SIZE: int = 16  # Optimized batch size
     # USE_EMBEDDING_CACHE: bool = True
-    
+    # In config.py
+
+# ... your other settings ...
+
+# --- NEW: Parameters for Hierarchical RAG ---
+    PARENT_CHUNK_SIZE = 10000
+    PARENT_CHUNK_OVERLAP = 500
+    CHILD_CHUNK_SIZE = 1000
+    CHILD_CHUNK_OVERLAP = 100
+        
     class Config:
         env_file = ".env"
         env_file_encoding = 'utf-8'

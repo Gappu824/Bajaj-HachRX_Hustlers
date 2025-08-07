@@ -26,6 +26,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import nltk
 from rapidfuzz import fuzz
 import itertools
+from typing import Tuple 
 
 # Local imports
 from app.core.config import settings
@@ -35,6 +36,7 @@ from app.core.smart_chunker import SmartChunker
 from app.core.enhanced_retrieval import EnhancedRetriever
 from app.core.question_analyzer import QuestionAnalyzer
 from app.core.answer_validator import AnswerValidator
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Add these imports at the top of enhanced_rag_pipeline.py
 import aiofiles  # Missing import
 # from typing import List, Tuple, Dict, Optional, Any
@@ -591,65 +593,153 @@ class EnhancedRAGPipeline:
             raise
 
     
-    async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
-        """Get or create advanced vector store with hierarchical chunking"""
+    # async def get_or_create_vector_store(self, url: str) -> AdvancedVectorStore:
+    #     """Get or create advanced vector store with hierarchical chunking"""
         
-        # Generate cache key
-        cache_key = f"adv_vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+    #     # Generate cache key
+    #     cache_key = f"adv_vecstore_{hashlib.md5(url.encode()).hexdigest()}"
         
-        # Check cache
-        cached_store = await cache.get(cache_key)
-        if cached_store:
-            logger.info(f"Using cached vector store for {url}")
-            return cached_store
+    #     # Check cache
+    #     cached_store = await cache.get(cache_key)
+    #     if cached_store:
+    #         logger.info(f"Using cached vector store for {url}")
+    #         return cached_store
         
-        logger.info(f"Creating new advanced vector store for {url}")
-        content = await self.download_document(url)
+    #     logger.info(f"Creating new advanced vector store for {url}")
+    #     content = await self.download_document(url)
     
-    # Check document size
-        is_large_doc = len(content) > 5 * 1024 * 1024  # > 5MB
+    # # Check document size
+    #     is_large_doc = len(content) > 5 * 1024 * 1024  # > 5MB
         
-        if is_large_doc:
-            logger.info("Using two-pass strategy for large document")
-            vector_store = await self._two_pass_processing(content, url)
-        else:
-            # Standard processing for smaller documents
-            text, metadata = self.universal_parser.parse_any_document(content, url)
-            vector_store = await self._standard_processing(text, metadata)
+    #     if is_large_doc:
+    #         logger.info("Using two-pass strategy for large document")
+    #         vector_store = await self._two_pass_processing(content, url)
+    #     else:
+    #         # Standard processing for smaller documents
+    #         text, metadata = self.universal_parser.parse_any_document(content, url)
+    #         vector_store = await self._standard_processing(text, metadata)
         
-        await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
-        return vector_store
+    #     await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+    #     return vector_store
+    # ---> MODIFIED: The function now returns a Tuple of two stores.
+# from typing import Tuple 
+
+    async def get_or_create_vector_store(self, url: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+        """
+        Get or create a pair of vector stores using the robust Hierarchical RAG strategy.
+        Returns (summary_store, full_text_store).
+        """
+        # ---> NEW: Generate two separate cache keys, one for each store.
+        document_hash = hashlib.md5(url.encode()).hexdigest()
+        summary_cache_key = f"summary_store_{document_hash}"
+        full_text_cache_key = f"full_text_store_{document_hash}"
+
+        # ---> MODIFIED: Check the cache for BOTH stores.
+        summary_store = await cache.get(summary_cache_key)
+        full_text_store = await cache.get(full_text_cache_key)
+
+        if summary_store and full_text_store:
+            logger.info(f"Using cached hierarchical vector stores for {url}")
+            return summary_store, full_text_store
+
+        logger.info(f"Creating new hierarchical vector stores for {url}")
+        # We now call a single, unified processing function.
+        # We pass the file path directly to avoid loading large files into memory here.
+        file_path = await self.download_document(url)
+
+        # ---> REMOVED: The old if/else logic for document size is no longer needed.
+        # The hierarchical strategy is superior for documents of almost all sizes.
+        
+        # ---> NEW: A single call to the new, powerful hierarchical processing method.
+        summary_store, full_text_store = await self._hierarchical_processing(file_path, document_hash)
+
+        # ---> MODIFIED: Set both stores in the cache with their respective keys.
+        await cache.set(summary_cache_key, summary_store, ttl=settings.CACHE_TTL_SECONDS)
+        await cache.set(full_text_cache_key, full_text_store, ttl=settings.CACHE_TTL_SECONDS)
+
+        return summary_store, full_text_store
     
-    async def _two_pass_processing(self, content: bytes, url: str) -> AdvancedVectorStore:
-        """Two-pass processing for large documents"""
-        # NEW: Implement two-pass strategy
+    # async def _two_pass_processing(self, content: bytes, url: str) -> AdvancedVectorStore:
+    #     """Two-pass processing for large documents"""
+    #     # NEW: Implement two-pass strategy
         
-        # First pass: Quick scan for structure
-        logger.info("First pass: Extracting document structure")
+    #     # First pass: Quick scan for structure
+    #     logger.info("First pass: Extracting document structure")
         
-        # Extract headers, TOC, summary
-        structure_info = self._extract_structure(content, url)
+    #     # Extract headers, TOC, summary
+    #     structure_info = self._extract_structure(content, url)
         
-        # Identify important sections based on structure
-        important_sections = self._identify_important_sections(structure_info)
+    #     # Identify important sections based on structure
+    #     important_sections = self._identify_important_sections(structure_info)
         
-        logger.info(f"Identified {len(important_sections)} important sections")
+    #     logger.info(f"Identified {len(important_sections)} important sections")
         
-        # Second pass: Detailed extraction of important parts
-        logger.info("Second pass: Detailed extraction")
+    #     # Second pass: Detailed extraction of important parts
+    #     logger.info("Second pass: Detailed extraction")
         
-        text_parts = []
-        metadata_parts = []
+    #     text_parts = []
+    #     metadata_parts = []
         
-        for section in important_sections:
-            section_text, section_meta = self._extract_section(content, section, url)
-            text_parts.append(section_text)
-            metadata_parts.extend(section_meta)
+    #     for section in important_sections:
+    #         section_text, section_meta = self._extract_section(content, section, url)
+    #         text_parts.append(section_text)
+    #         metadata_parts.extend(section_meta)
         
-        full_text = "\n\n".join(text_parts)
+    #     full_text = "\n\n".join(text_parts)
         
-        # Create vector store with extracted content
-        return await self._create_hierarchical_store(full_text, metadata_parts)
+    #     # Create vector store with extracted content
+    #     return await self._create_hierarchical_store(full_text, metadata_parts)
+    # In enhanced_rag_pipeline.py
+
+    async def _hierarchical_processing(self, file_path: str, document_hash: str) -> Tuple[AdvancedVectorStore, AdvancedVectorStore]:
+        """
+        Creates two vector stores: one with summaries and one with the full text.
+        """
+        logger.info("Starting hierarchical processing for the document.")
+        # Use the universal parser to get all text
+        full_text = await self.universal_parser.parse(file_path)
+
+        # --- Create Layer 1: The Parent Chunks and Summary Store ---
+        parent_chunker = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
+        parent_chunks = parent_chunker.split_text(full_text)
+
+        summary_texts = []
+        parent_chunk_metadata = []
+
+        # Use an LLM to summarize each large parent chunk
+        summarization_prompt = "Summarize the following text in one concise paragraph, capturing the key topics and entities: {chunk}"
+        summarization_model = self._get_llm(settings.LLM_MODEL_NAME)
+
+        for i, chunk in enumerate(parent_chunks):
+            response = await summarization_model.generate_content_async(summarization_prompt.format(chunk=chunk))
+            summary_texts.append(response.text)
+            parent_chunk_metadata.append({'parent_chunk_id': i, 'original_text_sample': chunk[:200]})
+
+        # Create the fast summary store
+        summary_store = AdvancedVectorStore(document_hash + "_summary")
+        summary_embeddings = await self._generate_embeddings(summary_texts)
+        summary_store.add_documents(summary_texts, summary_embeddings, parent_chunk_metadata)
+        logger.info(f"Created summary store with {len(summary_texts)} summaries.")
+
+
+        # --- Create Layer 2: The Child Chunks and Full-Text Store ---
+        child_chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        full_text_store = AdvancedVectorStore(document_hash + "_full")
+
+        for i, p_chunk in enumerate(parent_chunks):
+            child_chunks = child_chunker.split_text(p_chunk)
+            child_embeddings = await self._generate_embeddings(child_chunks)
+            # Add metadata linking child chunks back to their parent
+            child_metadata = [{'parent_chunk_id': i} for _ in child_chunks]
+            full_text_store.add_documents(child_chunks, child_embeddings, child_metadata)
+
+        logger.info(f"Created full-text store with {len(full_text_store.chunks)} total chunks.")
+
+        # Store both vector stores in memory/cache
+        cache.set(document_hash + "_summary", summary_store)
+        cache.set(document_hash + "_full", full_text_store)
+        
+        return summary_store, full_text_store
 
     def _extract_structure(self, content: bytes, url: str) -> Dict:
         """Extract document structure quickly"""
@@ -1125,73 +1215,100 @@ class EnhancedRAGPipeline:
                 
         return all_embeddings
     
-    async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
-        """Generate answer with multi-step reasoning and validation"""
+    # async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
+    #     """Generate answer with multi-step reasoning and validation"""
         
-        # 1. Analyze question type
-        question_info = self.question_analyzer.analyze(question)
-        min_chunks = 3
-        max_chunks = settings.MAX_CHUNKS_PER_QUERY
+    #     # 1. Analyze question type
+    #     question_info = self.question_analyzer.analyze(question)
+    #     min_chunks = 3
+    #     max_chunks = settings.MAX_CHUNKS_PER_QUERY
         
-        if question_info['type'] == 'yes_no':
-            max_chunks = 5  # Yes/no needs less context
-        elif question_info['type'] == 'numerical':
-            max_chunks = 8  # Numbers need moderate context
-        elif question_info['type'] == 'list':
-            max_chunks = 15  # Lists need more context
+    #     if question_info['type'] == 'yes_no':
+    #         max_chunks = 5  # Yes/no needs less context
+    #     elif question_info['type'] == 'numerical':
+    #         max_chunks = 8  # Numbers need moderate context
+    #     elif question_info['type'] == 'list':
+    #         max_chunks = 15  # Lists need more context
         
-        # Progressive retrieval
-        all_chunks = []
-        all_scores = []
-        confidence_threshold = 0.85
+    #     # Progressive retrieval
+    #     all_chunks = []
+    #     all_scores = []
+    #     confidence_threshold = 0.85
         
-        for k in [min_chunks, max_chunks // 2, max_chunks]:
-            search_results = vector_store.search_with_reranking(question, k=k)
+    #     for k in [min_chunks, max_chunks // 2, max_chunks]:
+    #         search_results = vector_store.search_with_reranking(question, k=k)
             
-            new_chunks = []
-            for chunk, score, meta in search_results:
-                if chunk not in all_chunks:  # Avoid duplicates
-                    all_chunks.append(chunk)
-                    all_scores.append(score)
-                    new_chunks.append(chunk)
+    #         new_chunks = []
+    #         for chunk, score, meta in search_results:
+    #             if chunk not in all_chunks:  # Avoid duplicates
+    #                 all_chunks.append(chunk)
+    #                 all_scores.append(score)
+    #                 new_chunks.append(chunk)
             
-            # Check if we have enough context
-            if len(all_chunks) >= min_chunks:
-                context_quality = self._assess_context_quality(
-                    question, all_chunks, all_scores, question_info
-                )
+    #         # Check if we have enough context
+    #         if len(all_chunks) >= min_chunks:
+    #             context_quality = self._assess_context_quality(
+    #                 question, all_chunks, all_scores, question_info
+    #             )
                 
-                if context_quality > confidence_threshold:
-                    logger.info(f"Early termination with {len(all_chunks)} chunks (quality: {context_quality:.2f})")
-                    break
+    #             if context_quality > confidence_threshold:
+    #                 logger.info(f"Early termination with {len(all_chunks)} chunks (quality: {context_quality:.2f})")
+    #                 break
         
-        # 2. Query expansion
-        # expanded_queries = self._expand_query(question, question_info)
+    #     # 2. Query expansion
+    #     # expanded_queries = self._expand_query(question, question_info)
         
-        # 3. Retrieve relevant chunks for all queries
-        # all_chunks = []
-        # all_scores = []
-        # confidence_threshold = 0.8
+    #     # 3. Retrieve relevant chunks for all queries
+    #     # all_chunks = []
+    #     # all_scores = []
+    #     # confidence_threshold = 0.8
         
-        # for query in expanded_queries:
-        #     search_results = vector_store.search_with_reranking(
-        #         query,
-        #         k=settings.MAX_CHUNKS_PER_QUERY
-        #     )
+    #     # for query in expanded_queries:
+    #     #     search_results = vector_store.search_with_reranking(
+    #     #         query,
+    #     #         k=settings.MAX_CHUNKS_PER_QUERY
+    #     #     )
             
-        #     for chunk, score, meta in search_results:
-        #         all_chunks.append(chunk)
-        #         all_scores.append(score)
-        #         if len(all_chunks) >= 5 and np.mean(all_scores[-5:]) > confidence_threshold:
-        #             logger.info(f"Early termination with {len(all_chunks)} chunks")
-        #             break
+    #     #     for chunk, score, meta in search_results:
+    #     #         all_chunks.append(chunk)
+    #     #         all_scores.append(score)
+    #     #         if len(all_chunks) >= 5 and np.mean(all_scores[-5:]) > confidence_threshold:
+    #     #             logger.info(f"Early termination with {len(all_chunks)} chunks")
+    #     #             break
         
-        # 4. Deduplicate and rank chunks
-        unique_chunks = self._deduplicate_chunks(all_chunks, all_scores)
-        return await self._generate_answer_with_validation(
-        question, unique_chunks, question_info, all_scores
-    )
+    #     # 4. Deduplicate and rank chunks
+    #     unique_chunks = self._deduplicate_chunks(all_chunks, all_scores)
+    #     return await self._generate_answer_with_validation(
+    #     question, unique_chunks, question_info, all_scores
+    # )
     # In EnhancedRAGPipeline class in app/core/enhanced_rag_pipeline.py
+    # In enhanced_rag_pipeline.py -> answer_question()
+
+    async def answer_question(self, question: str, summary_store: AdvancedVectorStore, full_text_store: AdvancedVectorStore) -> Dict[str, Any]:
+        """
+        Answers a question using the hierarchical retrieval strategy.
+        """
+        # 1. Search the small summary store first to find relevant parent sections
+        summary_results = summary_store.search(question, k=5)
+        
+        relevant_parent_ids = {res[2].get('parent_chunk_id') for res in summary_results}
+        if None in relevant_parent_ids:
+            relevant_parent_ids.remove(None)
+        logger.info(f"Found {len(relevant_parent_ids)} relevant parent sections from summaries.")
+
+        # 2. Now, search the large full-text store, but ONLY within the relevant parent sections
+        final_chunks = full_text_store.search_with_reranking(
+            question,
+            k=15,
+            # This filter is the key to speed and accuracy
+            filter_dict={'parent_chunk_id': list(relevant_parent_ids)}
+        )
+
+        # 3. Generate the answer with the high-quality, detailed context
+        context = "\n---\n".join([chunk[0] for chunk in final_chunks])
+        
+        # (Call your existing _generate_answer_with_validation method)
+        return await self._generate_answer_with_validation(question, context, ...)
 
 # --- NEW ---
     async def _generate_answer_with_validation(
@@ -1892,15 +2009,32 @@ class EnhancedRAGPipeline:
         # Wait for all with individual timeout handling
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        answers = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Error processing question {i}: {result}")
-                answers.append("Error processing this question.")
-            else:
-                answers.append(result)
+        # answers = []
+        # for i, result in enumerate(results):
+        #     if isinstance(result, Exception):
+        #         logger.error(f"Error processing question {i}: {result}")
+        #         answers.append("Error processing this question.")
+        #     else:
+        #         answers.append(result)
         
-        return answers    
+        # return answers   
+        # final_answers = []
+        for i, result in enumerate(results):
+            # --- THIS IS THE DEFINITIVE FIX ---
+            # It checks the type of the result before doing anything else.
+            if isinstance(result, Exception):
+                # The task raised an exception (e.g., the 'NoneType' error happened).
+                logger.error(f"Question {i} failed with an exception: {result}", exc_info=result)
+                final_answers.append("Error: The question processing failed.")
+            elif result is None:
+                # The task implicitly returned None.
+                logger.error(f"Question {i} returned a None result, indicating a hidden failure.")
+                final_answers.append("Error: A null response was generated.")
+            else:
+                # The task was successful and returned a string.
+                final_answers.append(result)
+
+        return final_answers 
     async def _get_cached_answers(self, doc_url: str, questions: List[str]) -> List[Optional[str]]:
         """Get cached answers for questions with batch retrieval"""
         # NEW: Efficient batch cache retrieval
