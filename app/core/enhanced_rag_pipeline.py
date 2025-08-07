@@ -14,6 +14,7 @@ import tempfile
 import aiofiles  # Missing import
 import shutil
 import pickle
+import pdfplumber
 
 # External imports
 import aiohttp
@@ -42,10 +43,13 @@ logger = logging.getLogger(__name__)
 class AdvancedVectorStore:
     """Advanced vector store with hierarchical chunking and re-ranking"""
     
-    def __init__(self, model: SentenceTransformer, reranker: CrossEncoder, dimension: int):
+    # def __init__(self, model: SentenceTransformer, reranker: CrossEncoder, dimension: int):
+    def __init__(self, model: SentenceTransformer, reranker: CrossEncoder, dimension: int, document_url: str = None):
         self.model = model
         self.reranker = reranker
         self.dimension = dimension
+        self.document_url = document_url
+        self.document_hash = hashlib.md5(document_url.encode()).hexdigest() if document_url else None
 
         self.max_chunks_in_memory = 500  # Keep only top 500 chunks in memory
         self.disk_cache_dir = tempfile.mkdtemp(prefix="vecstore_")
@@ -64,6 +68,31 @@ class AdvancedVectorStore:
         self.enhanced_retriever = None
         
         logger.info("Initialized advanced vector store with hierarchical chunking")
+
+    def clear(self):
+        """Clear memory and disk cache"""
+        # Clear chunks
+        self.small_chunks.clear()
+        self.large_chunks.clear()
+        self.chunk_metadata.clear()
+        self.chunk_to_large_mapping.clear()
+        
+        # Clear FAISS indices
+        self.small_index = faiss.IndexFlatL2(self.dimension)
+        self.large_index = faiss.IndexFlatL2(self.dimension)
+        
+        # Clean disk cache directory
+        if hasattr(self, 'disk_cache_dir') and os.path.exists(self.disk_cache_dir):
+            try:
+                shutil.rmtree(self.disk_cache_dir)
+                self.disk_cache_dir = tempfile.mkdtemp(prefix="vecstore_")
+            except Exception as e:
+                logger.warning(f"Failed to clear disk cache: {e}")
+        
+        # Clear retriever
+        self.enhanced_retriever = None
+        
+        logger.info("Vector store cleared")    
     
     def add_hierarchical(self, small_chunks: List[str], small_embeddings: np.ndarray,
                          large_chunks: List[str], large_embeddings: np.ndarray,
@@ -228,6 +257,106 @@ class EnhancedRAGPipeline:
         self.answer_validator = AnswerValidator()
 
         self._configure_gemini()
+
+
+    async def process_query_with_explainability(
+    self, document_url: str, questions: List[str]
+) -> Tuple[List[str], List[Dict], float]:
+        """
+        Process questions with detailed explainability.
+        Returns simple answers, detailed answers with explanations, and processing time.
+        """
+        start_time = time.time()
+        
+        try:
+            # Get or create vector store
+            vector_store = await self.get_or_create_vector_store(document_url)
+            
+            simple_answers = []
+            detailed_answers = []
+            
+            for question in questions:
+                # Get detailed answer with all metadata
+                result = await self.answer_question(question, vector_store)
+                
+                # Simple answer for backward compatibility
+                simple_answers.append(result['answer'])
+                
+                # Detailed answer with explainability
+                detailed = {
+                    'answer': result['answer'],
+                    'confidence': result.get('confidence', 0.5),
+                    'source_clauses': [],
+                    'reasoning': f"Question type: {result.get('question_type', 'general')}. ",
+                    'coverage_decision': None
+                }
+                
+                # Add source information
+                for source in result.get('sources', [])[:3]:  # Top 3 sources
+                    detailed['source_clauses'].append({
+                        'text': source.get('preview', '')[:200],
+                        'confidence_score': result.get('confidence', 0.5),
+                        'page_number': source.get('chunk_index'),
+                        'section': source.get('type', 'text')
+                    })
+                
+                # Add reasoning
+                if result.get('validation_notes'):
+                    detailed['reasoning'] += result['validation_notes']
+                else:
+                    detailed['reasoning'] += f"Answer extracted from {len(result.get('sources', []))} relevant document sections."
+                
+                # Coverage decision for yes/no questions
+                if result.get('question_type') == 'yes_no':
+                    if 'yes' in result['answer'].lower():
+                        detailed['coverage_decision'] = 'Covered'
+                    elif 'no' in result['answer'].lower():
+                        detailed['coverage_decision'] = 'Not Covered'
+                    else:
+                        detailed['coverage_decision'] = 'Conditional'
+                
+                detailed_answers.append(detailed)
+            
+            processing_time = time.time() - start_time
+            logger.info(f"Processed {len(questions)} questions with explainability in {processing_time:.2f}s")
+            
+            return simple_answers, detailed_answers, processing_time
+            
+        except Exception as e:
+            logger.error(f"Error in explainability processing: {e}", exc_info=True)
+            processing_time = time.time() - start_time
+            error_answer = "Error processing question with explainability."
+            return (
+                [error_answer] * len(questions),
+                [{'answer': error_answer, 'confidence': 0, 'reasoning': str(e)}] * len(questions),
+                processing_time
+            )
+
+
+
+    async def _generate_embeddings_sequential(self, chunks: List[str]) -> np.ndarray:
+        """Sequential embedding generation fallback"""
+        batch_size = 32
+        all_embeddings = []
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            
+            embeddings = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.embedding_model.encode(
+                    batch,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    normalize_embeddings=True
+                )
+            )
+            all_embeddings.append(embeddings)
+        
+        return np.vstack(all_embeddings).astype('float32') if all_embeddings else np.array([])
+
+# Add this missing import in enhanced_rag_pipeline.py
+# import pdfplumber  # Add this import at the top with other imports    
 
     async def _create_hierarchical_store(self, text: str, metadata: List[Dict]) -> AdvancedVectorStore:
         """Helper to create a vector store with hierarchical chunks."""
@@ -621,71 +750,250 @@ class EnhancedRAGPipeline:
         
     #     return np.vstack(all_embeddings).astype('float32')
     # enhanced_rag_pipeline.py - Update _generate_embeddings method
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """Generate embeddings in optimized batches"""
+    #     # OLD: Fixed batch size of 32
+    #     # NEW: Dynamic batch size with caching
+        
+    #     batch_size = 16  # Reduced from 32 for stability
+    #     all_embeddings = []
+        
+    #     # Check cache first
+    #     cache_key_prefix = "emb_"
+    #     cached_embeddings = []
+    #     chunks_to_embed = []
+    #     chunks_indices = []
+        
+    #     for i, chunk in enumerate(chunks):
+    #         chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
+    #         cache_key = f"{cache_key_prefix}{chunk_hash}"
+            
+    #         cached = await cache.get(cache_key)
+    #         if cached is not None:
+    #             cached_embeddings.append((i, cached))
+    #         else:
+    #             chunks_to_embed.append(chunk)
+    #             chunks_indices.append(i)
+        
+    #     # Generate embeddings for non-cached chunks
+    #     if chunks_to_embed:
+    #         for i in range(0, len(chunks_to_embed), batch_size):
+    #             batch = chunks_to_embed[i:i + batch_size]
+                
+    #             embeddings = await asyncio.get_event_loop().run_in_executor(
+    #                 None,
+    #                 lambda: self.embedding_model.encode(
+    #                     batch,
+    #                     convert_to_numpy=True,
+    #                     show_progress_bar=False,
+    #                     normalize_embeddings=True  # Add normalization
+    #                 )
+    #             )
+                
+    #             # Cache the embeddings
+    #             for j, emb in enumerate(embeddings):
+    #                 chunk_idx = chunks_indices[i + j]
+    #                 chunk_hash = hashlib.md5(chunks[chunk_idx].encode()).hexdigest()[:8]
+    #                 cache_key = f"{cache_key_prefix}{chunk_hash}"
+    #                 await cache.set(cache_key, emb, ttl=86400)  # Cache for 24 hours
+                
+    #             all_embeddings.append(embeddings)
+        
+    #     # Combine cached and new embeddings in correct order
+    #     if cached_embeddings:
+    #         # Merge cached and new embeddings
+    #         result = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()))
+            
+    #         for idx, emb in cached_embeddings:
+    #             result[idx] = emb
+            
+    #         if all_embeddings:
+    #             new_embeddings = np.vstack(all_embeddings)
+    #             for i, idx in enumerate(chunks_indices):
+    #                 result[idx] = new_embeddings[i]
+            
+    #         return result.astype('float32')
+    #     else:
+    #         return np.vstack(all_embeddings).astype('float32') if all_embeddings else np.array([])
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """Generate embeddings with parallel processing and caching"""
+    #     # OLD: Sequential embedding generation
+    #     # NEW: Parallel generation with comprehensive caching
+        
+    #     if not settings.PARALLEL_EMBEDDING_GENERATION:
+    #         return await self._generate_embeddings_sequential(chunks)
+        
+    #     batch_size = 16
+    #     cache_key_prefix = "emb_"
+        
+    #     # Prepare for parallel processing
+    #     chunks_to_process = []
+    #     cached_embeddings = {}
+    #     chunk_indices = {}
+        
+    #     # Check cache in parallel
+    #     cache_tasks = []
+    #     for i, chunk in enumerate(chunks):
+    #         chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
+    #         cache_key = f"{cache_key_prefix}{chunk_hash}"
+    #         cache_tasks.append((i, cache_key, cache.get(cache_key)))
+        
+    #     # Gather cache results
+    #     cache_results = await asyncio.gather(*[task[2] for task in cache_tasks])
+        
+    #     for (i, cache_key, _), result in zip(cache_tasks, cache_results):
+    #         if result is not None:
+    #             cached_embeddings[i] = result
+    #         else:
+    #             chunks_to_process.append((i, chunks[i], cache_key))
+        
+    #     # Process uncached chunks in parallel batches
+    #     if chunks_to_process:
+    #         # Split into batches
+    #         batches = []
+    #         for i in range(0, len(chunks_to_process), batch_size):
+    #             batch = chunks_to_process[i:i + batch_size]
+    #             batches.append(batch)
+            
+    #         # Process batches in parallel
+    #         async def process_batch(batch):
+    #             chunk_texts = [item[1] for item in batch]
+                
+    #             # Generate embeddings for batch
+    #             embeddings = await asyncio.get_event_loop().run_in_executor(
+    #                 None,
+    #                 lambda: self.embedding_model.encode(
+    #                     chunk_texts,
+    #                     convert_to_numpy=True,
+    #                     show_progress_bar=False,
+    #                     normalize_embeddings=True
+    #                 )
+    #             )
+                
+    #             # Cache embeddings
+    #             cache_tasks = []
+    #             for (idx, _, cache_key), emb in zip(batch, embeddings):
+    #                 cache_tasks.append(cache.set(cache_key, emb, ttl=settings.EMBEDDING_CACHE_TTL))
+                
+    #             await asyncio.gather(*cache_tasks, return_exceptions=True)
+                
+    #             return [(item[0], emb) for item, emb in zip(batch, embeddings)]
+            
+    #         # Process all batches in parallel
+    #         batch_results = await asyncio.gather(*[process_batch(batch) for batch in batches])
+            
+    #         # Flatten results
+    #         for batch_result in batch_results:
+    #             for idx, emb in batch_result:
+    #                 cached_embeddings[idx] = emb
+        
+    #     # Combine in correct order
+    #     dimension = self.embedding_model.get_sentence_embedding_dimension()
+    #     result = np.zeros((len(chunks), dimension), dtype='float32')
+        
+    #     for idx, emb in cached_embeddings.items():
+    #         result[idx] = emb
+        
+    #     return result
+    # In EnhancedRAGPipeline class in enhanced_rag_pipeline.py
+
+# --- REPLACE THIS ENTIRE METHOD ---
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """
+    #     Generate embeddings with a robust, simplified caching strategy.
+    #     This version correctly handles batching and async operations.
+    #     """
+    #     all_embeddings = {}
+    #     chunks_to_process = {}  # Maps original index to chunk text
+
+    #     # Step 1: Check cache for existing embeddings
+    #     cache_keys = {i: f"emb_{hashlib.md5(chunk.encode()).hexdigest()}" for i, chunk in enumerate(chunks)}
+    #     cached_results = await cache.get_many(list(cache_keys.values()))
+
+    #     for i, chunk in enumerate(chunks):
+    #         key = cache_keys[i]
+    #         if key in cached_results:
+    #             all_embeddings[i] = cached_results[key]
+    #         else:
+    #             chunks_to_process[i] = chunk
+
+    #     # Step 2: Process only the chunks that were not in the cache
+    #     if chunks_to_process:
+    #         logger.info(f"Generating embeddings for {len(chunks_to_process)} new chunks.")
+            
+    #         indices = list(chunks_to_process.keys())
+    #         texts = list(chunks_to_process.values())
+
+    #         # Run the CPU-bound encoding in a separate thread to avoid blocking the event loop
+    #         new_embeddings = await asyncio.to_thread(
+    #             self.embedding_model.encode,
+    #             texts,
+    #             batch_size=settings.EMBEDDING_BATCH_SIZE,
+    #             show_progress_bar=False,
+    #             convert_to_numpy=True
+    #         )
+
+    #         # Step 3: Update the cache with the newly generated embeddings
+    #         items_to_cache = {}
+    #         for i, embedding in enumerate(new_embeddings):
+    #             original_index = indices[i]
+    #             all_embeddings[original_index] = embedding
+    #             items_to_cache[cache_keys[original_index]] = embedding
+            
+    #         if items_to_cache:
+    #             await cache.set_many(items_to_cache, ttl=settings.EMBEDDING_CACHE_TTL)
+                
+    #     # Step 4: Assemble the final numpy array in the correct order
+    #     final_embeddings = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()))
+    #     for i, embedding in all_embeddings.items():
+    #         final_embeddings[i] = embedding
+            
+    #     return final_embeddings.astype('float32')
     async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
-        """Generate embeddings in optimized batches"""
-        # OLD: Fixed batch size of 32
-        # NEW: Dynamic batch size with caching
-        
-        batch_size = 16  # Reduced from 32 for stability
-        all_embeddings = []
-        
-        # Check cache first
-        cache_key_prefix = "emb_"
-        cached_embeddings = []
-        chunks_to_embed = []
-        chunks_indices = []
-        
+        """
+        Generate embeddings with a robust caching strategy.
+        """
+        all_embeddings = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()), dtype=np.float32)
+        chunks_to_process = {}  # Maps index -> chunk
+
+        # Step 1: Check cache for existing embeddings
+        cache_keys = {i: f"emb_{hashlib.md5(chunk.encode()).hexdigest()}" for i, chunk in enumerate(chunks)}
+        # Use the corrected get_many from your cache.py
+        cached_results = await cache.get_many(list(cache_keys.values()))
+
         for i, chunk in enumerate(chunks):
-            chunk_hash = hashlib.md5(chunk.encode()).hexdigest()[:8]
-            cache_key = f"{cache_key_prefix}{chunk_hash}"
-            
-            cached = await cache.get(cache_key)
-            if cached is not None:
-                cached_embeddings.append((i, cached))
+            key = cache_keys[i]
+            if key in cached_results and cached_results[key] is not None:
+                all_embeddings[i] = cached_results[key]
             else:
-                chunks_to_embed.append(chunk)
-                chunks_indices.append(i)
-        
-        # Generate embeddings for non-cached chunks
-        if chunks_to_embed:
-            for i in range(0, len(chunks_to_embed), batch_size):
-                batch = chunks_to_embed[i:i + batch_size]
-                
-                embeddings = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.embedding_model.encode(
-                        batch,
-                        convert_to_numpy=True,
-                        show_progress_bar=False,
-                        normalize_embeddings=True  # Add normalization
-                    )
-                )
-                
-                # Cache the embeddings
-                for j, emb in enumerate(embeddings):
-                    chunk_idx = chunks_indices[i + j]
-                    chunk_hash = hashlib.md5(chunks[chunk_idx].encode()).hexdigest()[:8]
-                    cache_key = f"{cache_key_prefix}{chunk_hash}"
-                    await cache.set(cache_key, emb, ttl=86400)  # Cache for 24 hours
-                
-                all_embeddings.append(embeddings)
-        
-        # Combine cached and new embeddings in correct order
-        if cached_embeddings:
-            # Merge cached and new embeddings
-            result = np.zeros((len(chunks), self.embedding_model.get_sentence_embedding_dimension()))
+                chunks_to_process[i] = chunk
+
+        # Step 2: Process only the chunks that were not found in the cache
+        if chunks_to_process:
+            logger.info(f"Generating embeddings for {len(chunks_to_process)} new chunks.")
+            indices = list(chunks_to_process.keys())
+            texts_to_embed = list(chunks_to_process.values())
+
+            # Run the CPU-bound encoding in a separate thread
+            new_embeddings = await asyncio.to_thread(
+                self.embedding_model.encode,
+                texts_to_embed,
+                batch_size=settings.EMBEDDING_BATCH_SIZE,
+                show_progress_bar=False,
+                convert_to_numpy=True
+            )
+
+            # Step 3: Update the main embeddings array and cache the new results
+            items_to_cache = {}
+            for i, embedding in enumerate(new_embeddings):
+                original_index = indices[i]
+                all_embeddings[original_index] = embedding
+                items_to_cache[cache_keys[original_index]] = embedding
             
-            for idx, emb in cached_embeddings:
-                result[idx] = emb
-            
-            if all_embeddings:
-                new_embeddings = np.vstack(all_embeddings)
-                for i, idx in enumerate(chunks_indices):
-                    result[idx] = new_embeddings[i]
-            
-            return result.astype('float32')
-        else:
-            return np.vstack(all_embeddings).astype('float32') if all_embeddings else np.array([])
+            if items_to_cache:
+                await cache.set_many(items_to_cache, ttl=settings.EMBEDDING_CACHE_TTL)
+                
+        return all_embeddings
     
     async def answer_question(self, question: str, vector_store: AdvancedVectorStore) -> Dict[str, Any]:
         """Generate answer with multi-step reasoning and validation"""
@@ -846,63 +1154,63 @@ class EnhancedRAGPipeline:
         
         return min(quality, 1.0)
     
-    def retrieve(self, query: str, k: int = 30) -> List[Tuple[int, float]]:
-        """Multi-strategy retrieval with better combination"""
-        # OLD: Simple score addition
-        # NEW: Weighted combination with normalization
+    # def retrieve(self, query: str, k: int = 30) -> List[Tuple[int, float]]:
+    #     """Multi-strategy retrieval with better combination"""
+    #     # OLD: Simple score addition
+    #     # NEW: Weighted combination with normalization
         
-        query_lower = query.lower()
-        scores = np.zeros(len(self.chunks))
+    #     query_lower = query.lower()
+    #     scores = np.zeros(len(self.chunks))
         
-        # 1. Exact phrase matching (highest weight)
-        for idx, chunk in enumerate(self.chunks):
-            if query_lower in chunk.lower():
-                scores[idx] += 10.0
+    #     # 1. Exact phrase matching (highest weight)
+    #     for idx, chunk in enumerate(self.chunks):
+    #         if query_lower in chunk.lower():
+    #             scores[idx] += 10.0
                 
-                # Bonus for exact case match
-                if query in chunk:
-                    scores[idx] += 2.0
+    #             # Bonus for exact case match
+    #             if query in chunk:
+    #                 scores[idx] += 2.0
         
-        # 2. BM25 scoring (moderate weight)
-        if hasattr(self, 'bm25'):
-            query_tokens = self._tokenize(query_lower)
-            if query_tokens:
-                bm25_scores = self.bm25.get_scores(query_tokens)
-                # Normalize BM25 scores
-                if max(bm25_scores) > 0:
-                    bm25_scores = bm25_scores / max(bm25_scores)
-                scores += bm25_scores * 5.0
+    #     # 2. BM25 scoring (moderate weight)
+    #     if hasattr(self, 'bm25'):
+    #         query_tokens = self._tokenize(query_lower)
+    #         if query_tokens:
+    #             bm25_scores = self.bm25.get_scores(query_tokens)
+    #             # Normalize BM25 scores
+    #             if max(bm25_scores) > 0:
+    #                 bm25_scores = bm25_scores / max(bm25_scores)
+    #             scores += bm25_scores * 5.0
         
-        # 3. TF-IDF scoring (lower weight)
-        if self.tfidf_vectorizer and self.tfidf_matrix is not None:
-            try:
-                query_vec = self.tfidf_vectorizer.transform([query])
-                tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
-                # Normalize TF-IDF scores
-                if max(tfidf_scores) > 0:
-                    tfidf_scores = tfidf_scores / max(tfidf_scores)
-                scores += tfidf_scores * 3.0
-            except:
-                pass
+    #     # 3. TF-IDF scoring (lower weight)
+    #     if self.tfidf_vectorizer and self.tfidf_matrix is not None:
+    #         try:
+    #             query_vec = self.tfidf_vectorizer.transform([query])
+    #             tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
+    #             # Normalize TF-IDF scores
+    #             if max(tfidf_scores) > 0:
+    #                 tfidf_scores = tfidf_scores / max(tfidf_scores)
+    #             scores += tfidf_scores * 3.0
+    #         except:
+    #             pass
         
-        # 4. Keyword and entity matching
-        entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', query)
-        for entity in entities:
-            entity_lower = entity.lower()
-            for idx, chunk in enumerate(self.chunks):
-                if entity_lower in chunk.lower():
-                    scores[idx] += 4.0
+    #     # 4. Keyword and entity matching
+    #     entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', query)
+    #     for entity in entities:
+    #         entity_lower = entity.lower()
+    #         for idx, chunk in enumerate(self.chunks):
+    #             if entity_lower in chunk.lower():
+    #                 scores[idx] += 4.0
         
-        # Get top-k with score threshold
-        score_threshold = 0.1
-        top_indices = np.argsort(scores)[-k:][::-1]
-        results = [(idx, scores[idx]) for idx in top_indices if scores[idx] > score_threshold]
+    #     # Get top-k with score threshold
+    #     score_threshold = 0.1
+    #     top_indices = np.argsort(scores)[-k:][::-1]
+    #     results = [(idx, scores[idx]) for idx in top_indices if scores[idx] > score_threshold]
         
-        # Ensure minimum results
-        if len(results) < 3 and len(self.chunks) > 0:
-            results = [(i, 1.0) for i in range(min(3, len(self.chunks)))]
+    #     # Ensure minimum results
+    #     if len(results) < 3 and len(self.chunks) > 0:
+    #         results = [(i, 1.0) for i in range(min(3, len(self.chunks)))]
         
-        return results
+    #     return results
     
     def _expand_query(self, question: str, question_info: Dict) -> List[str]:
         """Expand query for better retrieval"""
@@ -1253,37 +1561,211 @@ class EnhancedRAGPipeline:
     #         logger.error(f"Critical error: {e}", exc_info=True)
     #         return ["Document processing error."] * len(questions)
     # enhanced_rag_pipeline.py - Add question-aware processing
+    # async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
+    #     """Process with question awareness"""
+    #     # OLD: Process document fully before answering
+    #     # NEW: Analyze questions first, then process relevant parts
+        
+    #     start_time = time.time()
+    #     logger.info(f"Processing {len(questions)} questions for {document_url}")
+        
+    #     try:
+    #         # Analyze all questions first
+    #         question_analysis = self._analyze_all_questions(questions)
+            
+    #         # Get or create vector store with question context
+    #         vector_store = await self._get_or_create_question_aware_store(
+    #             document_url, question_analysis
+    #         )
+            
+    #         # Process questions with optimized retrieval
+    #         answers = await self._process_questions_optimized(
+    #             questions, vector_store, question_analysis
+    #         )
+            
+    #         elapsed = time.time() - start_time
+    #         logger.info(f"Processed {len(questions)} questions in {elapsed:.2f}s")
+            
+    #         return answers
+            
+    #     except Exception as e:
+    #         logger.error(f"Critical error: {e}", exc_info=True)
+    #         return ["Document processing error."] * len(questions)
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process with question awareness"""
-        # OLD: Process document fully before answering
-        # NEW: Analyze questions first, then process relevant parts
+        """Process multiple questions with optimized parallel execution and caching"""
+        # OLD: Simple parallel processing with fixed concurrency
+        # NEW: Smart batching with comprehensive caching
         
         start_time = time.time()
         logger.info(f"Processing {len(questions)} questions for {document_url}")
         
         try:
-            # Analyze all questions first
-            question_analysis = self._analyze_all_questions(questions)
+            # Check cache for previously answered questions
+            cached_answers = await self._get_cached_answers(document_url, questions)
+            questions_to_process = []
+            question_indices = []
             
-            # Get or create vector store with question context
-            vector_store = await self._get_or_create_question_aware_store(
-                document_url, question_analysis
-            )
+            for i, q in enumerate(questions):
+                if cached_answers[i] is None:
+                    questions_to_process.append(q)
+                    question_indices.append(i)
             
-            # Process questions with optimized retrieval
-            answers = await self._process_questions_optimized(
-                questions, vector_store, question_analysis
-            )
+            logger.info(f"Found {len(questions) - len(questions_to_process)} cached answers")
+            
+            # Process uncached questions
+            if questions_to_process:
+                vector_store = await self.get_or_create_vector_store(document_url)
+                
+                # Process in optimized batches
+                batch_size = settings.QUESTION_BATCH_SIZE or 3
+                new_answers = []
+                
+                for i in range(0, len(questions_to_process), batch_size):
+                    batch = questions_to_process[i:i + batch_size]
+                    batch_answers = await self._process_question_batch(batch, vector_store)
+                    new_answers.extend(batch_answers)
+                    
+                    # Cache the answers immediately
+                    for q, a in zip(batch, batch_answers):
+                        await self._cache_answer(document_url, q, a)
+                
+                # Merge cached and new answers
+                final_answers = list(cached_answers)
+                for idx, answer in zip(question_indices, new_answers):
+                    final_answers[idx] = answer
+            else:
+                final_answers = cached_answers
             
             elapsed = time.time() - start_time
             logger.info(f"Processed {len(questions)} questions in {elapsed:.2f}s")
             
-            return answers
+            return final_answers
             
+        except asyncio.TimeoutError:
+            logger.error("Overall processing timeout")
+            return ["Processing timeout. Please try again."] * len(questions)
         except Exception as e:
             logger.error(f"Critical error: {e}", exc_info=True)
             return ["Document processing error."] * len(questions)
+    async def _answer_with_timeout(self, question: str, vector_store: AdvancedVectorStore) -> str:
+        """Answer question with individual timeout and caching"""
+        # NEW: Individual timeout per question with cache check
+        
+        # Check if this specific question-document pair is cached
+        cache_key = self._get_question_cache_key(vector_store.document_hash, question)
+        cached_result = await cache.get(cache_key)
+        
+        if cached_result:
+            logger.info(f"Using cached result for question: {question[:50]}...")
+            return cached_result
+        
+        try:
+            result = await asyncio.wait_for(
+                self.answer_question(question, vector_store),
+                timeout=settings.ANSWER_TIMEOUT_SECONDS
+            )
+            
+            answer = result['answer']
+            
+            # Cache the result
+            await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
+            
+            return answer
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout for question: {question[:50]}...")
+            return "Processing timeout. Question too complex."
+        except Exception as e:
+            logger.error(f"Error answering question: {e}")
+            return "Error generating answer."    
+        
+    async def _process_question_batch(self, questions: List[str], vector_store: AdvancedVectorStore) -> List[str]:
+        """Process a batch of questions in parallel with optimal concurrency"""
+        # NEW: Optimized batch processing with semaphore control
+        
+        # Use semaphore to control concurrency
+        semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_QUESTIONS or 1)
+        
+        async def process_single(q):
+            async with semaphore:
+                return await self._answer_with_timeout(q, vector_store)
+        
+        # Create tasks for all questions in batch
+        tasks = [asyncio.create_task(process_single(q)) for q in questions]
+        
+        # Wait for all with individual timeout handling
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        answers = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Error processing question {i}: {result}")
+                answers.append("Error processing this question.")
+            else:
+                answers.append(result)
+        
+        return answers    
+    async def _get_cached_answers(self, doc_url: str, questions: List[str]) -> List[Optional[str]]:
+        """Get cached answers for questions with batch retrieval"""
+        # NEW: Efficient batch cache retrieval
+        
+        doc_hash = hashlib.md5(doc_url.encode()).hexdigest()
+        cached = []
+        
+        # Batch get from cache if supported
+        cache_keys = [self._get_question_cache_key(doc_hash, q) for q in questions]
+        
+        # Try batch get
+        try:
+            # If cache supports batch get
+            if hasattr(cache, 'get_many'):
+                cached_dict = await cache.get_many(cache_keys)
+                cached = [cached_dict.get(key) for key in cache_keys]
+            else:
+                # Fall back to individual gets
+                cached = await asyncio.gather(*[cache.get(key) for key in cache_keys])
+        except Exception as e:
+            logger.warning(f"Cache retrieval error: {e}")
+            cached = [None] * len(questions)
+        
+        return cached
+    async def _cache_answer(self, doc_url: str, question: str, answer: str):
+        """Cache an answer with error handling"""
+        # NEW: Robust answer caching
+        
+        if not settings.USE_ANSWER_CACHE:
+            return
+        
+        try:
+            doc_hash = hashlib.md5(doc_url.encode()).hexdigest()
+            cache_key = self._get_question_cache_key(doc_hash, question)
+            
+            # Don't cache error responses
+            if not self._is_error_answer(answer):
+                await cache.set(cache_key, answer, ttl=settings.ANSWER_CACHE_TTL or 7200)
+                logger.debug(f"Cached answer for: {question[:30]}...")
+        except Exception as e:
+            logger.warning(f"Failed to cache answer: {e}") 
 
+    def _get_question_cache_key(self, doc_hash: str, question: str) -> str:
+        """Generate cache key for question-document pair"""
+        # NEW: Consistent cache key generation
+        
+        question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+        return f"qa_{doc_hash[:8]}_{question_hash}" 
+
+    def _is_error_answer(self, answer: str) -> bool:
+        """Check if answer is an error response"""
+        # NEW: Don't cache error responses
+        
+        error_indicators = [
+            "error", "timeout", "failed", "unable to",
+            "processing error", "document processing error"
+        ]
+        
+        answer_lower = answer.lower()
+        return any(indicator in answer_lower for indicator in error_indicators) or len(answer) < 10  
+         
     def _analyze_all_questions(self, questions: List[str]) -> Dict:
         """Analyze all questions to understand what to look for"""
         # NEW: Comprehensive question analysis

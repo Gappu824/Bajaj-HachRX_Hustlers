@@ -31,6 +31,17 @@ class EnhancedRetriever:
         self._init_tfidf()
         
         logger.info(f"Enhanced retriever initialized with {len(chunks)} chunks")
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text for BM25"""
+        try:
+            stop_words = set(stopwords.words('english'))
+        except:
+            stop_words = set()
+        
+        tokens = word_tokenize(text.lower())
+        tokens = [t for t in tokens if t.isalnum() and t not in stop_words]
+        return tokens if tokens else ['empty']    
     
     def _init_keyword_index(self):
         """Build keyword index for exact matching"""

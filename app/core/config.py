@@ -21,10 +21,16 @@ class Settings(BaseSettings):
     # Performance settings - balanced for accuracy
     MAX_CHUNKS_PER_QUERY: int = 15  # Increased for better context
     MAX_RERANK_CHUNKS: int = 30  # Initial retrieval before reranking
-    MAX_CONCURRENT_QUESTIONS: int = 1
+    MAX_CONCURRENT_QUESTIONS: int = 2
     ANSWER_TIMEOUT_SECONDS: int = 1800
     TOTAL_TIMEOUT_SECONDS: int = 3600
     MAX_TOTAL_CHUNKS: int = 1000  # New limit for total chunks
+
+    # Parallel Processing
+    # MAX_CONCURRENT_QUESTIONS: int = 1  # Process 1 at a time for stability
+    QUESTION_BATCH_SIZE: int = 3  # Batch size for parallel processing
+    USE_PARALLEL_RETRIEVAL: bool = True  # Parallel chunk retrieval
+    PARALLEL_EMBEDDING_GENERATION: bool = True  # Parallel embedding generation
 
     
     # Cache settings
@@ -39,6 +45,22 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_CHARS: int = 200
     LARGE_CHUNK_SIZE_CHARS: int = 2000  # For hierarchical chunking
     LARGE_CHUNK_OVERLAP_CHARS: int = 400
+
+    # Caching Configuration
+    USE_ANSWER_CACHE: bool = True  # Cache individual answers
+    ANSWER_CACHE_TTL: int = 10800  # 2 hours for answer cache
+    USE_EMBEDDING_CACHE: bool = True  # Cache embeddings
+    EMBEDDING_CACHE_TTL: int = 86400  # 24 hours for embeddings
+    USE_VECTOR_STORE_CACHE: bool = True  # Cache vector stores
+    VECTOR_STORE_CACHE_TTL: int = 10800  # 3 hours for vector stores
+
+    #  Performance Tuning
+    CACHE_COMPRESSION: bool = True  # Compress cached items
+    CACHE_BATCH_SIZE: int = 10  # Batch size for cache operations
+
+    # Cache Size Limits
+    MAX_CACHE_MEMORY_MB: int = 500  # Max memory cache size
+    MAX_CACHE_DISK_MB: int = 2000  # Max disk cache size
     
     # Universal parser settings
     USE_TIKA: bool = True
@@ -51,9 +73,9 @@ class Settings(BaseSettings):
     CONFIDENCE_THRESHOLD: float = 0.7
 
 
-    EMBEDDING_CACHE_TTL: int = 86400  # 24 hours
+    # EMBEDDING_CACHE_TTL: int = 86400  # 24 hours
     EMBEDDING_BATCH_SIZE: int = 16  # Optimized batch size
-    USE_EMBEDDING_CACHE: bool = True
+    # USE_EMBEDDING_CACHE: bool = True
     
     class Config:
         env_file = ".env"

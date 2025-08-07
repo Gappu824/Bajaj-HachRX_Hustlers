@@ -13,6 +13,7 @@ from app.core.logging_config import setup_logging
 from app.core.enhanced_rag_pipeline import EnhancedRAGPipeline
 from app.api.endpoints import query
 from app.core.cache import cache
+from app.core.performance_monitor import PerformanceMonitor
 
 # Setup logging
 setup_logging()
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
     # logger.info("Shutdown complete")
     # Startup
     logger.info("Starting Enhanced RAG Pipeline v2...")
+    app.state.performance_monitor = PerformanceMonitor()
     
     try:
         # Load models with error handling
@@ -94,6 +96,9 @@ async def lifespan(app: FastAPI):
     # Clean up pipeline resources
     if hasattr(app.state, 'rag_pipeline'):
         await app.state.rag_pipeline.cleanup()
+    if hasattr(app.state, 'performance_monitor'):
+        final_stats = app.state.performance_monitor.get_stats()
+        logger.info(f"Final performance stats: {final_stats}")
     
     # Final cache cleanup
     cache.clear()
@@ -113,7 +118,12 @@ async def lifespan(app: FastAPI):
                 pass
     
     logger.info("Shutdown complete")
-
+@app.get("/performance/stats", tags=["Monitoring"])
+async def get_performance_stats(request: Request):
+    """Get current performance statistics"""
+    if hasattr(request.app.state, 'performance_monitor'):
+        return request.app.state.performance_monitor.get_stats()
+    return {"error": "Performance monitor not initialized"}
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,

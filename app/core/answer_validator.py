@@ -79,51 +79,88 @@ class AnswerValidator:
     #     )
         
     #     return validation_result
+    # def validate(self, question: str, answer: str, question_info: Dict,
+    #          chunks: List[str]) -> Dict[str, Any]:
+    #     """Validate answer and correct if needed"""
+    #     validation_result = {
+    #         'answer': answer,
+    #         'validation_passed': True,
+    #         'corrections': [],
+    #         'sources': [],
+    #         'notes': '',
+    #         'confidence': 0.5
+    #     }
+    #     if self._is_error_response(answer):
+    #         validation_result['validation_passed'] = False
+    #         validation_result['answer'] = self._generate_fallback_answer(question, chunks)
+    #         validation_result['notes'] = 'Generated fallback answer due to processing error.'
+    #         return validation_result
+
+    #     # Re-enable the type-specific validation logic
+    #     if question_info['type'] == 'numerical':
+    #         validation_result = self._validate_numerical_enhanced(
+    #             question, answer, chunks, validation_result
+    #         )
+    #     elif question_info['type'] == 'yes_no':
+    #         validation_result = self._validate_yes_no(
+    #             answer, validation_result
+    #         )
+    #     elif question_info['type'] == 'list':
+    #         validation_result = self._validate_list(
+    #             question, answer, chunks, validation_result
+    #         )
+
+    #     # Re-enable general validations
+    #     validation_result = self._validate_completeness(
+    #         answer, question_info, validation_result
+    #     )
+    #     validation_result = self._validate_consistency(
+    #         answer, chunks, validation_result
+    #     )
+
+    #     # Calculate final confidence
+    #     validation_result['confidence'] = self._calculate_answer_confidence(
+    #         answer, chunks, validation_result
+    #     )
+        
+    #     return validation_result
+
+    # In AnswerValidator class in answer_validator.py
+
+# --- REPLACE THIS METHOD ---
     def validate(self, question: str, answer: str, question_info: Dict,
-             chunks: List[str]) -> Dict[str, Any]:
-        """Validate answer and correct if needed"""
+                chunks: List[str]) -> Dict[str, Any]:
+        """Validate answer with a unified and corrected logical flow."""
         validation_result = {
-            'answer': answer,
-            'validation_passed': True,
-            'corrections': [],
-            'sources': [],
-            'notes': '',
-            'confidence': 0.5
+            'answer': answer, 'validation_passed': True, 'corrections': [],
+            'sources': [], 'notes': '', 'confidence': 0.5
         }
+
         if self._is_error_response(answer):
             validation_result['validation_passed'] = False
             validation_result['answer'] = self._generate_fallback_answer(question, chunks)
-            validation_result['notes'] = 'Generated fallback answer due to processing error.'
+            validation_result['notes'] = 'Generated fallback due to processing error.'
             return validation_result
 
-        # Re-enable the type-specific validation logic
+        # Use the enhanced, type-specific validators
         if question_info['type'] == 'numerical':
-            validation_result = self._validate_numerical_enhanced(
-                question, answer, chunks, validation_result
-            )
+            validation_result = self._validate_numerical_enhanced(question, answer, chunks, validation_result)
         elif question_info['type'] == 'yes_no':
-            validation_result = self._validate_yes_no(
-                answer, validation_result
-            )
+            # There wasn't an "enhanced" version for yes/no, so we use the standard one
+            validation_result = self._validate_yes_no(answer, validation_result)
         elif question_info['type'] == 'list':
-            validation_result = self._validate_list(
-                question, answer, chunks, validation_result
-            )
+            # There wasn't an "enhanced" version for list, so we use the standard one
+            validation_result = self._validate_list(question, answer, chunks, validation_result)
+        
+        # General validations for consistency and completeness
+        validation_result = self._validate_completeness(answer, question_info, validation_result)
+        validation_result = self._validate_consistency(answer, chunks, validation_result)
 
-        # Re-enable general validations
-        validation_result = self._validate_completeness(
-            answer, question_info, validation_result
-        )
-        validation_result = self._validate_consistency(
-            answer, chunks, validation_result
-        )
-
-        # Calculate final confidence
-        validation_result['confidence'] = self._calculate_answer_confidence(
-            answer, chunks, validation_result
-        )
+        # Final confidence calculation
+        validation_result['confidence'] = self._calculate_answer_confidence(answer, chunks, validation_result)
         
         return validation_result
+
     def _is_error_response(self, answer: str) -> bool:
         """Check if answer is an error response"""
         # NEW: Better error detection

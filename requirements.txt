@@ -40,6 +40,7 @@ pypdf
 docx2txt
 striprtf
 chardet
+psutil
 
 # Spreadsheet and presentation handling
 pandas
