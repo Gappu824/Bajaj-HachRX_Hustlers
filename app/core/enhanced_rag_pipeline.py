@@ -1483,50 +1483,110 @@ class EnhancedRAGPipeline:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def _generate_answer(self, question: str, chunks: List[str], 
-                                question_info: Dict) -> str:
-        """Generate answer using appropriate prompt based on question type"""
+    # async def _generate_answer(self, question: str, chunks: List[str], 
+    #                             question_info: Dict) -> str:
+    #     """Generate answer using appropriate prompt based on question type"""
         
-        # Select prompt template based on question type
-        prompt = self._create_prompt(question, chunks, question_info)
+    #     # Select prompt template based on question type
+    #     prompt = self._create_prompt(question, chunks, question_info)
         
-        # Select model based on complexity
-        if question_info.get('requires_precision', False):
-            model_name = settings.LLM_MODEL_NAME_PRECISE
-            max_tokens = 1000
-        else:
-            model_name = settings.LLM_MODEL_NAME
-            max_tokens = 600
+    #     # Select model based on complexity
+    #     if question_info.get('requires_precision', False):
+    #         model_name = settings.LLM_MODEL_NAME_PRECISE
+    #         max_tokens = 1000
+    #     else:
+    #         model_name = settings.LLM_MODEL_NAME
+    #         max_tokens = 600
         
+    #     try:
+    #         model = genai.GenerativeModel(model_name)
+            
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config=genai.types.GenerationConfig(
+    #                     temperature=0.1,
+    #                     max_output_tokens=max_tokens,
+    #                     top_p=0.95,
+    #                     candidate_count=1
+    #                 )
+    #             ),
+    #             timeout=settings.ANSWER_TIMEOUT_SECONDS
+    #         )
+            
+    #         answer = response.text.strip()
+            
+    #         if not answer or len(answer) < 10:
+    #             return "Unable to generate a valid answer."
+            
+    #         return answer
+            
+    #     except asyncio.TimeoutError:
+    #         logger.error(f"Answer generation timeout for question: {question[:50]}...")
+    #         return "Processing timeout. Please try again."
+    #     except Exception as e:
+    #         logger.error(f"Answer generation failed: {e}")
+    #         return "An error occurred while generating the answer."
+    # In enhanced_rag_pipeline.py, replace the existing _generate_answer method with this one.
+
+    async def _generate_answer(
+        self, question: str, context: str, question_info: Dict
+    ) -> str:
+        """
+        Generates an answer using the LLM, with robust error handling and safety checks.
+        """
+        model_name = (
+            settings.LLM_MODEL_NAME_PRECISE
+            if question_info.get("requires_precision")
+            else settings.LLM_MODEL_NAME
+        )
+        model = self._get_llm(model_name)
+
+        # --- FIX 1: Add robust safety settings to the LLM call ---
+        # This reduces the chance of the LLM refusing to answer due to overly sensitive filters,
+        # which is a common issue in document Q&A.
+        from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
+        # Construct the prompt...
+        prompt = f"""
+        Context:
+        ---
+        {context}
+        ---
+        Based *only* on the context provided, answer the following question.
+        Question: {question}
+        """
+
         try:
-            model = genai.GenerativeModel(model_name)
-            
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.1,
-                        max_output_tokens=max_tokens,
-                        top_p=0.95,
-                        candidate_count=1
-                    )
-                ),
-                timeout=settings.ANSWER_TIMEOUT_SECONDS
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.1},
+                safety_settings=safety_settings
             )
-            
+
+            # --- FIX 2: Check for a blocked response BEFORE accessing .text ---
+            # This is the true source of the error. If the prompt is blocked, `response.text`
+            # does not exist, and accessing it causes a crash.
+            if not response.candidates or not response.candidates[0].content.parts:
+                block_reason = response.prompt_feedback.block_reason.name if response.prompt_feedback else "Unknown"
+                logger.error(f"LLM response was blocked. Reason: {block_reason}")
+                # --- FIX 3: Return a safe fallback string instead of None ---
+                return f"The response was blocked by the safety filter. Reason: {block_reason}"
+
             answer = response.text.strip()
-            
-            if not answer or len(answer) < 10:
-                return "Unable to generate a valid answer."
-            
             return answer
-            
-        except asyncio.TimeoutError:
-            logger.error(f"Answer generation timeout for question: {question[:50]}...")
-            return "Processing timeout. Please try again."
+
         except Exception as e:
-            logger.error(f"Answer generation failed: {e}")
-            return "An error occurred while generating the answer."
+            logger.error(f"Error during LLM call: {e}", exc_info=True)
+            # --- FIX 4: Ensure the except block also returns a string ---
+            return f"An error occurred while communicating with the language model: {str(e)}"
     
     def _create_prompt(self, question: str, chunks: List[str], 
                         question_info: Dict) -> str:
