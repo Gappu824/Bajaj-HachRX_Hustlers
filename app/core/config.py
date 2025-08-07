@@ -81,10 +81,14 @@ class Settings(BaseSettings):
 # ... your other settings ...
 
 # --- NEW: Parameters for Hierarchical RAG ---
-    PARENT_CHUNK_SIZE = 10000
-    PARENT_CHUNK_OVERLAP = 500
-    CHILD_CHUNK_SIZE = 1000
-    CHILD_CHUNK_OVERLAP = 100
+    # PARENT_CHUNK_SIZE = 10000
+    # PARENT_CHUNK_OVERLAP = 500
+    # CHILD_CHUNK_SIZE = 1000
+    # CHILD_CHUNK_OVERLAP = 100
+    PARENT_CHUNK_SIZE: int = 10000
+    PARENT_CHUNK_OVERLAP: int = 500
+    CHILD_CHUNK_SIZE: int = 1000
+    CHILD_CHUNK_OVERLAP: int = 100
         
     class Config:
         env_file = ".env"
