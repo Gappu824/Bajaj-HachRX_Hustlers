@@ -1,6 +1,7 @@
 # app/core/config.py
 from pydantic_settings import BaseSettings
 import os
+from typing import Optional
 
 class Settings(BaseSettings):
     """Enhanced configuration with new features"""
@@ -32,7 +33,8 @@ class Settings(BaseSettings):
     USE_DISK_CACHE: bool = True
     
     # Document processing
-    MAX_DOCUMENT_SIZE_MB: int = None
+    # MAX_DOCUMENT_SIZE_MB: int = None
+    MAX_DOCUMENT_SIZE_MB: Optional[int] = None
     CHUNK_SIZE_CHARS: int = 1000  # Smaller for precision
     CHUNK_OVERLAP_CHARS: int = 200
     LARGE_CHUNK_SIZE_CHARS: int = 2000  # For hierarchical chunking

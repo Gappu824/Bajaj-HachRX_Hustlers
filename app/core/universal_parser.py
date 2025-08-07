@@ -24,9 +24,9 @@ import os
 os.environ['JAVA_HOME'] = '/usr/lib/jvm/default-java'  # Set Java home for Tika
 
 # Initialize Tika properly
-from tika import tika
-tika.initVM()
-
+# from tika import tika
+# tika.initVM()
+from tika import parser as tika_parser, config as tika_config
 logger = logging.getLogger(__name__)
 
 # Initialize Tika
