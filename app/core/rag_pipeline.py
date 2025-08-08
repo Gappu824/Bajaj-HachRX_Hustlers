@@ -388,6 +388,43 @@ class HybridRAGPipeline:
     #         logger.info(f"Cached vector store for document: {url}")
             
     #         return vector_store
+    async def _download_document(self, url: str) -> bytes:
+        """Download document with retry logic"""
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
+            'Accept': '*/*'
+        }
+        
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    content = await response.read()
+                    logger.info(f"Downloaded {len(content)/1024/1024:.1f}MB from {url}")
+                    return content
+        except Exception as e:
+            logger.warning(f"Async download failed: {e}, trying sync")
+            
+            try:
+                response = requests.get(url, headers=headers, timeout=30, stream=True)
+                response.raise_for_status()
+                
+                chunks = []
+                total_size = 0
+                max_size = settings.MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+                
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    chunks.append(chunk)
+                    total_size += len(chunk)
+                    if total_size > max_size:
+                        logger.warning(f"Document exceeds {settings.MAX_DOCUMENT_SIZE_MB}MB limit")
+                        break
+                
+                return b''.join(chunks)
+            except Exception as e2:
+                logger.error(f"Sync download also failed: {e2}")
+                raise
 
 
     async def get_or_create_vector_store(self, url: str, use_cache: bool = True) -> OptimizedVectorStore:
@@ -422,11 +459,17 @@ class HybridRAGPipeline:
         # Route .zip files to the incremental parser
         if file_extension == '.zip':
             logger.info(f"Processing ZIP file incrementally: {url}")
-            local_path = await self._download_document(url)
-            vector_store = OptimizedVectorStore(
-                embedding_function=self.embedding_model.embed_query,
-                index_type=settings.FAISS_INDEX_TYPE
-            )
+            local_path = await self._download_document_path(url)
+            # vector_store = OptimizedVectorStore(
+            #     embedding_function=self.embedding_model.embed_query,
+            #     index_type=settings.FAISS_INDEX_TYPE
+            # )
+             # --- THIS IS THE CORRECTED LOGIC ---
+            # Get the embedding dimension from the model
+            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # First, create an empty vector store with the correct arguments
+            vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+            # --- END OF CORRECTION ---
             await DocumentParser.parse_zip_incrementally(local_path, vector_store, self)
 
         # Handle other file types
