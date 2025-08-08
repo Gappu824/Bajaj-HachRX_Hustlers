@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Request, HTTPException, Query
 from app.models.query import QueryRequest, QueryResponse
 from app.agents.advanced_query_agent import AdvancedQueryAgent
-
+# from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 router = APIRouter()
 # app/api/endpoints/query.py - Now using the AdvancedQueryAgent
@@ -18,6 +18,16 @@ async def run_submission(
     Processes a document and questions using an advanced, multi-step agent
     that can decompose complex problems.
     """
+    from urllib.parse import urlparse
+    
+    try:
+        parsed = urlparse(request_body.documents.strip())
+        if not all([parsed.scheme, parsed.netloc]):
+            raise HTTPException(status_code=400, detail="Invalid document URL")
+        if parsed.scheme not in ['http', 'https']:
+            raise HTTPException(status_code=400, detail="Only HTTP(S) URLs are allowed")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {str(e)}")
     try:
         # Get the RAG pipeline from the app state
         rag_pipeline = request.app.state.rag_pipeline

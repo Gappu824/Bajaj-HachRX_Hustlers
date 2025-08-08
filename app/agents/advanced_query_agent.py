@@ -5,7 +5,7 @@ import re
 from typing import List, Dict, Any, Tuple
 from collections import defaultdict
 import html
-
+import hashlib
 from app.models.query import QueryRequest, QueryResponse
 from app.core.rag_pipeline import HybridRAGPipeline, OptimizedVectorStore
 
@@ -137,47 +137,102 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"Failed to generate master plan: {e}")
             # return "Error: Could not formulate a master plan. The challenge context may be invalid or the objective unclear."
+    # async def _generate_master_plan(self, questions: List[str]) -> str:
+    #     """Analyzes all questions to create a single, unified strategy."""
+    #     logger.info("🧠 Analyzing all questions to formulate a master strategy...")
+
+    #     # Consolidate all available text from the vector store to use as context
+    #     full_context = "\n---\n".join(self.vector_store.chunks)
+        
+    #     # --- FIX ---
+    #     # The list of questions is joined into a single string *before* being placed in the f-string.
+    #     question_list = "\n- ".join(questions)
+        
+    #     # Create a prompt that asks the LLM to think like a hackathon winner
+    #     prompt = f"""
+    #     You are an elite AI agent in a high-stakes, interactive programming challenge.
+    #     Your goal is to devise a complete, step-by-step strategy to solve the entire problem, not just answer individual questions.
+    #     Analyze the provided context and the list of user questions to understand the overall mission.
+
+    #     CONTEXT:
+    #     {full_context}
+
+    #     USER QUESTIONS (use these to understand the mission's scope):
+    #     - {question_list}
+
+    #     YOUR TASK:
+    #     Create a single, comprehensive 'Master Plan' as a step-by-step guide to win the challenge.
+    #     This plan should be a clear, actionable walkthrough. Identify critical steps, potential pitfalls, and the final objective.
+    #     Be smart, anticipate the required sequence of actions, and explain the logic.
+    #     """
+        
+    #     try:
+    #         # Use the most powerful model for strategic planning
+    #         model = self.rag_pipeline.llm_precise
+    #         response = await model.generate_content_async(
+    #             prompt,
+    #             generation_config={'temperature': 0.1} # Low temperature for factual, deterministic plans
+    #         )
+    #         logger.info("✅ Master Plan generated successfully.")
+    #         return response.text
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate master plan: {e}")
+    #         return "Error: Could not formulate a master plan. The challenge context may be invalid or the objective unclear." 
+
+
+
     async def _generate_master_plan(self, questions: List[str]) -> str:
-        """Analyzes all questions to create a single, unified strategy."""
+        """
+        Analyzes all questions to create a single, unified strategy.
+        This version is optimized to use only relevant context, preventing memory overload.
+        """
         logger.info("🧠 Analyzing all questions to formulate a master strategy...")
 
-        # Consolidate all available text from the vector store to use as context
-        full_context = "\n---\n".join(self.vector_store.chunks)
+        # --- MEMORY FIX START ---
+        # Instead of loading the entire document, perform a broad search to gather
+        # the most relevant context for the overall mission.
         
-        # --- FIX ---
-        # The list of questions is joined into a single string *before* being placed in the f-string.
+        # Consolidate keywords from all questions to form a representative search query
+        all_question_text = " ".join(questions)
+        
+        # Retrieve a diverse set of chunks that are relevant to the questions as a whole
+        # This provides a high-quality summary of the document's key information
+        relevant_chunks = self.vector_store.search(all_question_text, k=20) # Get top 20 chunks
+        
+        # Use only the text from these relevant chunks as the context
+        full_context = "\n---\n".join([chunk[0] for chunk in relevant_chunks])
+        # --- MEMORY FIX END ---
+        
         question_list = "\n- ".join(questions)
         
-        # Create a prompt that asks the LLM to think like a hackathon winner
         prompt = f"""
-        You are an elite AI agent in a high-stakes, interactive programming challenge.
-        Your goal is to devise a complete, step-by-step strategy to solve the entire problem, not just answer individual questions.
-        Analyze the provided context and the list of user questions to understand the overall mission.
+        You are an elite AI agent. Your goal is to devise a complete, step-by-step strategy to solve the entire problem.
+        Analyze the provided CONTEXT and the list of USER QUESTIONS to understand the overall mission.
 
         CONTEXT:
         {full_context}
 
-        USER QUESTIONS (use these to understand the mission's scope):
+        USER QUESTIONS:
         - {question_list}
 
         YOUR TASK:
-        Create a single, comprehensive 'Master Plan' as a step-by-step guide to win the challenge.
-        This plan should be a clear, actionable walkthrough. Identify critical steps, potential pitfalls, and the final objective.
-        Be smart, anticipate the required sequence of actions, and explain the logic.
+        Create a single, comprehensive 'Master Plan' as a step-by-step guide.
+        This plan should be a clear, actionable walkthrough.
         """
         
         try:
-            # Use the most powerful model for strategic planning
             model = self.rag_pipeline.llm_precise
             response = await model.generate_content_async(
                 prompt,
-                generation_config={'temperature': 0.1} # Low temperature for factual, deterministic plans
+                generation_config={'temperature': 0.1}
             )
             logger.info("✅ Master Plan generated successfully.")
             return response.text
         except Exception as e:
             logger.error(f"Failed to generate master plan: {e}")
-            return "Error: Could not formulate a master plan. The challenge context may be invalid or the objective unclear."        
+            return "Error: Could not formulate a master plan."
+        
+               
     async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
         """Answers a specific question by extracting relevant info from the master plan."""
         logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
@@ -568,7 +623,9 @@ class AdvancedQueryAgent:
             
             # Clean up and cache the final, refined answer
             final_answer = self._clean_text(final_answer)
-            self.investigation_cache[f"{question[:100]}"] = final_answer
+            # self.investigation_cache[f"{question[:100]}"] = final_answer
+            cache_key = hashlib.md5(question.encode()).hexdigest()
+            self.investigation_cache[cache_key] = final_answer
             
             return final_answer
             

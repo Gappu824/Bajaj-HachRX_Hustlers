@@ -36,8 +36,26 @@ class UniversalDocumentParser:
     """Universal parser that handles any document format"""
     
     def __init__(self):
+        import subprocess
+        try:
+            subprocess.run(['java', '-version'], capture_output=True, check=True)
+            self.tika_available = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.warning("Java not found. Tika parsing will be disabled.")
+            self.tika_available = False
         self.fallback_parser = DocumentParser()
-        self.easyocr_reader = None  # Lazy load
+        # self.easyocr_reader = None  # Lazy load
+        self._easyocr_reader = None
+    @property
+    def easyocr_reader(self):
+        if self._easyocr_reader is None:
+            try:
+                import easyocr
+                self._easyocr_reader = easyocr.Reader(['en'])
+            except Exception as e:
+                logger.warning(f"EasyOCR initialization failed: {e}")
+                self._easyocr_reader = False
+        return self._easyocr_reader if self._easyocr_reader else None    
         
     def parse_any_document(self, content: bytes, url: str) -> Tuple[str, List[Dict]]:
         """Parse any document format using multiple strategies"""
@@ -110,7 +128,8 @@ class UniversalDocumentParser:
             if extension == '.csv':
                 # Detect encoding
                 encoding = chardet.detect(content)['encoding'] or 'utf-8'
-                df = pd.read_csv(io.BytesIO(content), encoding=encoding, error_bad_lines=False)
+                # df = pd.read_csv(io.BytesIO(content), encoding=encoding, error_bad_lines=False)
+                df = pd.read_csv(io.BytesIO(content), encoding=encoding, on_bad_lines='skip')
             else:
                 excel_file = pd.ExcelFile(io.BytesIO(content))
                 all_text = []

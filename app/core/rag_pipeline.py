@@ -554,7 +554,9 @@ class HybridRAGPipeline:
         if file_extension == '.zip':
             logger.info(f"Processing ZIP file incrementally: {url}")
             local_path = await self.download_document_path(url)
-            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # dimension = self.embedding_model.get_sentence_embedding_dimension()
+            sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+            dimension = sample_embedding.shape[1]
             vector_store = OptimizedVectorStore(self.embedding_model, dimension)
             await DocumentParser.parse_zip_incrementally(local_path, vector_store, self)
 
@@ -603,7 +605,9 @@ class HybridRAGPipeline:
 
             embeddings = await self._generate_embeddings(chunks)
             
-            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # dimension = self.embedding_model.get_sentence_embedding_dimension()
+            sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+            dimension = sample_embedding.shape[1]
             vector_store = OptimizedVectorStore(self.embedding_model, dimension)
             vector_store.add(chunks, embeddings, chunk_metadata)
 
@@ -757,7 +761,9 @@ class HybridRAGPipeline:
         Orchestrates the memory-safe processing of a single ZIP file.
         """
         # 1. Initialize an empty vector store
-        dimension = self.embedding_model.get_sentence_embedding_dimension()
+        # dimension = self.embedding_model.get_sentence_embedding_dimension()
+        sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+        dimension = sample_embedding.shape[1]
         vector_store = OptimizedVectorStore(self.embedding_model, dimension)
         
         file_path = None

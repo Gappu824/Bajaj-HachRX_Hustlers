@@ -5,6 +5,9 @@ uvicorn[standard]
 # Configuration and data models
 pydantic
 pydantic-settings
+chardet
+html5lib
+nltk_data
 
 # Google AI and LLM
 google-generativeai

@@ -180,6 +180,40 @@ class DocumentParser:
     #         except Exception as universal_e:
     #             logger.error(f"FATAL: All parsing methods failed for {file_extension}: {universal_e}", exc_info=True)
     #             return f"Unable to process the document. The format '{file_extension}' is not supported by any available parser.", [{'type': 'fatal_error'}]
+    # Add this method to DocumentParser class:
+    @staticmethod
+    async def parse_bin_incrementally(file_path: str, vector_store, pipeline):
+        """
+        Stream-process a large binary file
+        """
+        READ_CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+        
+        try:
+            with open(file_path, 'rb') as f:
+                while True:
+                    byte_chunk = f.read(READ_CHUNK_SIZE)
+                    if not byte_chunk:
+                        break
+                    
+                    text, _ = DocumentParser.parse_binary(byte_chunk)
+                    if not text.strip():
+                        continue
+                    
+                    chunks, chunk_meta = SmartChunker.chunk_document(
+                        text, 
+                        [{'type': 'binary_stream'}],
+                        chunk_size=settings.CHUNK_SIZE_CHARS,
+                        overlap=settings.CHUNK_OVERLAP_CHARS
+                    )
+                    
+                    if chunks:
+                        embeddings = await pipeline._generate_embeddings(chunks)
+                        vector_store.add(chunks, embeddings, chunk_meta)
+                        
+        except Exception as e:
+            logger.error(f"Failed to process binary file: {e}")
+    
+    
     @staticmethod
     def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
         """
