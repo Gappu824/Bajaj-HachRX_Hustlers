@@ -260,34 +260,142 @@ class AdvancedQueryAgent:
     # No changes are needed for them.
 
         
-    async def investigate_question(self, question: str) -> str:
-        """Conduct a full investigation and generate a strategic report."""
-        cache_key = f"{self.rag_pipeline.settings.EMBEDDING_MODEL_NAME}_{question}"
-        if cache_key in self.investigation_cache:
-            logger.info(f"Returning cached investigation for: '{question}'")
-            return self.investigation_cache[cache_key]
+    # async def investigate_question(self, question: str) -> str:
+    #     """Conduct a full investigation and generate a strategic report."""
+    #     cache_key = f"{self.rag_pipeline.settings.EMBEDDING_MODEL_NAME}_{question}"
+    #     if cache_key in self.investigation_cache:
+    #         logger.info(f"Returning cached investigation for: '{question}'")
+    #         return self.investigation_cache[cache_key]
 
-        logger.info(f"🕵️  New Investigation: '{question}'")
+    #     logger.info(f"🕵️  New Investigation: '{question}'")
         
-        # 1. Get a clean, direct answer
-        direct_answer_text = await self.rag_pipeline.answer_question(question, self.vector_store)
+    #     # 1. Get a clean, direct answer
+    #     direct_answer_text = await self.rag_pipeline.answer_question(question, self.vector_store)
         
-        # 2. Search for contradictions and inconsistencies
-        contradictions = await self._find_inconsistencies(question, direct_answer_text)
+    #     # 2. Search for contradictions and inconsistencies
+    #     contradictions = await self._find_inconsistencies(question, direct_answer_text)
         
-        # 3. Investigate for hidden details (exceptions, conditions, etc.)
-        investigation_findings = await self._investigate_hidden_details(question, direct_answer_text)
+    #     # 3. Investigate for hidden details (exceptions, conditions, etc.)
+    #     investigation_findings = await self._investigate_hidden_details(question, direct_answer_text)
         
-        # 4. Synthesize everything into a final, strategic report
-        final_report = self._create_final_report(
-            question,
-            self._clean_text(direct_answer_text),
-            contradictions,
-            investigation_findings
+    #     # 4. Synthesize everything into a final, strategic report
+    #     final_report = self._create_final_report(
+    #         question,
+    #         self._clean_text(direct_answer_text),
+    #         contradictions,
+    #         investigation_findings
+    #     )
+        
+    #     self.investigation_cache[cache_key] = final_report
+    #     return final_report
+    async def investigate_question(self, question: str) -> str:
+        """
+        Detective-style investigation that now includes a final
+        self-correction and refinement step.
+        """
+        try:
+            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
+            
+            # ... (keep the existing logic for caching, pattern detection, etc.)
+            
+            # Phase 1 & 2: Get the basic answer and conduct initial investigation
+            basic_answer = await self._get_basic_answer(question)
+            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
+                basic_answer = await self._deep_search(question)
+            
+            investigation_findings = await self._conduct_investigation(
+                question, 
+                self._detect_question_patterns(question)[0], 
+                self._detect_question_patterns(question)[1], 
+                basic_answer
+            )
+            
+            # --- SELF-CORRECTION AGENTIC SHIFT START ---
+            
+            # Phase 3: Agent performs self-correction and refinement
+            final_answer = await self._self_correct_and_refine(question, basic_answer, investigation_findings)
+            
+            # --- SELF-CORRECTION AGENTIC SHIFT END ---
+            
+            # Clean up and cache the final, refined answer
+            final_answer = self._clean_text(final_answer)
+            self.investigation_cache[f"{question[:100]}"] = final_answer
+            
+            return final_answer
+            
+        except Exception as e:
+            logger.error(f"Investigation failed for question: {e}", exc_info=True)
+            return f"Investigation error: {str(e)[:200]}"
+    async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
+        """
+        A new agentic step where the LLM critiques its own answer and
+        performs a targeted search to fix potential flaws.
+        """
+        logger.info("🧐 Performing self-correction and refinement...")
+        
+        # Consolidate all the information gathered so far
+        full_context = original_answer + "\n" + "\n".join(
+            " ".join(items) for items in findings.values() if items
         )
+
+        # Prompt the agent to critique its own work
+        critique_prompt = f"""
+        You are a meticulous fact-checker. Review the following DRAFT ANSWER for a user's question and identify potential flaws, missing details, or contradictions based on the provided CONTEXT.
+
+        USER QUESTION: "{question}"
         
-        self.investigation_cache[cache_key] = final_report
-        return final_report
+        CONTEXT:
+        {self._clean_text(full_context)}
+
+        DRAFT ANSWER:
+        "{self._clean_text(original_answer)}"
+
+        CRITIQUE:
+        Identify one critical flaw in the draft answer. For example:
+        - "The answer is missing the specific percentage for the tariff."
+        - "The answer mentions Big Ben is in two places but doesn't explain the implication."
+        - "The answer is too generic and doesn't provide a direct, actionable step."
+        
+        If no flaws are found, respond with "No significant flaws found.".
+        """
+        
+        try:
+            # Generate a critique
+            critique_response = await self.rag_pipeline.llm_precise.generate_content_async(critique_prompt)
+            critique = self._clean_text(critique_response.text)
+
+            if "no significant flaws" in critique.lower():
+                logger.info("✅ No flaws found. Finalizing original answer.")
+                return original_answer # The original answer is good enough
+
+            logger.warning(f"⚠️ Flaw identified: {critique}. Attempting refinement.")
+            
+            # If a flaw is found, use the critique to generate a better answer
+            refinement_prompt = f"""
+            You are a solution-oriented agent. An initial answer was drafted, but a flaw was found. 
+            Your task is to generate a final, improved answer that directly addresses the identified flaw using the full context provided.
+
+            USER QUESTION: "{question}"
+            
+            FULL CONTEXT:
+            {self._clean_text(full_context)}
+            
+            IDENTIFIED FLAW:
+            "{critique}"
+
+            IMPROVED ANSWER:
+            """
+            
+            final_response = await self.rag_pipeline.llm_precise.generate_content_async(refinement_prompt)
+            return self._clean_text(final_response.text)
+
+        except Exception as e:
+            logger.error(f"Self-correction failed: {e}. Returning original answer.")
+            return original_answer # Fallback to the original answer if refinement fails
+
+    # --- KEEP ALL OTHER METHODS ---
+    # Your other methods like _get_basic_answer, _conduct_investigation,
+    # _clean_text, etc., remain unchanged.    
 
     async def _find_inconsistencies(self, question: str, context_text: str) -> Dict[str, str]:
         """Finds contradictions and ambiguities and explains their importance."""
