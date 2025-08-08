@@ -158,6 +158,10 @@ class HybridRAGPipeline:
             raise
         # Initialize LLM models for use by agents
         self.llm_precise = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+
+    def _get_cache_key(self, url: str) -> str:
+        """Creates a consistent cache key for a given source URL."""
+        return f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"    
     
     async def download_document(self, url: str) -> bytes:
         """Download document with retry logic"""
