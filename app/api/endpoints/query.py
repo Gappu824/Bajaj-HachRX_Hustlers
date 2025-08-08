@@ -1,13 +1,38 @@
 # app/api/endpoints/query.py - Enhanced endpoint
 import asyncio
 import logging
-import time
 from fastapi import APIRouter, Request, HTTPException, Query
 from app.models.query import QueryRequest, QueryResponse
-
+from app.agents.advanced_query_agent import AdvancedQueryAgent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+# app/api/endpoints/query.py - Now using the AdvancedQueryAgent
+
+@router.post("/hackrx/run", response_model=QueryResponse, tags=["Submissions"])
+async def run_submission(
+    request_body: QueryRequest,
+    request: Request
+):
+    """
+    Processes a document and questions using an advanced, multi-step agent
+    that can decompose complex problems.
+    """
+    try:
+        # Get the RAG pipeline from the app state
+        rag_pipeline = request.app.state.rag_pipeline
+
+        # Instantiate the advanced agent
+        agent = AdvancedQueryAgent(rag_pipeline)
+
+        # Let the agent plan and execute the request
+        return await agent.run(request_body)
+
+    except Exception as e:
+        logger.error(f"A critical error occurred: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="An internal server error occurred."
+        )
 
 # @router.post("/hackrx/run", response_model=QueryResponse, tags=["Submissions"])
 # async def run_submission(
@@ -40,69 +65,25 @@ router = APIRouter()
 #     except Exception as e:
 #         logger.error(f"A critical error occurred in the query endpoint: {e}", exc_info=True)
 #         raise HTTPException(status_code=500, detail="An internal server error occurred.")
-@router.post("/hackrx/run", response_model=QueryResponse, tags=["Submissions"])
-async def run_submission(
-    request_body: QueryRequest, 
-    request: Request,
-    explainable: bool = Query(False, description="Include detailed explanations and reasoning")
-):
-    """
-    Processes a document URL and a list of questions.
-    Set explainable=true for detailed answers with reasoning and clause traceability.
-    """
-    start_time = time.time()
-    success = False
-    
-    try:
-        rag_pipeline = request.app.state.rag_pipeline
-        doc_url = request_body.documents.strip()
-        questions = request_body.questions
-        
-        if explainable:
-            # Use enhanced processing with explainability
-            simple_answers, detailed_answers, processing_time = await rag_pipeline.process_query_with_explainability(doc_url, questions)
-            success = True
-            return QueryResponse(
-                answers=simple_answers,
-                detailed_answers=detailed_answers,
-                processing_time=processing_time
-            )
-        else:
-            # Use existing simple processing for backward compatibility
-            answers = await rag_pipeline.process_query(doc_url, questions)
-            success = True
-            return QueryResponse(answers=answers)
 
-    except Exception as e:
-        logger.error(f"A critical error occurred in the query endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal server error occurred.")
-    
-    finally:
-        # Record performance if monitor exists
-        duration = time.time() - start_time
-        if hasattr(request.app.state, 'performance_monitor'):
-            request.app.state.performance_monitor.record_request(duration, success)
-        
-        logger.info(f"Request completed in {duration:.2f}s (success: {success})")
+# @router.post("/hackrx/run/detailed", response_model=QueryResponse, tags=["Submissions"])
+# async def run_detailed_submission(request_body: QueryRequest, request: Request):
+#     """
+#     Enhanced endpoint that always returns detailed explanations.
+#     Provides full explainability, decision rationale, and clause traceability.
+#     """
+#     rag_pipeline = request.app.state.rag_pipeline
+#     doc_url = request_body.documents.strip()
+#     questions = request_body.questions
 
-@router.post("/hackrx/run/detailed", response_model=QueryResponse, tags=["Submissions"])
-async def run_detailed_submission(request_body: QueryRequest, request: Request):
-    """
-    Enhanced endpoint that always returns detailed explanations.
-    Provides full explainability, decision rationale, and clause traceability.
-    """
-    rag_pipeline = request.app.state.rag_pipeline
-    doc_url = request_body.documents.strip()
-    questions = request_body.questions
+#     try:
+#         simple_answers, detailed_answers, processing_time = await rag_pipeline.process_query_with_explainability(doc_url, questions)
+#         return QueryResponse(
+#             answers=simple_answers,
+#             detailed_answers=detailed_answers,
+#             processing_time=processing_time
+#         )
 
-    try:
-        simple_answers, detailed_answers, processing_time = await rag_pipeline.process_query_with_explainability(doc_url, questions)
-        return QueryResponse(
-            answers=simple_answers,
-            detailed_answers=detailed_answers,
-            processing_time=processing_time
-        )
-
-    except Exception as e:
-        logger.error(f"A critical error occurred in the detailed query endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal server error occurred.")
+#     except Exception as e:
+#         logger.error(f"A critical error occurred in the detailed query endpoint: {e}", exc_info=True)
+#         raise HTTPException(status_code=500, detail="An internal server error occurred.")

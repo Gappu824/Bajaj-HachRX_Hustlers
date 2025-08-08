@@ -23,7 +23,7 @@ class EnhancedRetriever:
     
     def __init__(self, chunks: List[str], chunk_metadata: List[Dict]):
         self.chunks = chunks
-        self.chunk_metadata = chunk_metadata or []
+        self.chunk_metadata = chunk_metadata
         
         # Initialize components
         self._init_keyword_index()
@@ -31,17 +31,6 @@ class EnhancedRetriever:
         self._init_tfidf()
         
         logger.info(f"Enhanced retriever initialized with {len(chunks)} chunks")
-
-    def _tokenize(self, text: str) -> List[str]:
-        """Tokenize text for BM25"""
-        try:
-            stop_words = set(stopwords.words('english'))
-        except:
-            stop_words = set()
-        
-        tokens = word_tokenize(text.lower())
-        tokens = [t for t in tokens if t.isalnum() and t not in stop_words]
-        return tokens if tokens else ['empty']    
     
     def _init_keyword_index(self):
         """Build keyword index for exact matching"""
@@ -127,42 +116,59 @@ class EnhancedRetriever:
     #         logger.warning(f"TF-IDF initialization failed: {e}")
     #         self.tfidf_vectorizer = None
     #         self.tfidf_matrix = None
-    def _init_tfidf(self):
-        """Initialize TF-IDF with error handling"""
-        # OLD: Fails on small collections
-        # NEW: Adaptive initialization
+    # def _init_tfidf(self):
+    #     """Initialize TF-IDF for term frequency analysis"""
+    #     if len(self.chunks) < 2:
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    #         return
         
+    #     try:
+    #         # Adjust parameters based on collection size
+    #         if len(self.chunks) < 10:
+    #             # Very small collections - be more permissive
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(100, len(self.chunks) * 20),
+    #                 ngram_range=(1, 1),  # Only unigrams for small collections
+    #                 stop_words=None,     # Don't remove stop words for small collections
+    #                 min_df=1,
+    #                 max_df=1.0           # Allow all terms
+    #             )
+    #         else:
+    #             # Larger collections - use original settings
+    #             self.tfidf_vectorizer = TfidfVectorizer(
+    #                 max_features=min(5000, len(self.chunks) * 10),
+    #                 ngram_range=(1, 2),
+    #                 stop_words='english',
+    #                 min_df=1,
+    #                 max_df=0.95
+    #             )
+    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+    #     except Exception as e:
+    #         logger.warning(f"TF-IDF initialization failed: {e}")
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    def _init_tfidf(self):
+        """Initialize TF-IDF for term frequency analysis with robust fallbacks."""
         if len(self.chunks) < 2:
             self.tfidf_vectorizer = None
             self.tfidf_matrix = None
-            logger.warning("Not enough chunks for TF-IDF (need at least 2)")
             return
         
         try:
-            # Adjust parameters based on collection size
-            if len(self.chunks) < 10:
-                # Very small collections
-                self.tfidf_vectorizer = TfidfVectorizer(
-                    max_features=min(100, len(self.chunks) * 20),
-                    ngram_range=(1, 1),  # Only unigrams
-                    stop_words=None,     # Keep all words
-                    min_df=1,
-                    max_df=1.0,
-                    token_pattern=r'(?u)\b\w+\b'  # Single character tokens allowed
-                )
-            else:
-                # Normal collections
-                self.tfidf_vectorizer = TfidfVectorizer(
-                    max_features=min(5000, len(self.chunks) * 10),
-                    ngram_range=(1, 2),
-                    stop_words='english',
-                    min_df=1,
-                    max_df=0.95
-                )
-            
+            # For very small collections, be extremely permissive.
+            # Only apply stop words if we have a decent number of documents.
+            use_stop_words = 'english' if len(self.chunks) >= 20 else None
+
+            self.tfidf_vectorizer = TfidfVectorizer(
+                max_features=min(5000, len(self.chunks) * 10),
+                ngram_range=(1, 2),
+                stop_words=use_stop_words,
+                min_df=1, # Always include terms that appear at least once
+                max_df=1.0 # Always include terms that appear in all documents
+            )
+
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
-            logger.info(f"TF-IDF initialized with {self.tfidf_matrix.shape[0]} documents, {self.tfidf_matrix.shape[1]} features")
-            
         except Exception as e:
             logger.warning(f"TF-IDF initialization failed: {e}")
             self.tfidf_vectorizer = None

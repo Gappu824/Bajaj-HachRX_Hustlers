@@ -1,19 +1,15 @@
-# app/main.py - Updated with enhanced pipeline
+# app/main.py - Main FastAPI application
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from sentence_transformers import SentenceTransformer, CrossEncoder
+from sentence_transformers import SentenceTransformer
 import time
-import tempfile
-import os
-import shutil
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.core.enhanced_rag_pipeline import EnhancedRAGPipeline
+from app.core.rag_pipeline import HybridRAGPipeline
 from app.api.endpoints import query
 from app.core.cache import cache
-from app.core.performance_monitor import PerformanceMonitor
 
 # Setup logging
 setup_logging()
@@ -23,143 +19,36 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
     # Startup
-    # logger.info("Starting Enhanced RAG Pipeline v2...")
-    
-    # try:
-    #     # Load models
-    #     logger.info("Loading embedding model...")
-    #     embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-        
-    #     logger.info("Loading re-ranker model...")
-    #     reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
-        
-    #     logger.info("Models loaded successfully")
-        
-    #     # Initialize pipeline
-    #     app.state.rag_pipeline = EnhancedRAGPipeline(embedding_model, reranker_model)
-    #     logger.info("Enhanced RAG Pipeline initialized successfully")
-        
-    #     # Download NLTK data
-    #     import nltk
-    #     nltk.download('punkt', quiet=True)
-    #     nltk.download('stopwords', quiet=True)
-    #     nltk.download('wordnet', quiet=True)
-        
-    # except Exception as e:
-    #     logger.error(f"Failed to initialize: {e}")
-    #     raise
-    
-    # yield
-    
-    # # Shutdown
-    # logger.info("Shutting down...")
-    # cache.clear()
-    # logger.info(f"Final cache stats: {cache.get_stats()}")
-    # logger.info("Shutdown complete")
-    # Startup
-    logger.info("Starting Enhanced RAG Pipeline v2...")
-    app.state.performance_monitor = PerformanceMonitor()
+    logger.info("Starting Hybrid Optimized RAG Pipeline...")
     
     try:
-        # Load models with error handling
-        logger.info("Loading embedding model...")
-        try:
-            embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-        except Exception as e:
-            logger.error(f"Failed to load embedding model: {e}")
-            # Fallback to a smaller model
-            logger.info("Trying fallback embedding model...")
-            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        
-        logger.info("Loading re-ranker model...")
-        try:
-            reranker_model = CrossEncoder(settings.RERANKER_MODEL_NAME)
-        except Exception as e:
-            logger.error(f"Failed to load reranker model: {e}")
-            # Continue without reranker
-            reranker_model = None
-            logger.warning("Running without reranker model")
+        # Load embedding model
+        embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        logger.info(f"Loaded embedding model: {settings.EMBEDDING_MODEL_NAME}")
         
         # Initialize pipeline
-        app.state.rag_pipeline = EnhancedRAGPipeline(embedding_model, reranker_model)
-        logger.info("Enhanced RAG Pipeline initialized successfully")
+        app.state.rag_pipeline = HybridRAGPipeline(embedding_model)
+        logger.info("RAG Pipeline initialized successfully")
         
     except Exception as e:
         logger.error(f"Failed to initialize: {e}")
         raise
     
-    # yield
-    
-    # # Shutdown with cleanup
-    # logger.info("Shutting down...")
-    
-    # # Clean up pipeline resources
-    # if hasattr(app.state, 'rag_pipeline'):
-    #     await app.state.rag_pipeline.cleanup()
-    # if hasattr(app.state, 'performance_monitor'):
-    #     final_stats = app.state.performance_monitor.get_stats()
-    #     logger.info(f"Final performance stats: {final_stats}")
-    
-    # # Final cache cleanup
-    # cache.clear()
-    # logger.info(f"Final cache stats: {cache.get_stats()}")
-    
-    # # Clean any remaining temp files
-    # temp_dir = tempfile.gettempdir()
-    # for filename in os.listdir(temp_dir):
-    #     if filename.startswith('vecstore_') or filename.startswith('tmp'):
-    #         try:
-    #             filepath = os.path.join(temp_dir, filename)
-    #             if os.path.isdir(filepath):
-    #                 shutil.rmtree(filepath)
-    #             else:
-    #                 os.unlink(filepath)
-    #         except:
-    #             pass
-    
-    # logger.info("Shutdown complete")
-    # In the 'lifespan' function in main.py
-
-# --- REPLACE THE ENTIRE 'yield' and 'Shutdown' BLOCK WITH THIS ---
-
     yield
     
-    # --- NEW: Robust Shutdown and Cleanup ---
+    # Shutdown
     logger.info("Shutting down...")
-    
-    # Step 1: Clean up resources from the RAG pipeline itself
-    if hasattr(app.state, 'rag_pipeline'):
-        await app.state.rag_pipeline.cleanup()
-    
-    # Step 2: Log the final performance stats
-    if hasattr(app.state, 'performance_monitor'):
-        final_stats = app.state.performance_monitor.get_stats()
-        logger.info(f"Final performance stats: {final_stats}")
-    
-    # Step 3: Clear the main application cache
     cache.clear()
     logger.info(f"Final cache stats: {cache.get_stats()}")
-    
-    # This old block is unsafe and has been removed.
-    # It was iterating through the global temp directory, which is not reliable.
-    # temp_dir = tempfile.gettempdir()
-    # for filename in os.listdir(temp_dir): ...
-
-    logger.info("Shutdown complete.")
+    logger.info("Shutdown complete")
 
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Advanced document query system with 80%+ accuracy target",
-    version="2.0.0",
+    description="High-performance document query system with balanced speed and accuracy",
+    version="6.0.0",
     lifespan=lifespan
 )
-@app.get("/performance/stats", tags=["Monitoring"])
-async def get_performance_stats(request: Request):
-    """Get current performance statistics"""
-    if hasattr(request.app.state, 'performance_monitor'):
-        return request.app.state.performance_monitor.get_stats()
-    return {"error": "Performance monitor not initialized"}
 
 # Middleware for request logging
 @app.middleware("http")
@@ -181,27 +70,23 @@ async def read_root():
     """Root endpoint with system information"""
     return {
         "message": f"Welcome to {settings.APP_NAME}",
-        "version": "2.0.0",
+        "version": "6.0.0",
         "features": [
-            "Universal document parsing with Tika",
-            "Hierarchical chunking for better context",
-            "Cross-encoder re-ranking for accuracy",
-            "Multi-step reasoning for complex questions",
-            "Query expansion for better retrieval",
-            "Answer validation and correction",
-            "Question type detection and routing",
-            "Support for 100+ file formats",
-            "Binary file handling",
-            "Advanced table extraction"
+            "Balanced speed and accuracy optimization",
+            "Hybrid memory and disk caching",
+            "Comprehensive format support (PDF, DOCX, Excel, PPT, Images, ZIP)",
+            "Smart context-aware chunking",
+            "Multi-strategy retrieval (BM25, TF-IDF, Semantic)",
+            "Adaptive answer generation",
+            "Parallel question processing"
         ],
         "performance": {
-            "target_accuracy": "80%+",
-            "target_speed": "<30s for 10 questions",
+            "target_accuracy": "85%+",
+            "target_speed": "<20s for 10 questions",
             "max_document_size": f"{settings.MAX_DOCUMENT_SIZE_MB}MB"
         },
         "models": {
             "embedding": settings.EMBEDDING_MODEL_NAME,
-            "reranker": settings.RERANKER_MODEL_NAME,
             "llm_fast": settings.LLM_MODEL_NAME,
             "llm_accurate": settings.LLM_MODEL_NAME_PRECISE
         }
@@ -214,7 +99,7 @@ async def health_check():
     
     return {
         "status": "healthy",
-        "pipeline": "enhanced-v2",
+        "pipeline": "hybrid-optimized-v6",
         "cache": cache_stats
     }
 
