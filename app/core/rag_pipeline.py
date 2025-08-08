@@ -397,13 +397,23 @@ class HybridRAGPipeline:
         including special handling for ZIP files and a specific token URL.
         """
         cache_key = self._get_cache_key(url)
-        if use_cache and cache_key in cache:
-            try:
-                logger.info(f"✅ Loading vector store from cache for: {url}")
-                return cache.get(cache_key)
-            except Exception as e:
-                logger.warning(f"Cache load failed for {url}, rebuilding. Reason: {e}")
-
+        # if use_cache and cache_key in cache:
+        #     try:
+        #         logger.info(f"✅ Loading vector store from cache for: {url}")
+        #         return cache.get(cache_key)
+        #     except Exception as e:
+        #         logger.warning(f"Cache load failed for {url}, rebuilding. Reason: {e}")
+        if use_cache:
+            # First, try to get the item from the cache
+            cached_store = await cache.get(cache_key)
+            # Then, check if the retrieved item is not None
+            if cached_store:
+                try:
+                    logger.info(f"✅ Loading vector store from cache for: {url}")
+                    return cached_store
+                except Exception as e:
+                    logger.warning(f"Cache load failed for {url}, rebuilding. Reason: {e}")
+        # --- END OF CORRECTION ---
         logger.info(f"🛠️ Creating new vector store for: {url}")
         
         vector_store = None
