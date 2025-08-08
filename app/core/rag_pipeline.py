@@ -156,6 +156,8 @@ class HybridRAGPipeline:
         except Exception as e:
             logger.error(f"Failed to configure Gemini: {e}")
             raise
+        # Initialize LLM models for use by agents
+        self.llm_precise = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
     
     async def download_document(self, url: str) -> bytes:
         """Download document with retry logic"""
