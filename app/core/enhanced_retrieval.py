@@ -62,17 +62,28 @@ class EnhancedRetriever:
                     self.keyword_index[num] = set()
                 self.keyword_index[num].add(idx)
     
+    # def _init_bm25(self):
+    #     """Initialize BM25 for probabilistic retrieval"""
+    #     try:
+    #         stop_words = set(stopwords.words('english'))
+    #     except:
+    #         stop_words = set()
+        
+    #     tokenized_chunks = []
+    #     for chunk in self.chunks:
+    #         tokens = word_tokenize(chunk.lower())
+    #         tokens = [t for t in tokens if t.isalnum() and t not in stop_words]
+    #         tokenized_chunks.append(tokens if tokens else ['empty'])
+        
+    #     self.bm25 = BM25Okapi(tokenized_chunks)
     def _init_bm25(self):
         """Initialize BM25 for probabilistic retrieval"""
-        try:
-            stop_words = set(stopwords.words('english'))
-        except:
-            stop_words = set()
-        
+        # No longer using language-specific stopwords
         tokenized_chunks = []
         for chunk in self.chunks:
             tokens = word_tokenize(chunk.lower())
-            tokens = [t for t in tokens if t.isalnum() and t not in stop_words]
+            # Tokenization is kept, but stopword filtering is removed
+            tokens = [t for t in tokens if t.isalnum()]
             tokenized_chunks.append(tokens if tokens else ['empty'])
         
         self.bm25 = BM25Okapi(tokenized_chunks)
@@ -199,13 +210,19 @@ class EnhancedRetriever:
                     scores[idx] += 3.0
         
         # 3. BM25 scoring
-        try:
-            stop_words = set(stopwords.words('english'))
-        except:
-            stop_words = set()
+        # try:
+        #     stop_words = set(stopwords.words('english'))
+        # except:
+        #     stop_words = set()
         
+        # query_tokens = word_tokenize(query_lower)
+        # query_tokens = [t for t in query_tokens if t.isalnum() and t not in stop_words]
+        
+        # if query_tokens:
+        #     bm25_scores = self.bm25.get_scores(query_tokens)
+        #     scores += np.array(bm25_scores) * 2.0
         query_tokens = word_tokenize(query_lower)
-        query_tokens = [t for t in query_tokens if t.isalnum() and t not in stop_words]
+        query_tokens = [t for t in query_tokens if t.isalnum()]
         
         if query_tokens:
             bm25_scores = self.bm25.get_scores(query_tokens)

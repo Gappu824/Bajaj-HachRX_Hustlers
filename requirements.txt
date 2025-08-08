@@ -15,6 +15,11 @@ huggingface-hub
 transformers
 faiss-cpu
 torch
+tika
+python-magic
+easyocr
+tabula-py
+camelot-py
 
 # Enhanced retrieval
 rank-bm25

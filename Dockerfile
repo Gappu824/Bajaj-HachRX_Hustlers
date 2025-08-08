@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     # For document processing
     libxml2-dev \
     libxslt-dev \
+    # For Tika (Java dependency)
+    default-jre \
     # For OCR
     tesseract-ocr \
     tesseract-ocr-eng \

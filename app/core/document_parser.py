@@ -19,6 +19,7 @@ from odf.text import P
 from odf.opendocument import load
 from app.core.smart_chunker import SmartChunker
 from app.core.config import settings
+# from app.core.universal_parser import universal_parser
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -89,35 +90,157 @@ class DocumentParser:
     #     else:
     #         # Try text extraction
     #         return DocumentParser.parse_text(content)
+    # @staticmethod
+    # def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
+    #     """Route to appropriate parser based on file type"""
+        
+    #     # Normalize extension
+    #     file_extension = file_extension.lower()
+    #     if not file_extension.startswith('.'):
+    #         file_extension = '.' + file_extension
+        
+    #     # Route to appropriate parser
+    #     if file_extension == '.pdf':
+    #         return DocumentParser.parse_pdf(content)
+    #     elif file_extension in ['.xlsx', '.xls', '.csv']:
+    #         return DocumentParser.parse_spreadsheet(content, file_extension)
+    #     elif file_extension in ['.docx', '.doc']:
+    #         return DocumentParser.parse_word(content)
+    #     elif file_extension in ['.pptx', '.ppt']:
+    #         return DocumentParser.parse_powerpoint(content)
+    #     elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+    #         return DocumentParser.parse_image(content)
+    #     elif file_extension == '.bin':
+    #         return DocumentParser.parse_binary(content)
+    #     # elif file_extension == '.zip':
+    #     #     return DocumentParser.parse_zip(content)
+    #     elif file_extension == '.odt':
+    #         return DocumentParser.parse_odt(content)
+    #     else:
+    #         # Try text extraction
+    #         return DocumentParser.parse_text(content)
+    # @staticmethod
+    # def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
+    #     """
+    #     Route to appropriate parser, with an agentic fallback to a universal
+    #     parser if the specialized method fails or returns poor content.
+    #     """
+    #     # Normalize extension (same as before)
+    #     file_extension = file_extension.lower()
+    #     if not file_extension.startswith('.'):
+    #         file_extension = '.' + file_extension
+        
+    #     # --- AGENTIC PARSING LOGIC ---
+        
+    #     # Define the primary parser to try first
+    #     parser_map = {
+    #         '.pdf': DocumentParser.parse_pdf,
+    #         '.xlsx': DocumentParser.parse_spreadsheet,
+    #         '.xls': DocumentParser.parse_spreadsheet,
+    #         '.csv': DocumentParser.parse_spreadsheet,
+    #         '.docx': DocumentParser.parse_word,
+    #         '.doc': DocumentParser.parse_word,
+    #         '.pptx': DocumentParser.parse_powerpoint,
+    #         '.ppt': DocumentParser.parse_powerpoint,
+    #         '.png': DocumentParser.parse_image,
+    #         '.jpg': DocumentParser.parse_image,
+    #         '.jpeg': DocumentParser.parse_image,
+    #         '.tiff': DocumentParser.parse_image,
+    #         '.bmp': DocumentParser.parse_image,
+    #         '.odt': DocumentParser.parse_odt,
+    #         '.bin': DocumentParser.parse_binary,
+    #     }
+        
+    #     # Default to the basic text parser if the extension is unknown
+    #     primary_parser = parser_map.get(file_extension, DocumentParser.parse_text)
+        
+    #     try:
+    #         # Attempt to parse with the specialized tool
+    #         if primary_parser in [DocumentParser.parse_spreadsheet]:
+    #              text, metadata = primary_parser(content, file_extension)
+    #         else:
+    #              text, metadata = primary_parser(content)
+
+    #         # Check if the primary parser failed or returned weak results
+    #         if "unable to parse" in text.lower() or "error parsing" in text.lower() or len(text.strip()) < 20:
+    #             logger.warning(f"Specialized parser for '{file_extension}' failed or returned poor content. Triggering Universal Parser fallback.")
+    #             raise ValueError("Primary parser failed.")
+
+    #         return text, metadata
+
+    #     except Exception as e:
+    #         # If the primary parser fails, the agent tries a different tool.
+    #         logger.info(f"Fallback initiated due to: {e}. Using universal_parser.")
+    #         try:
+    #             # The UniversalDocumentParser can handle almost any format.
+    #             # We pass a dummy URL since it's required by the method signature.
+    #             from app.core.universal_parser import UniversalDocumentParser
+    #             universal_parser = universal_parser()
+    #             return universal_parser.parse_any_document(content, f"file{file_extension}")
+    #         except Exception as universal_e:
+    #             logger.error(f"FATAL: All parsing methods failed for {file_extension}: {universal_e}", exc_info=True)
+    #             return f"Unable to process the document. The format '{file_extension}' is not supported by any available parser.", [{'type': 'fatal_error'}]
     @staticmethod
     def parse_document(content: bytes, file_extension: str) -> Tuple[str, List[Dict]]:
-        """Route to appropriate parser based on file type"""
-        
+        """
+        Route to appropriate parser, with an agentic fallback to a universal
+        parser if the specialized method fails or returns poor content.
+        """
         # Normalize extension
         file_extension = file_extension.lower()
         if not file_extension.startswith('.'):
             file_extension = '.' + file_extension
         
-        # Route to appropriate parser
-        if file_extension == '.pdf':
-            return DocumentParser.parse_pdf(content)
-        elif file_extension in ['.xlsx', '.xls', '.csv']:
-            return DocumentParser.parse_spreadsheet(content, file_extension)
-        elif file_extension in ['.docx', '.doc']:
-            return DocumentParser.parse_word(content)
-        elif file_extension in ['.pptx', '.ppt']:
-            return DocumentParser.parse_powerpoint(content)
-        elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
-            return DocumentParser.parse_image(content)
-        elif file_extension == '.bin':
-            return DocumentParser.parse_binary(content)
-        # elif file_extension == '.zip':
-        #     return DocumentParser.parse_zip(content)
-        elif file_extension == '.odt':
-            return DocumentParser.parse_odt(content)
-        else:
-            # Try text extraction
-            return DocumentParser.parse_text(content)
+        # Define the primary parser to try first
+        parser_map = {
+            '.pdf': DocumentParser.parse_pdf,
+            '.xlsx': DocumentParser.parse_spreadsheet,
+            '.xls': DocumentParser.parse_spreadsheet,
+            '.csv': DocumentParser.parse_spreadsheet,
+            '.docx': DocumentParser.parse_word,
+            '.doc': DocumentParser.parse_word,
+            '.pptx': DocumentParser.parse_powerpoint,
+            '.ppt': DocumentParser.parse_powerpoint,
+            '.png': DocumentParser.parse_image,
+            '.jpg': DocumentParser.parse_image,
+            '.jpeg': DocumentParser.parse_image,
+            '.tiff': DocumentParser.parse_image,
+            '.bmp': DocumentParser.parse_image,
+            '.odt': DocumentParser.parse_odt,
+            '.bin': DocumentParser.parse_binary,
+        }
+        
+        # Default to the basic text parser if the extension is unknown
+        primary_parser = parser_map.get(file_extension, DocumentParser.parse_text)
+        
+        try:
+            # Attempt to parse with the specialized tool
+            if primary_parser is DocumentParser.parse_spreadsheet:
+                 text, metadata = primary_parser(content, file_extension)
+            else:
+                 text, metadata = primary_parser(content)
+
+            # Check if the primary parser failed or returned weak results
+            if "unable to parse" in text.lower() or "error parsing" in text.lower() or len(text.strip()) < 20:
+                logger.warning(f"Specialized parser for '{file_extension}' returned poor content. Triggering Universal Parser fallback.")
+                raise ValueError("Primary parser yielded insufficient content.")
+
+            return text, metadata
+
+        except Exception as e:
+            # If the primary parser fails, the agent tries a different tool.
+            logger.info(f"Fallback initiated due to: {e}. Using UniversalDocumentParser.")
+            try:
+                # --- FIX: Import is moved inside the function to prevent the circular dependency ---
+                from app.core.universal_parser import UniversalDocumentParser
+                
+                # The UniversalDocumentParser can handle almost any format.
+                universal_parser = UniversalDocumentParser()
+                return universal_parser.parse_any_document(content, f"file{file_extension}")
+            except Exception as universal_e:
+                logger.error(f"FATAL: All parsing methods failed for {file_extension}: {universal_e}", exc_info=True)
+                return f"Unable to process the document. The format '{file_extension}' is not supported by any available parser.", [{'type': 'fatal_error'}]
+    
     @staticmethod
     def parse_binary(content: bytes) -> Tuple[str, List[Dict]]:
         """Extracts printable strings from a binary file."""
@@ -528,6 +651,95 @@ class DocumentParser:
     #         # --- ADDED: CRITICAL step to always clean up the temporary directory and its contents ---
     #         shutil.rmtree(temp_dir)
     # Line 278 in document_parser.py
+    # @staticmethod
+    # async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
+    #     """
+    #     Extracts a zip and processes its contents one-by-one, adding them
+    #     to the vector store incrementally to save memory.
+    #     """
+    #     temp_dir = tempfile.mkdtemp()
+    #     try:
+    #         with zipfile.ZipFile(zip_path, 'r') as zf:
+    #             zf.extractall(temp_dir)
+
+    #         # Walk through the extracted files
+    #         for root, _, files in os.walk(temp_dir):
+    #             for filename in files:
+    #                 if filename.startswith('.') or filename.startswith('__MACOSX'):
+    #                     continue
+                    
+    #                 file_path = os.path.join(root, filename)
+    #                 file_ext = os.path.splitext(filename)[1].lower()
+                    
+    #                 logger.info(f"Incrementally processing: {filename}")
+    #                 try:
+    #                     with open(file_path, 'rb') as f:
+    #                         content = f.read()
+
+    #                     # INSTEAD of appending to a list, we process immediately:
+                        
+    #                     # 1. Parse the single file's content
+    #                     text, metadata = DocumentParser.parse_document(content, file_ext)
+    #                     if not text.strip():
+    #                         continue
+                        
+    #                     # 2. Chunk the text from just this one file
+    #                     # chunks, chunk_meta = SmartChunker.chunk_document(
+    #                     #     text, metadata, 
+    #                     #     chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
+    #                     #     overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
+    #                     # )
+    #                     chunks, chunk_meta = SmartChunker.chunk_document(
+    #                     text, metadata, 
+    #                     chunk_size=settings.CHUNK_SIZE_CHARS, 
+    #                     overlap=settings.CHUNK_OVERLAP_CHARS
+    #                     )
+                        
+    #                     # 3. Embed and add the chunks to the vector store immediately
+    #                     # if chunks:
+    #                     #     # loop = asyncio.get_event_loop()
+    #                     #     # embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     # Line 296 in document_parser.py
+    #                     #     try:
+    #                     #         loop = asyncio.get_event_loop()
+    #                     #         embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     except RuntimeError:
+    #                     #         # Already in async context
+    #                     #         embeddings = await pipeline._generate_embeddings(chunks)
+    #                     #     vector_store.add(chunks, embeddings, chunk_meta)
+    #                     # 3. Embed and add the chunks to the vector store immediately
+    #                     # if chunks:
+    #                     #     try:
+    #                     #         loop = asyncio.get_event_loop()
+    #                     #         if loop.is_running():
+    #                     #             # We're already in an async context, create a task
+    #                     #             import concurrent.futures
+    #                     #             with concurrent.futures.ThreadPoolExecutor() as executor:
+    #                     #                 future = executor.submit(
+    #                     #                     lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+    #                     #                 )
+    #                     #                 embeddings = future.result()
+    #                     #         else:
+    #                     #             embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
+    #                     #     except RuntimeError:
+    #                     #         # Fallback: run in new event loop
+    #                     #         import concurrent.futures
+    #                     #         with concurrent.futures.ThreadPoolExecutor() as executor:
+    #                     #             future = executor.submit(
+    #                     #                 lambda: asyncio.run(pipeline._generate_embeddings(chunks))
+    #                     #             )
+    #                     #             embeddings = future.result()
+                            
+    #                     #     vector_store.add(chunks, embeddings, chunk_meta)
+    #                     if chunks:
+    #                         embeddings = await pipeline._generate_embeddings(chunks)
+    #                         vector_store.add(chunks, embeddings, chunk_meta)
+
+    #                 except Exception as e:
+    #                     logger.error(f"Failed to process '{filename}' in zip: {e}")
+    #     finally:
+    #         # Always clean up the temporary directory
+    #         shutil.rmtree(temp_dir)
     @staticmethod
     async def parse_zip_incrementally(zip_path: str, vector_store, pipeline):
         """
@@ -553,62 +765,21 @@ class DocumentParser:
                         with open(file_path, 'rb') as f:
                             content = f.read()
 
-                        # INSTEAD of appending to a list, we process immediately:
-                        
                         # 1. Parse the single file's content
                         text, metadata = DocumentParser.parse_document(content, file_ext)
                         if not text.strip():
                             continue
                         
                         # 2. Chunk the text from just this one file
-                        # chunks, chunk_meta = SmartChunker.chunk_document(
-                        #     text, metadata, 
-                        #     chunk_size=pipeline.settings.CHUNK_SIZE_CHARS, 
-                        #     overlap=pipeline.settings.CHUNK_OVERLAP_CHARS
-                        # )
                         chunks, chunk_meta = SmartChunker.chunk_document(
-                        text, metadata, 
-                        chunk_size=settings.CHUNK_SIZE_CHARS, 
-                        overlap=settings.CHUNK_OVERLAP_CHARS
+                            text, metadata, 
+                            chunk_size=settings.CHUNK_SIZE_CHARS, 
+                            overlap=settings.CHUNK_OVERLAP_CHARS
                         )
                         
                         # 3. Embed and add the chunks to the vector store immediately
-                        # if chunks:
-                        #     # loop = asyncio.get_event_loop()
-                        #     # embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     # Line 296 in document_parser.py
-                        #     try:
-                        #         loop = asyncio.get_event_loop()
-                        #         embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     except RuntimeError:
-                        #         # Already in async context
-                        #         embeddings = await pipeline._generate_embeddings(chunks)
-                        #     vector_store.add(chunks, embeddings, chunk_meta)
-                        # 3. Embed and add the chunks to the vector store immediately
-                        # if chunks:
-                        #     try:
-                        #         loop = asyncio.get_event_loop()
-                        #         if loop.is_running():
-                        #             # We're already in an async context, create a task
-                        #             import concurrent.futures
-                        #             with concurrent.futures.ThreadPoolExecutor() as executor:
-                        #                 future = executor.submit(
-                        #                     lambda: asyncio.run(pipeline._generate_embeddings(chunks))
-                        #                 )
-                        #                 embeddings = future.result()
-                        #         else:
-                        #             embeddings = loop.run_until_complete(pipeline._generate_embeddings(chunks))
-                        #     except RuntimeError:
-                        #         # Fallback: run in new event loop
-                        #         import concurrent.futures
-                        #         with concurrent.futures.ThreadPoolExecutor() as executor:
-                        #             future = executor.submit(
-                        #                 lambda: asyncio.run(pipeline._generate_embeddings(chunks))
-                        #             )
-                        #             embeddings = future.result()
-                            
-                        #     vector_store.add(chunks, embeddings, chunk_meta)
                         if chunks:
+                            # This await call is now valid because the function is async
                             embeddings = await pipeline._generate_embeddings(chunks)
                             vector_store.add(chunks, embeddings, chunk_meta)
 

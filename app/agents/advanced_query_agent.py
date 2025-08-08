@@ -22,6 +22,65 @@ class AdvancedQueryAgent:
         self.vector_store: OptimizedVectorStore = None
         self.investigation_cache = {}
 
+    # --- FIX START: ADD THE MISSING HELPER METHODS ---
+
+    async def _get_basic_answer(self, question: str) -> str:
+        """Gets a straightforward answer to the question using the RAG pipeline."""
+        try:
+            logger.info("📝 Getting basic answer...")
+            answer = await self.rag_pipeline.answer_question(question, self.vector_store)
+            return answer if answer else "No direct answer found."
+        except Exception as e:
+            logger.error(f"Basic answer retrieval failed: {e}")
+            return "Unable to generate a basic answer due to an internal error."
+
+    async def _deep_search(self, question: str) -> str:
+        """Performs a deeper search if the basic answer is insufficient."""
+        logger.info("🔬 Performing deep search for more context...")
+        key_terms = re.findall(r'\b[A-Z][a-z]+\b|\b\d+\b|\b[a-z]{4,}\b', question)
+        search_queries = [question] + [' '.join(key_terms)]
+        
+        all_results = []
+        for query in search_queries:
+            try:
+                results = self.vector_store.search(query, k=3)
+                all_results.extend([r[0] for r in results])
+            except Exception:
+                continue
+        
+        if not all_results:
+            return "No relevant information found even after a deep search."
+
+        unique_results = list(dict.fromkeys(all_results))[:4]
+        try:
+            return await self.rag_pipeline._generate_answer(question, unique_results, is_complex=True)
+        except Exception:
+            return unique_results[0]
+
+    def _detect_question_patterns(self, question: str) -> Tuple[List[str], List[str]]:
+        """Detects question types to guide the investigation."""
+        # This is a simplified placeholder. In a real scenario, this would be more complex.
+        question_lower = question.lower()
+        if "how" in question_lower or "what are the steps" in question_lower:
+            return ["process"], ["deadline", "requirement", "exception"]
+        if "what is" in question_lower:
+            return ["definition"], ["limit", "condition", "exclusion"]
+        return ["general"], ["exception", "important", "note"]
+
+    async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
+        """A placeholder for the investigation logic."""
+        # This method is required by `investigate_question` but its complex
+        # logic is not needed to fix the current error.
+        return {"exceptions": [], "conditions": []}
+
+    async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
+        """A placeholder for the self-correction logic."""
+        # This method is required by `investigate_question` but its complex
+        # logic is not needed to fix the current error.
+        return original_answer
+
+    # --- FIX END ---    
+
     def _clean_text(self, text: str) -> str:
         """Robustly clean text from HTML, encoding issues, and artifacts."""
         if not text:
@@ -236,35 +295,141 @@ class AdvancedQueryAgent:
     #         logger.error(f"Critical error in Mission Control agent: {e}", exc_info=True)
     #         error_msg = "A critical mission error occurred. Please review the challenge parameters and document URL."
     #         return QueryResponse(answers=[error_msg] * len(request.questions))
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Acts as a 'Planner' to determine the user's intent and then calls the
+    #     appropriate 'Executor' to solve the problem. This is the core of the
+    #     agentic behavior.
+    #     """
+    #     logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+        
+    #     # --- AGENTIC PLANNER ---
+    #     # The agent first analyzes the questions to determine the overall mission objective.
+    #     mission_type = self._determine_mission_type(request.questions)
+    #     logger.info(f"✅ Mission Type Identified: {mission_type}")
+
+    #     try:
+    #         # --- AGENTIC EXECUTOR ---
+    #         # Based on the plan, the agent calls the correct tool/executor function.
+    #         if mission_type == "Strategy & Full Walkthrough":
+    #             answers = await self._execute_full_strategy(request.questions)
+    #         elif mission_type == "Fact & Detail Extraction":
+    #             answers = await self._execute_fact_extraction(request.questions)
+    #         else: # Default to the full strategy
+    #             answers = await self._execute_full_strategy(request.questions)
+                
+    #         return QueryResponse(answers=answers)
+
+    #     except Exception as e:
+    #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
-        Acts as a 'Planner' to determine the user's intent and then calls the
-        appropriate 'Executor' to solve the problem. This is the core of the
-        agentic behavior.
+        Acts as a 'Planner' that first validates if the mission is possible
+        before calling the appropriate 'Executor'.
         """
         logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
         
-        # --- AGENTIC PLANNER ---
-        # The agent first analyzes the questions to determine the overall mission objective.
+        # --- AGENTIC FAIL-SAFE (NEW) ---
+        # The agent first performs a quick check to see if the mission is relevant.
+        is_relevant, reason = await self._is_mission_relevant(request.questions)
+        if not is_relevant:
+            logger.warning(f"Mission is not relevant. Reason: {reason}")
+            # Return a helpful, consistent message for all questions.
+            fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
+            return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
+        # --- END OF FAIL-SAFE ---
+
+        # (The rest of your run method remains the same)
         mission_type = self._determine_mission_type(request.questions)
         logger.info(f"✅ Mission Type Identified: {mission_type}")
 
         try:
-            # --- AGENTIC EXECUTOR ---
-            # Based on the plan, the agent calls the correct tool/executor function.
             if mission_type == "Strategy & Full Walkthrough":
                 answers = await self._execute_full_strategy(request.questions)
-            elif mission_type == "Fact & Detail Extraction":
+            else:
                 answers = await self._execute_fact_extraction(request.questions)
-            else: # Default to the full strategy
-                answers = await self._execute_full_strategy(request.questions)
                 
             return QueryResponse(answers=answers)
 
         except Exception as e:
             logger.error(f"A critical mission error occurred: {e}", exc_info=True)
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
+        """
+        Conducts a focused investigation based on question type and keywords.
+        This is a functional implementation of the original placeholder.
+        """
+        logger.info(f"Conducting investigation for keywords: {keywords}")
+        investigation_results = defaultdict(list)
+
+        # Create search queries from keywords
+        search_queries = [f"{question} {kw}" for kw in keywords]
+
+        for query in search_queries:
+            try:
+                # Search the vector store for related information
+                results = self.vector_store.search(query, k=2)
+                for chunk, score, metadata in results:
+                    if score > 0.1 and chunk not in basic_answer:
+                        # Add relevant findings to the investigation results
+                        investigation_results[keywords[0]].append(self._clean_text(chunk))
+            except Exception as e:
+                logger.warning(f"Investigation search failed for query '{query}': {e}")
+        
+        return investigation_results
+    async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
+        """
+        Refines the original answer by incorporating the findings from the investigation.
+        This is a functional implementation of the original placeholder.
+        """
+        if not findings:
+            return original_answer
+
+        logger.info("Refining answer with new findings...")
+        
+        # Combine the original answer with the new findings
+        context_for_refinement = original_answer
+        for category, details in findings.items():
+            if details:
+                context_for_refinement += f"\n\nAdditional context on {category}:\n- {'\n- '.join(details)}"
+
+        # Create a prompt for the LLM to generate a final, comprehensive answer
+        prompt = f"""
+        You are a synthesizing agent. Your task is to combine the original answer with new findings to create a single, comprehensive, and accurate final answer.
+
+        USER QUESTION:
+        "{question}"
+
+        ORIGINAL ANSWER:
+        "{original_answer}"
+
+        ADDITIONAL FINDINGS:
+        "{context_for_refinement}"
+
+        INSTRUCTIONS:
+        - Integrate the additional findings smoothly into the original answer.
+        - Do not repeat information.
+        - If there are contradictions, point them out.
+        - Produce a final, clear, and well-structured answer.
+
+        FINAL REFINED ANSWER:
+        """
+        
+        try:
+            # Generate the final answer using the precise LLM
+            model = self.rag_pipeline.llm_precise
+            response = await model.generate_content_async(prompt)
+            return self._clean_text(response.text)
+        except Exception as e:
+            logger.error(f"Self-correction and refinement failed: {e}")
+            # If refinement fails, return the original answer with a note
+            return original_answer + "\n\n(Note: Further refinement failed, this is the best available answer.)"
+
+# ... (keep all the existing code after this method, including the `run` and other helper functions)
+    
 
     def _determine_mission_type(self, questions: List[str]) -> str:
         """A simple classifier to understand the user's primary goal."""
@@ -511,6 +676,49 @@ class AdvancedQueryAgent:
         
         logger.info(f"Found {sum(len(v) for v in hidden_details.values())} hidden details.")
         return hidden_details
+    async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
+        """
+        A new agentic check to determine if the document is relevant to the questions.
+        """
+        logger.info("🧐 Performing mission relevance check...")
+        
+        # Use a small, representative sample of the document's content for a fast check.
+        context_sample = "\n".join(self.vector_store.chunks[:2])
+
+        # --- FIX ---
+        # The list of questions is joined into a single string *before* being placed in the f-string.
+        question_list = "\n- ".join(questions)
+
+        prompt = f"""
+        You are an AI assistant. Your task is to determine if the provided DOCUMENT CONTEXT can answer the given QUESTIONS.
+        Answer with only "Yes" or "No", followed by a very brief reason.
+
+        DOCUMENT CONTEXT:
+        "{context_sample[:1500]}"
+
+        QUESTIONS:
+        - {question_list}
+
+        Example 1:
+        No. The document is about a new tariff policy, but the questions are about flight numbers and landmarks.
+
+        Example 2:
+        Yes. The document contains tables of landmarks and flight endpoints, which matches the questions.
+        """
+
+        try:
+            model = self.rag_pipeline.llm_precise
+            response = await model.generate_content_async(prompt, generation_config={'temperature': 0.0})
+            
+            answer = response.text.strip()
+            if answer.lower().startswith("yes"):
+                return True, answer
+            else:
+                return False, answer
+
+        except Exception as e:
+            logger.warning(f"Relevance check failed: {e}")
+            return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
 
     def _extract_main_topic(self, question: str) -> str:
         """Extracts the core subject from the question for targeted searches."""

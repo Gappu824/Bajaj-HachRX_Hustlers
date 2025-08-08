@@ -311,79 +311,172 @@ class HybridRAGPipeline:
 #         logger.info(f"Cached vector store for document: {url}")
         
 #         return vector_store
-    async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
-            """Get or create vector store, with special handling for large ZIP and BIN files."""
+    # async def get_or_create_vector_store(self, url: str) -> OptimizedVectorStore:
+    #         """Get or create vector store, with special handling for large ZIP and BIN files."""
             
-            cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
-            cached_store = await cache.get(cache_key)
-            if cached_store:
-                logger.info(f"Using cached vector store for {url}")
-                return cached_store
+    #         cache_key = f"vecstore_{hashlib.md5(url.encode()).hexdigest()}"
+    #         cached_store = await cache.get(cache_key)
+    #         if cached_store:
+    #             logger.info(f"Using cached vector store for {url}")
+    #             return cached_store
             
-            logger.info(f"Creating new vector store for {url}")
+    #         logger.info(f"Creating new vector store for {url}")
             
-            file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+    #         file_extension = os.path.splitext(url.split('?')[0])[1].lower()
             
-            # --- NEW: Route both .zip and .bin files to streaming processors ---
-            if file_extension == '.zip':
-                vector_store = await self._process_zip_incrementally(url)
-            elif file_extension == '.bin':
-                vector_store = await self._process_bin_incrementally(url)
-            # else:
-            #     # Original logic for smaller, manageable file types
-            #     content = await self.download_document(url) 
+    #         # --- NEW: Route both .zip and .bin files to streaming processors ---
+    #         if file_extension == '.zip':
+    #             vector_store = await self._process_zip_incrementally(url)
+    #         elif file_extension == '.bin':
+    #             vector_store = await self._process_bin_incrementally(url)
+    #         # else:
+    #         #     # Original logic for smaller, manageable file types
+    #         #     content = await self.download_document(url) 
                 
-            #     text, metadata = DocumentParser.parse_document(content, file_extension)
-            else:
-                # Original logic for smaller, manageable file types
-                content = await self.download_document(url) 
+    #         #     text, metadata = DocumentParser.parse_document(content, file_extension)
+    #         else:
+    #             # Original logic for smaller, manageable file types
+    #             content = await self.download_document(url) 
                 
-                # --- MODIFICATION FOR SECRET TOKEN START ---
-                # Check for the special secret token URL before generic parsing
-                if 'register.hackrx.in/utils/get-secret-token' in url:
-                    try:
-                        html_text = content.decode('utf-8', errors='ignore')
-                        # This regex looks for a 64-character hexadecimal string, as seen in the screenshot.
-                        match = re.search(r'\b([a-fA-F0-9]{64})\b', html_text)
-                        if match:
-                            text = match.group(1)
-                            metadata = [{'type': 'secret_token', 'source_url': url}]
-                            logger.info("Extracted secret token directly from URL content.")
-                        else:
-                            # Fallback if the specific token format isn't found
-                            text = "Could not find the secret token in the page content."
-                            metadata = [{'type': 'error', 'reason': 'token_not_found'}]
-                    except Exception as e:
-                        logger.error(f"Failed to parse secret token page: {e}")
-                        text = "An error occurred while parsing the secret token page."
-                        metadata = [{'type': 'error'}]
-                else:
-                    # Fallback to the standard document parser for all other files
-                    text, metadata = DocumentParser.parse_document(content, file_extension)
-                # --- MODIFICATION FOR SECRET TOKEN END ---    
-                if not text or len(text) < 10:
-                    logger.error(f"Document parsing failed or empty: {url}")
-                    text = "Document could not be parsed or is empty."
-                    metadata = [{'type': 'error'}]
+    #             # --- MODIFICATION FOR SECRET TOKEN START ---
+    #             # Check for the special secret token URL before generic parsing
+    #             if 'register.hackrx.in/utils/get-secret-token' in url:
+    #                 try:
+    #                     html_text = content.decode('utf-8', errors='ignore')
+    #                     # This regex looks for a 64-character hexadecimal string, as seen in the screenshot.
+    #                     match = re.search(r'\b([a-fA-F0-9]{64})\b', html_text)
+    #                     if match:
+    #                         text = match.group(1)
+    #                         metadata = [{'type': 'secret_token', 'source_url': url}]
+    #                         logger.info("Extracted secret token directly from URL content.")
+    #                     else:
+    #                         # Fallback if the specific token format isn't found
+    #                         text = "Could not find the secret token in the page content."
+    #                         metadata = [{'type': 'error', 'reason': 'token_not_found'}]
+    #                 except Exception as e:
+    #                     logger.error(f"Failed to parse secret token page: {e}")
+    #                     text = "An error occurred while parsing the secret token page."
+    #                     metadata = [{'type': 'error'}]
+    #             else:
+    #                 # Fallback to the standard document parser for all other files
+    #                 text, metadata = DocumentParser.parse_document(content, file_extension)
+    #             # --- MODIFICATION FOR SECRET TOKEN END ---    
+    #             if not text or len(text) < 10:
+    #                 logger.error(f"Document parsing failed or empty: {url}")
+    #                 text = "Document could not be parsed or is empty."
+    #                 metadata = [{'type': 'error'}]
                 
-                chunks, chunk_metadata = SmartChunker.chunk_document(
-                    text, metadata,
-                    chunk_size=settings.CHUNK_SIZE_CHARS,
-                    overlap=settings.CHUNK_OVERLAP_CHARS
-                )
+    #             chunks, chunk_metadata = SmartChunker.chunk_document(
+    #                 text, metadata,
+    #                 chunk_size=settings.CHUNK_SIZE_CHARS,
+    #                 overlap=settings.CHUNK_OVERLAP_CHARS
+    #             )
                 
-                logger.info(f"Created {len(chunks)} chunks")
-                embeddings = await self._generate_embeddings(chunks)
+    #             logger.info(f"Created {len(chunks)} chunks")
+    #             embeddings = await self._generate_embeddings(chunks)
                 
-                sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
-                dimension = sample_embedding.shape[1]
-                vector_store = OptimizedVectorStore(self.embedding_model, dimension)
-                vector_store.add(chunks, embeddings, chunk_metadata)
+    #             sample_embedding = self.embedding_model.encode(["sample"], show_progress_bar=False)
+    #             dimension = sample_embedding.shape[1]
+    #             vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+    #             vector_store.add(chunks, embeddings, chunk_metadata)
 
-            await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
-            logger.info(f"Cached vector store for document: {url}")
+    #         await cache.set(cache_key, vector_store, ttl=settings.CACHE_TTL_SECONDS)
+    #         logger.info(f"Cached vector store for document: {url}")
             
-            return vector_store
+    #         return vector_store
+
+
+    async def get_or_create_vector_store(self, url: str, use_cache: bool = True) -> OptimizedVectorStore:
+        """
+        Get or create a vector store for a given document URL.
+        Handles caching, downloading, and processing for various file types,
+        including special handling for ZIP files and a specific token URL.
+        """
+        cache_key = self._get_cache_key(url)
+        if use_cache and cache_key in cache:
+            try:
+                logger.info(f"✅ Loading vector store from cache for: {url}")
+                return cache.get(cache_key)
+            except Exception as e:
+                logger.warning(f"Cache load failed for {url}, rebuilding. Reason: {e}")
+
+        logger.info(f"🛠️ Creating new vector store for: {url}")
+        
+        vector_store = None
+        file_extension = os.path.splitext(url.split('?')[0])[1].lower()
+
+        # Route .zip files to the incremental parser
+        if file_extension == '.zip':
+            logger.info(f"Processing ZIP file incrementally: {url}")
+            local_path = await self._download_document(url)
+            vector_store = OptimizedVectorStore(
+                embedding_function=self.embedding_model.embed_query,
+                index_type=settings.FAISS_INDEX_TYPE
+            )
+            await DocumentParser.parse_zip_incrementally(local_path, vector_store, self)
+
+        # Handle other file types
+        else:
+            content = await self._download_document(url)
+            text, metadata = "", {}
+
+            # Special handling for the secret token URL
+            if 'register.hackrx.in/utils/get-secret-token' in url:
+                try:
+                    html_text = content.decode('utf-8', errors='ignore')
+                    match = re.search(r'\b([a-fA-F0-9]{64})\b', html_text)
+                    if match:
+                        text = match.group(1)
+                        metadata = {'source': url, 'type': 'secret_token'}
+                        logger.info("Extracted secret token from URL content.")
+                    else:
+                        text = "Could not find the secret token in the page content."
+                        metadata = {'source': url, 'type': 'error', 'reason': 'token_not_found'}
+                except Exception as e:
+                    logger.error(f"Failed to parse secret token page: {e}")
+                    text, metadata = "Error parsing secret token page.", {'source': url, 'type': 'error'}
+            
+            # Standard logic for all other documents
+            else:
+                text, metadata = DocumentParser.parse_document(content, file_extension)
+
+            if not text or len(text.strip()) < 1:
+                logger.warning(f"Document parsing resulted in empty text for {url}")
+                text, metadata = "Document is empty or could not be parsed.", {'source': url, 'type': 'parsing_error'}
+
+            chunks, chunk_metadata = SmartChunker.chunk_document(
+                text, metadata,
+                chunk_size=settings.CHUNK_SIZE_CHARS,
+                overlap=settings.CHUNK_OVERLAP_CHARS
+            )
+            
+            if not chunks:
+                 logger.warning(f"No chunks were created for {url}. The document might be empty or too small.")
+                 # Create a dummy chunk to prevent errors downstream
+                 chunks = ["No content available."]
+                 chunk_metadata = [{'source': url, 'type': 'empty_document'}]
+
+
+            embeddings = await self._generate_embeddings(chunks)
+            
+            # vector_store = OptimizedVectorStore.from_embeddings(
+            #     chunks, embeddings, self.embedding_model.embed_query, chunk_metadata,
+            #     index_type=settings.FAISS_INDEX_TYPE
+            # )
+             # --- THIS IS THE CORRECTED LOGIC ---
+            # Get the embedding dimension from the model
+            dimension = self.embedding_model.get_sentence_embedding_dimension()
+            # First, create an empty vector store
+            vector_store = OptimizedVectorStore(self.embedding_model, dimension)
+            # Then, add the data to it
+            vector_store.add(chunks, embeddings, chunk_metadata)
+            # --- END OF CORRECTION ---
+
+        if use_cache:
+            cache.set(cache_key, vector_store)
+            logger.info(f"Cached new vector store for: {url}")
+            
+        return vector_store
     # async def _process_bin_incrementally(self, url: str) -> 'OptimizedVectorStore':
     #     """
     #     Orchestrates the memory-safe streaming and processing of a single large binary file.

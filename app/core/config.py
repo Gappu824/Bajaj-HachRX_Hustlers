@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     BEARER_TOKEN: str = ""  # Will be loaded from .env
     
     # Model Configuration - balanced for speed and accuracy
-    EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'  # Fast embeddings
+    # EMBEDDING_MODEL_NAME: str = 'all-MiniLM-L6-v2'  # Fast embeddings
+    EMBEDDING_MODEL_NAME: str = 'paraphrase-multilingual-MiniLM-L12-v2'  # Fast embeddings
     # EMBEDDING_MODEL_NAME: str = 'paraphrase-MiniLM-L3-v2'
     LLM_MODEL_NAME: str = 'gemini-1.5-flash'  # Fast model
     LLM_MODEL_NAME_PRECISE: str = 'gemini-1.5-pro-latest'  # Accurate model
