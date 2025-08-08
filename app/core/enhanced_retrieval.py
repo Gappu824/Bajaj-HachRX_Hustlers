@@ -76,6 +76,17 @@ class EnhancedRetriever:
     #         tokenized_chunks.append(tokens if tokens else ['empty'])
         
     #     self.bm25 = BM25Okapi(tokenized_chunks)
+    # def _init_bm25(self):
+    #     """Initialize BM25 for probabilistic retrieval"""
+    #     # No longer using language-specific stopwords
+    #     tokenized_chunks = []
+    #     for chunk in self.chunks:
+    #         tokens = word_tokenize(chunk.lower())
+    #         # Tokenization is kept, but stopword filtering is removed
+    #         tokens = [t for t in tokens if t.isalnum()]
+    #         tokenized_chunks.append(tokens if tokens else ['empty'])
+        
+    #     self.bm25 = BM25Okapi(tokenized_chunks)
     def _init_bm25(self):
         """Initialize BM25 for probabilistic retrieval"""
         # No longer using language-specific stopwords
@@ -154,6 +165,31 @@ class EnhancedRetriever:
     #                 min_df=1,
     #                 max_df=0.95
     #             )
+    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
+    #     except Exception as e:
+    #         logger.warning(f"TF-IDF initialization failed: {e}")
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    # def _init_tfidf(self):
+    #     """Initialize TF-IDF for term frequency analysis with robust fallbacks."""
+    #     if len(self.chunks) < 2:
+    #         self.tfidf_vectorizer = None
+    #         self.tfidf_matrix = None
+    #         return
+        
+    #     try:
+    #         # For very small collections, be extremely permissive.
+    #         # Only apply stop words if we have a decent number of documents.
+    #         use_stop_words = 'english' if len(self.chunks) >= 20 else None
+
+    #         self.tfidf_vectorizer = TfidfVectorizer(
+    #             max_features=min(5000, len(self.chunks) * 10),
+    #             ngram_range=(1, 2),
+    #             stop_words=use_stop_words,
+    #             min_df=1, # Always include terms that appear at least once
+    #             max_df=1.0 # Always include terms that appear in all documents
+    #         )
+
     #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
     #     except Exception as e:
     #         logger.warning(f"TF-IDF initialization failed: {e}")

@@ -231,8 +231,8 @@ class AdvancedQueryAgent:
         except Exception as e:
             logger.error(f"Failed to generate master plan: {e}")
             return "Error: Could not formulate a master plan."
-        
-               
+
+
     async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
         """Answers a specific question by extracting relevant info from the master plan."""
         logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
@@ -412,6 +412,45 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
     #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Acts as a 'Planner' that first validates if the mission is possible
+    #     before calling the appropriate 'Executor'.
+    #     """
+    #     logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+        
+    #     is_relevant, reason = await self._is_mission_relevant(request.questions)
+    #     if not is_relevant:
+    #         logger.warning(f"Mission is not relevant. Reason: {reason}")
+    #         fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
+    #         return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
+
+    #     mission_type = self._determine_mission_type(request.questions)
+    #     logger.info(f"✅ Mission Type Identified: {mission_type}")
+
+    #     try:
+    #         if mission_type == "Strategy & Full Walkthrough":
+    #             answers = await self._execute_full_strategy(request.questions)
+    #         else:
+    #             answers = await self._execute_fact_extraction(request.questions)
+            
+    #         # --- FINAL SANITY CHECK ---
+    #         # If all answers are identical and contain an error message, something went wrong.
+    #         # Try one last time with the direct, non-agentic approach.
+    #         if len(set(answers)) == 1 and ("error" in answers[0].lower() or "does not contain" in answers[0].lower()):
+    #             logger.warning("Agentic approach failed. Falling back to direct RAG.")
+    #             direct_tasks = [self.rag_pipeline.answer_question(q, self.vector_store) for q in request.questions]
+    #             answers = await asyncio.gather(*direct_tasks)
+    #         # --- END OF SANITY CHECK ---
+                
+    #         return QueryResponse(answers=answers)
+
+    #     except Exception as e:
+    #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+
+# ... (the rest of the file remains the same)
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
         Acts as a 'Planner' that first validates if the mission is possible
@@ -449,8 +488,6 @@ class AdvancedQueryAgent:
         except Exception as e:
             logger.error(f"A critical mission error occurred: {e}", exc_info=True)
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
-
-# ... (the rest of the file remains the same)
     
     
     async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
@@ -819,6 +856,36 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.warning(f"Relevance check failed: {e}")
     #         return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
+    # async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
+    #     """
+    #     A new agentic check to determine if the document is relevant to the questions.
+    #     This version is more robust and performs targeted searches.
+    #     """
+    #     logger.info("🧐 Performing mission relevance check...")
+        
+    #     # --- NEW ROBUST LOGIC ---
+    #     # Extract key nouns and terms from the questions
+    #     question_keywords = set()
+    #     for q in questions:
+    #         # A simple regex to find potential nouns or key terms
+    #         keywords = re.findall(r'\b[A-Z][a-z]+\b|\b[a-z]{4,}\b', q)
+    #         question_keywords.update(kw.lower() for kw in keywords)
+
+    #     # Perform a quick, targeted search for these keywords in the document
+    #     search_query = " ".join(list(question_keywords)[:10]) # Use up to 10 keywords for the search
+    #     try:
+    #         # We are looking for just one relevant chunk to confirm relevance
+    #         search_results = self.vector_store.search(search_query, k=1)
+    #         if not search_results or search_results[0][1] < 0.1: # Check if any result was found with a reasonable score
+    #             logger.warning(f"Relevance check failed: No relevant chunks found for keywords: {search_query}")
+    #             return False, "The document does not seem to contain content related to the key topics in the questions."
+            
+    #         logger.info("✅ Relevance check passed. The document contains relevant information.")
+    #         return True, "Document is relevant."
+
+    #     except Exception as e:
+    #         logger.warning(f"Relevance check failed due to an error: {e}")
+    #         return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
     async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
         """
         A new agentic check to determine if the document is relevant to the questions.
@@ -849,7 +916,6 @@ class AdvancedQueryAgent:
         except Exception as e:
             logger.warning(f"Relevance check failed due to an error: {e}")
             return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
-    
 # ... (the rest of the file remains the same)
     def _extract_main_topic(self, question: str) -> str:
         """Extracts the core subject from the question for targeted searches."""

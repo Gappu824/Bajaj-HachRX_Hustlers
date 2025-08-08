@@ -17,8 +17,13 @@ RUN apt-get update && apt-get install -y \
     # For Tika (Java dependency)
     default-jre \
     # For OCR
+    # tesseract-ocr \
+    # tesseract-ocr-eng \
     tesseract-ocr \
     tesseract-ocr-eng \
+    tesseract-ocr-mal \
+    tesseract-ocr-hin \
+    tesseract-ocr-osd \
     # For Excel processing
     libopenblas-dev \
     gfortran \
