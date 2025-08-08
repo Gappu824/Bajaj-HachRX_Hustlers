@@ -329,12 +329,38 @@ class HybridRAGPipeline:
                 vector_store = await self._process_zip_incrementally(url)
             elif file_extension == '.bin':
                 vector_store = await self._process_bin_incrementally(url)
+            # else:
+            #     # Original logic for smaller, manageable file types
+            #     content = await self.download_document(url) 
+                
+            #     text, metadata = DocumentParser.parse_document(content, file_extension)
             else:
                 # Original logic for smaller, manageable file types
                 content = await self.download_document(url) 
                 
-                text, metadata = DocumentParser.parse_document(content, file_extension)
-                
+                # --- MODIFICATION FOR SECRET TOKEN START ---
+                # Check for the special secret token URL before generic parsing
+                if 'register.hackrx.in/utils/get-secret-token' in url:
+                    try:
+                        html_text = content.decode('utf-8', errors='ignore')
+                        # This regex looks for a 64-character hexadecimal string, as seen in the screenshot.
+                        match = re.search(r'\b([a-fA-F0-9]{64})\b', html_text)
+                        if match:
+                            text = match.group(1)
+                            metadata = [{'type': 'secret_token', 'source_url': url}]
+                            logger.info("Extracted secret token directly from URL content.")
+                        else:
+                            # Fallback if the specific token format isn't found
+                            text = "Could not find the secret token in the page content."
+                            metadata = [{'type': 'error', 'reason': 'token_not_found'}]
+                    except Exception as e:
+                        logger.error(f"Failed to parse secret token page: {e}")
+                        text = "An error occurred while parsing the secret token page."
+                        metadata = [{'type': 'error'}]
+                else:
+                    # Fallback to the standard document parser for all other files
+                    text, metadata = DocumentParser.parse_document(content, file_extension)
+                # --- MODIFICATION FOR SECRET TOKEN END ---    
                 if not text or len(text) < 10:
                     logger.error(f"Document parsing failed or empty: {url}")
                     text = "Document could not be parsed or is empty."

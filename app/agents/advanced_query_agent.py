@@ -2,8 +2,10 @@
 import logging
 import asyncio
 import re
-from typing import List, Dict, Any, Tuple, Set, Optional
+from typing import List, Dict, Any, Tuple
 from collections import defaultdict
+import html
+
 from app.models.query import QueryRequest, QueryResponse
 from app.core.rag_pipeline import HybridRAGPipeline, OptimizedVectorStore
 
@@ -12,533 +14,399 @@ logger = logging.getLogger(__name__)
 class AdvancedQueryAgent:
     """
     A detective-style agent that investigates beyond explicit questions,
-    finding exceptions, contradictions, and related insights.
+    finding exceptions, contradictions, and related insights to build a full strategy.
     """
 
     def __init__(self, rag_pipeline: HybridRAGPipeline):
         self.rag_pipeline = rag_pipeline
         self.vector_store: OptimizedVectorStore = None
-        self.investigation_cache = {}  # Cache investigation results
-        
-        # Detective patterns for different question types
-        self.detective_patterns = {
-            'time_period': {
-                'triggers': ['period', 'days', 'months', 'years', 'time', 'duration', 'deadline', 'when', 'waiting'],
-                'investigate': ['exception', 'extension', 'grace period', 'holiday', 'business days', 
-                               'calendar days', 'renewal', 'expiry', 'early', 'late', 'penalty', 'reduced', 'extended']
-            },
-            'money': {
-                'triggers': ['cost', 'price', 'fee', 'amount', 'payment', 'premium', 'charge', 'dollar', 'rupee', 
-                           'salary', 'compensation', 'reimbursement', 'deductible', 'investment', 'billion'],
-                'investigate': ['tax', 'penalty', 'interest', 'late fee', 'discount', 'maximum', 
-                               'minimum', 'limit', 'co-pay', 'excluded', 'additional charges', 'hidden costs']
-            },
-            'coverage': {
-                'triggers': ['covered', 'eligible', 'included', 'benefit', 'claim', 'insurance', 'policy'],
-                'investigate': ['excluded', 'exception', 'not covered', 'pre-existing', 'waiting period',
-                               'maximum benefit', 'sub-limit', 'conditions', 'requirements', 'documentation', 'denial']
-            },
-            'eligibility': {
-                'triggers': ['eligible', 'qualify', 'requirement', 'criteria', 'who can', 'allowed'],
-                'investigate': ['age limit', 'documentation', 'proof', 'minimum', 'maximum', 
-                               'excluded', 'special cases', 'grandfather clause', 'restrictions']
-            },
-            'process': {
-                'triggers': ['how to', 'process', 'procedure', 'steps', 'apply', 'claim', 'submit', 'get', 'find'],
-                'investigate': ['deadline', 'required documents', 'forms', 'approval', 'rejection',
-                               'appeal', 'review', 'turnaround time', 'contact', 'prerequisites']
-            },
-            'location': {
-                'triggers': ['where', 'location', 'city', 'landmark', 'gateway', 'tower', 'monument'],
-                'investigate': ['wrong location', 'swapped', 'parallel world', 'original location', 'multiple locations']
-            },
-            'api': {
-                'triggers': ['endpoint', 'api', 'url', 'flight', 'token', 'secret'],
-                'investigate': ['authentication', 'parameters', 'response', 'error', 'fallback']
-            },
-            'policy': {
-                'triggers': ['tariff', 'policy', 'announcement', 'exemption', 'regulation'],
-                'investigate': ['exceptions', 'who is affected', 'implications', 'consequences', 'trade war']
-            }
-        }
-
-    async def run(self, request: QueryRequest) -> QueryResponse:
-        """Main entry point for the detective agent."""
-        logger.info(f"🔍 Detective Agent activated for: {request.documents}")
-        
-        try:
-            # Step 1: Get or create vector store
-            self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
-            
-            # Step 2: Process questions with detective mindset
-            tasks = []
-            for q in request.questions:
-                tasks.append(self.investigate_question(q))
-            
-            answers = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Handle any exceptions in answers
-            final_answers = []
-            for i, answer in enumerate(answers):
-                if isinstance(answer, Exception):
-                    logger.error(f"Error processing question {i}: {answer}")
-                    final_answers.append(f"Error processing question: {str(answer)[:200]}")
-                else:
-                    final_answers.append(answer)
-            
-            return QueryResponse(answers=final_answers)
-            
-        except Exception as e:
-            logger.error(f"Critical error in detective agent: {e}", exc_info=True)
-            error_msg = "Document processing error. Please try again."
-            return QueryResponse(answers=[error_msg] * len(request.questions))
-
-    async def investigate_question(self, question: str) -> str:
-        """Detective-style investigation that goes beyond the explicit question."""
-        try:
-            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
-            
-            # Check cache first
-            cache_key = f"{question[:100]}"
-            if cache_key in self.investigation_cache:
-                logger.info("Using cached investigation result")
-                return self.investigation_cache[cache_key]
-            
-            # Detect question type and patterns
-            question_types, keywords = self._detect_question_patterns(question)
-            logger.info(f"📊 Patterns: {question_types}, Keywords: {len(keywords)}")
-            
-            # Phase 1: Get the basic answer
-            basic_answer = await self._get_basic_answer(question)
-            
-            # If basic answer is too short or generic, dig deeper
-            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
-                basic_answer = await self._deep_search(question)
-            
-            # Phase 2: Conduct investigation based on patterns
-            investigation_findings = await self._conduct_investigation(
-                question, question_types, keywords, basic_answer
-            )
-            
-            # Phase 3: Check for contradictions
-            contradictions = self._find_contradictions(basic_answer, investigation_findings)
-            
-            # Phase 4: Find edge cases
-            edge_cases = await self._investigate_edge_cases(question, question_types)
-            
-            # Phase 5: Create comprehensive detective report
-            final_answer = self._create_detective_report(
-                question, basic_answer, investigation_findings, contradictions, edge_cases
-            )
-            
-            # Clean up encoding issues in the final answer
-            final_answer = self._clean_text(final_answer)
-            
-            # Cache the result
-            self.investigation_cache[cache_key] = final_answer
-            
-            return final_answer
-            
-        except Exception as e:
-            logger.error(f"Investigation failed for question: {e}", exc_info=True)
-            return f"Investigation error: {str(e)[:200]}"
-
-    def _detect_question_patterns(self, question: str) -> Tuple[List[str], List[str]]:
-        """Detect multiple question types and extract key investigation terms."""
-        question_lower = question.lower()
-        detected_patterns = []
-        all_keywords = set()
-        
-        # Check all patterns
-        for pattern_type, pattern_info in self.detective_patterns.items():
-            for trigger in pattern_info['triggers']:
-                if trigger in question_lower:
-                    detected_patterns.append(pattern_type)
-                    all_keywords.update(pattern_info['investigate'])
-                    break
-        
-        # Default to general if no pattern detected
-        if not detected_patterns:
-            detected_patterns = ['general']
-            all_keywords = {'exception', 'condition', 'requirement', 'limit', 'special case', 
-                           'important', 'note', 'warning', 'caution', 'additional'}
-        
-        return detected_patterns, list(all_keywords)[:15]  # Limit keywords
-
-    async def _get_basic_answer(self, question: str) -> str:
-        """Get the straightforward answer to the question."""
-        try:
-            logger.info("📝 Getting basic answer...")
-            answer = await self.rag_pipeline.answer_question(question, self.vector_store)
-            return answer if answer else "No direct answer found."
-        except Exception as e:
-            logger.error(f"Basic answer failed: {e}")
-            return "Unable to generate basic answer."
-
-    async def _deep_search(self, question: str) -> str:
-        """Perform deeper search when basic answer is insufficient."""
-        logger.info("🔬 Performing deep search...")
-        
-        # Extract key terms from question
-        key_terms = re.findall(r'\b[A-Z][a-z]+\b|\b\d+\b|\b[a-z]{4,}\b', question)
-        
-        # Search with different query formulations
-        search_queries = [
-            question,
-            ' '.join(key_terms),
-            question.replace('?', ''),
-            f"information about {' '.join(key_terms[:3])}"
-        ]
-        
-        all_results = []
-        for query in search_queries[:3]:  # Limit searches
-            try:
-                results = self.vector_store.search(query, k=5)
-                all_results.extend([r[0] for r in results[:2]])
-            except:
-                continue
-        
-        if all_results:
-            # Combine unique results
-            unique_results = list(dict.fromkeys(all_results))[:3]
-            context = '\n'.join(unique_results)
-            
-            # Generate answer from expanded context
-            try:
-                answer = await self.rag_pipeline._generate_answer(question, unique_results, True)
-                return answer
-            except:
-                return unique_results[0] if unique_results else "No information found."
-        
-        return "No relevant information found after deep search."
-
-    async def _conduct_investigation(self, question: str, question_types: List[str], 
-                                    keywords: List[str], basic_answer: str) -> Dict[str, List[str]]:
-        """Conduct detailed investigation based on question patterns."""
-        findings = {
-            'exceptions': [],
-            'conditions': [],
-            'related_info': [],
-            'important_notes': [],
-            'prerequisites': [],
-            'limitations': [],
-            'warnings': []
-        }
-        
-        # Extract main topic
-        base_topic = self._extract_main_topic(question)
-        
-        # Create investigation queries
-        investigation_queries = []
-        
-        # Type-specific investigations
-        for q_type in question_types[:2]:  # Limit to top 2 types
-            if q_type == 'time_period':
-                investigation_queries.extend([
-                    f"{base_topic} exceptions",
-                    f"{base_topic} extensions",
-                    f"{base_topic} penalties"
-                ])
-            elif q_type == 'money':
-                investigation_queries.extend([
-                    f"{base_topic} additional costs",
-                    f"{base_topic} limits",
-                    f"{base_topic} exemptions"
-                ])
-            elif q_type == 'location':
-                investigation_queries.extend([
-                    f"{base_topic} multiple locations",
-                    f"{base_topic} appears twice",
-                    f"{base_topic} contradiction"
-                ])
-        
-        # Keyword-based investigations
-        for keyword in keywords[:5]:
-            investigation_queries.append(f"{base_topic} {keyword}")
-        
-        # Execute investigations concurrently
-        investigation_tasks = []
-        for query in investigation_queries[:10]:  # Limit total investigations
-            investigation_tasks.append(self._investigate_specific(query))
-        
-        investigation_results = await asyncio.gather(*investigation_tasks, return_exceptions=True)
-        
-        # Process and categorize findings
-        for query, result in zip(investigation_queries, investigation_results):
-            if isinstance(result, Exception):
-                continue
-                
-            if result and len(result) > 20 and result != basic_answer:
-                # Categorize based on content
-                result_lower = result.lower()
-                
-                if any(word in result_lower for word in ['except', 'unless', 'but not']):
-                    findings['exceptions'].append(result[:200])
-                elif any(word in result_lower for word in ['if', 'when', 'require', 'must']):
-                    findings['conditions'].append(result[:200])
-                elif any(word in result_lower for word in ['limit', 'maximum', 'minimum', 'up to']):
-                    findings['limitations'].append(result[:200])
-                elif any(word in result_lower for word in ['warning', 'caution', 'important', 'note']):
-                    findings['warnings'].append(result[:200])
-                elif any(word in result_lower for word in ['document', 'proof', 'submit', 'form']):
-                    findings['prerequisites'].append(result[:200])
-                else:
-                    findings['related_info'].append(result[:200])
-        
-        # Remove duplicates and limit each category
-        for key in findings:
-            unique_items = []
-            seen = set()
-            for item in findings[key]:
-                item_key = item[:50]  # Use first 50 chars as key
-                if item_key not in seen:
-                    seen.add(item_key)
-                    unique_items.append(item)
-            findings[key] = unique_items[:3]  # Max 3 items per category
-        
-        return findings
-
-    async def _investigate_specific(self, query: str) -> str:
-        """Execute a specific investigation query."""
-        try:
-            # Search for specific information
-            search_results = self.vector_store.search(query, k=3)
-            
-            if not search_results:
-                return ""
-            
-            # Extract relevant content
-            relevant_content = []
-            for chunk, score, _ in search_results:
-                if score > 0.1:  # Relevance threshold
-                    # Extract sentences containing query terms
-                    sentences = chunk.split('.')
-                    query_terms = query.lower().split()
-                    
-                    for sentence in sentences:
-                        sentence_lower = sentence.lower()
-                        if any(term in sentence_lower for term in query_terms if len(term) > 3):
-                            relevant_content.append(sentence.strip())
-                            if len(relevant_content) >= 2:
-                                break
-                
-                if len(relevant_content) >= 2:
-                    break
-            
-            return '. '.join(relevant_content[:2]) if relevant_content else ""
-            
-        except Exception as e:
-            logger.warning(f"Specific investigation failed: {e}")
-            return ""
-
-    def _find_contradictions(self, basic_answer: str, findings: Dict) -> List[str]:
-        """Detect contradictions and inconsistencies."""
-        contradictions = []
-        
-        # Combine all text for analysis
-        all_text = basic_answer + ' ' + ' '.join(
-            ' '.join(items) for items in findings.values() if items
-        )
-        
-        # Find conflicting numbers
-        numbers = re.findall(r'\b(\d+(?:\.\d+)?)\s*(days?|months?|years?|dollars?|%|percent)', all_text)
-        
-        if numbers:
-            # Group by unit
-            number_groups = defaultdict(list)
-            for num, unit in numbers:
-                number_groups[unit.lower()].append(float(num))
-            
-            # Check for different values with same unit
-            for unit, values in number_groups.items():
-                unique_values = list(set(values))
-                if len(unique_values) > 1:
-                    contradictions.append(
-                        f"Conflicting {unit}: {', '.join(map(str, unique_values))}"
-                    )
-        
-        # Find conflicting terms
-        conflict_pairs = [
-            ('included', 'excluded'),
-            ('covered', 'not covered'),
-            ('eligible', 'not eligible'),
-            ('allowed', 'prohibited'),
-            ('yes', 'no')
-        ]
-        
-        text_lower = all_text.lower()
-        for term1, term2 in conflict_pairs:
-            if term1 in text_lower and term2 in text_lower:
-                contradictions.append(f"Both '{term1}' and '{term2}' mentioned")
-        
-        # Check for duplicate landmarks (specific to parallel world puzzle)
-        landmark_pattern = r'(Big Ben|Taj Mahal|Gateway of India|Eiffel Tower)'
-        landmarks = re.findall(landmark_pattern, all_text, re.IGNORECASE)
-        
-        if landmarks:
-            landmark_counts = defaultdict(int)
-            for landmark in landmarks:
-                landmark_counts[landmark.lower()] += 1
-            
-            for landmark, count in landmark_counts.items():
-                if count > 1:
-                    contradictions.append(f"'{landmark}' appears {count} times - verify correct location")
-        
-        return contradictions[:3]  # Limit contradictions
-
-    async def _investigate_edge_cases(self, question: str, question_types: List[str]) -> List[str]:
-        """Find edge cases and special scenarios."""
-        edge_cases = []
-        base_topic = self._extract_main_topic(question)
-        
-        # Type-specific edge case queries
-        edge_queries = []
-        
-        if 'location' in question_types:
-            edge_queries.extend([
-                f"{base_topic} multiple entries",
-                f"{base_topic} duplicate",
-                f"{base_topic} ambiguous"
-            ])
-        elif 'process' in question_types:
-            edge_queries.extend([
-                f"{base_topic} failure",
-                f"{base_topic} error",
-                f"{base_topic} alternative"
-            ])
-        else:
-            edge_queries.extend([
-                f"{base_topic} special case",
-                f"{base_topic} exception",
-                f"{base_topic} unusual"
-            ])
-        
-        # Search for edge cases
-        for query in edge_queries[:3]:
-            result = await self._investigate_specific(query)
-            if result and len(result) > 30:
-                edge_cases.append(result)
-        
-        return list(dict.fromkeys(edge_cases))[:2]  # Unique edge cases
-
-    def _extract_main_topic(self, question: str) -> str:
-        """Extract the main topic from the question."""
-        # Remove question words and punctuation
-        question_words = {'what', 'when', 'where', 'why', 'how', 'is', 'are', 'can', 
-                         'could', 'would', 'should', 'does', 'do', 'if', 'the', 'a', 'an'}
-        
-        words = question.lower().replace('?', '').split()
-        
-        # Find important words (longer words, capitalized words, numbers)
-        important_words = []
-        
-        for word in question.split():
-            word_clean = word.strip('?,.')
-            if (word_clean and 
-                word_clean.lower() not in question_words and 
-                (len(word_clean) > 3 or word_clean[0].isupper() or word_clean.isdigit())):
-                important_words.append(word_clean)
-        
-        # Return first few important words
-        return ' '.join(important_words[:3]) if important_words else question[:30]
-
-    def _create_detective_report(self, question: str, basic_answer: str,
-                                findings: Dict, contradictions: List[str],
-                                edge_cases: List[str]) -> str:
-        """Create a comprehensive detective-style report."""
-        
-        report_parts = []
-        
-        # 1. Direct Answer
-        report_parts.append(f"📋 **DIRECT ANSWER:**")
-        report_parts.append(basic_answer)
-        
-        # 2. Important Exceptions
-        if findings.get('exceptions'):
-            report_parts.append("\n⚠️ **IMPORTANT EXCEPTIONS:**")
-            for exception in findings['exceptions']:
-                clean_exception = self._clean_text(exception)
-                if clean_exception:
-                    report_parts.append(f"• {clean_exception}")
-        
-        # 3. Conditions & Requirements
-        conditions_found = findings.get('conditions', []) + findings.get('prerequisites', [])
-        if conditions_found:
-            report_parts.append("\n📌 **CONDITIONS & REQUIREMENTS:**")
-            for condition in conditions_found[:3]:
-                clean_condition = self._clean_text(condition)
-                if clean_condition:
-                    report_parts.append(f"• {clean_condition}")
-        
-        # 4. Limitations
-        if findings.get('limitations'):
-            report_parts.append("\n🚫 **LIMITATIONS:**")
-            for limitation in findings['limitations']:
-                clean_limit = self._clean_text(limitation)
-                if clean_limit:
-                    report_parts.append(f"• {clean_limit}")
-        
-        # 5. Contradictions Alert
-        if contradictions:
-            report_parts.append("\n⚡ **ATTENTION - INCONSISTENCIES FOUND:**")
-            for contradiction in contradictions:
-                report_parts.append(f"• {contradiction}")
-            report_parts.append("• Verify with source document for accuracy")
-        
-        # 6. Special Cases
-        if edge_cases:
-            report_parts.append("\n🔍 **SPECIAL CASES TO NOTE:**")
-            for case in edge_cases:
-                clean_case = self._clean_text(case)
-                if clean_case:
-                    report_parts.append(f"• {clean_case}")
-        
-        # 7. Warnings
-        if findings.get('warnings'):
-            report_parts.append("\n⚠️ **WARNINGS:**")
-            for warning in findings['warnings']:
-                clean_warning = self._clean_text(warning)
-                if clean_warning:
-                    report_parts.append(f"• {clean_warning}")
-        
-        # 8. Additional Information
-        if findings.get('related_info'):
-            report_parts.append("\n💡 **RELATED INFORMATION YOU SHOULD KNOW:**")
-            for info in findings['related_info'][:3]:
-                clean_info = self._clean_text(info)
-                if clean_info and len(clean_info) > 20:
-                    report_parts.append(f"• {clean_info}")
-        
-        # Build final report
-        final_report = '\n'.join(report_parts)
-        
-        # If investigation found significant insights, log it
-        total_findings = sum(len(v) for v in findings.values())
-        if total_findings > 0:
-            logger.info(f"🎯 Detective found {total_findings} insights beyond the basic answer")
-        
-        return final_report
+        self.investigation_cache = {}
 
     def _clean_text(self, text: str) -> str:
-        """Clean text from encoding issues and artifacts."""
+        """Robustly clean text from HTML, encoding issues, and artifacts."""
         if not text:
             return ""
         
-        # Remove common encoding artifacts
-        text = re.sub(r'\(cid:\d+\)', '', text)  # Remove (cid:X) artifacts
-        text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)  # Remove unicode escapes
-        text = re.sub(r'\x00+', ' ', text)  # Remove null bytes
-        text = re.sub(r'[^\x20-\x7E\n\r\t]+', '', text)  # Keep only printable ASCII
+        # 1. Decode HTML entities
+        text = html.unescape(text)
         
-        # Clean up excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        # 2. Remove HTML tags
+        text = re.sub(r'<[^>]+>', ' ', text)
         
-        # Remove incomplete sentences at the end
-        if text and not text[-1] in '.!?':
-            # Find last complete sentence
-            last_period = text.rfind('.')
-            if last_period > len(text) // 2:  # Only truncate if we keep most of the text
-                text = text[:last_period + 1]
+        # 3. Handle Unicode and other artifacts
+        text = re.sub(r'\(cid:\d+\)', '', text)
+        text = text.encode('ascii', 'ignore').decode('utf-8', 'ignore')
         
-        return text.strip()
+        # 4. Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+    async def _generate_master_plan(self, questions: List[str]) -> str:
+        """Analyzes all questions to create a single, unified strategy."""
+        logger.info("🧠 Analyzing all questions to formulate a master strategy...")
+
+        # Consolidate all available text from the vector store to use as context
+        full_context = "\n---\n".join(self.vector_store.chunks)
+        
+        # Create a prompt that asks the LLM to think like a hackathon winner
+        prompt = f"""
+        You are an elite AI agent in a high-stakes, interactive programming challenge.
+        Your goal is to devise a complete, step-by-step strategy to solve the entire problem, not just answer individual questions.
+        Analyze the provided context and the list of user questions to understand the overall mission.
+
+        CONTEXT:
+        {full_context}
+
+        USER QUESTIONS (use these to understand the mission's scope):
+        - {"\n- ".join(questions)}
+
+        YOUR TASK:
+        Create a single, comprehensive 'Master Plan' as a step-by-step guide to win the challenge.
+        This plan should be a clear, actionable walkthrough. Identify critical steps, potential pitfalls, and the final objective.
+        Be smart, anticipate the required sequence of actions, and explain the logic.
+        """
+        
+        try:
+            # Use the most powerful model for strategic planning
+            model = self.rag_pipeline.llm_precise
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={'temperature': 0.1} # Low temperature for factual, deterministic plans
+            )
+            logger.info("✅ Master Plan generated successfully.")
+            return response.text
+        except Exception as e:
+            logger.error(f"Failed to generate master plan: {e}")
+            return "Error: Could not formulate a master plan. The challenge context may be invalid or the objective unclear."
+    async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
+        """Answers a specific question by extracting relevant info from the master plan."""
+        logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
+
+        prompt = f"""
+        You are an intelligent assistant. Your task is to answer the user's question based *only* on the provided 'Master Plan'.
+        Do not add any new information. Extract the relevant steps or details from the plan to provide a direct and concise answer.
+
+        MASTER PLAN:
+        {master_plan}
+
+        QUESTION:
+        "{question}"
+
+        ANSWER:
+        """
+
+        try:
+            model = self.rag_pipeline.llm_precise # Use a precise model to extract info accurately
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={'temperature': 0.0} # Zero temperature for direct extraction
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Failed to answer from plan: {e}")
+            # Fallback to the original investigation method if plan-based answering fails
+            return await self.investigate_question(question)
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """Main entry point for the detective agent."""
+    #     logger.info(f"🔍 Detective Agent activated for: {request.documents}")
+        
+    #     try:
+    #         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+    #         # --- AGENTIC SHIFT START ---
+            
+    #         # Step 2: Generate a single, comprehensive Master Plan for the entire mission.
+    #         # This plan is created by looking at ALL questions to understand the true objective.
+    #         master_plan = await self._generate_master_plan(request.questions)
+            
+    #         # Step 3: Answer each question by intelligently referencing the Master Plan.
+    #         # This ensures all answers are consistent and part of a coherent strategy.
+    #         tasks = []
+    #         for question in request.questions:
+    #             tasks.append(self._answer_question_from_plan(question, master_plan))
+            
+    #         final_answers = await asyncio.gather(*tasks, return_exceptions=True)
+    #         # If the document is very simple (e.g., just a token), use a simpler approach
+    #         if len(self.vector_store.chunks) == 1 and len(self.vector_store.chunks[0]) < 100:
+    #             logger.info("📄 Simple document detected. Providing direct answer.")
+    #             # The content is the single chunk itself
+    #             direct_answer = self.vector_store.chunks[0]
+    #             return QueryResponse(answers=[direct_answer] * len(request.questions))
+
+    #         tasks = [self.investigate_question(q) for q in request.questions]
+    #         answers = await asyncio.gather(*tasks, return_exceptions=True)
+            
+    #         final_answers = []
+    #         for i, answer in enumerate(answers):
+    #             if isinstance(answer, Exception):
+    #                 logger.error(f"Error processing question {i+1}: {answer}", exc_info=True)
+    #                 final_answers.append(f"Error during investigation: {self._clean_text(str(answer))}")
+    #             else:
+    #                 final_answers.append(answer)
+            
+    #         return QueryResponse(answers=final_answers)
+            
+    #     except Exception as e:
+    #         logger.error(f"Critical error in detective agent: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical error occurred: {self._clean_text(str(e))}"] * len(request.questions))
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Main entry point for the new 'Mission Control' agent. This function
+    #     orchestrates the entire strategic analysis for the user's request.
+    #     """
+    #     logger.info(f"🚀 Mission Control Agent activated for: {request.documents}")
+        
+    #     try:
+    #         # Step 1: Prepare the environment by creating or retrieving the vector store.
+    #         # This provides the foundational knowledge for the agent.
+    #         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+            
+    #         # --- AGENTIC STRATEGY INITIATION ---
+            
+    #         # Step 2: Generate a single, comprehensive Master Plan for the entire mission.
+    #         # This is the core of the agentic shift: the AI first understands the *overall objective*
+    #         # by analyzing all questions together, rather than treating them in isolation.
+    #         master_plan = await self._generate_master_plan(request.questions)
+            
+    #         # Step 3: Answer each individual question by intelligently referencing the Master Plan.
+    #         # This ensures that every answer is consistent and contributes to the single, coherent strategy
+    #         # defined in the master plan. It prevents contradictory or isolated responses.
+    #         tasks = []
+    #         for question in request.questions:
+    #             tasks.append(self._answer_question_from_plan(question, master_plan))
+            
+    #         final_answers = await asyncio.gather(*tasks, return_exceptions=True)
+            
+    #         # --- END OF AGENTIC STRATEGY ---
+            
+    #         # Step 4: Process the results and handle any potential errors gracefully.
+    #         processed_answers = []
+    #         for i, answer in enumerate(final_answers):
+    #             if isinstance(answer, Exception):
+    #                 logger.error(f"Error processing question {i}: {answer}", exc_info=True)
+    #                 processed_answers.append(f"Error generating strategic answer: {str(answer)[:200]}")
+    #             else:
+    #                 processed_answers.append(answer)
+            
+    #         return QueryResponse(answers=processed_answers)
+            
+    #     except Exception as e:
+    #         # This is a critical failure catch-all. If anything in the process breaks,
+    #         # from document download to plan generation, it is caught here.
+    #         logger.error(f"Critical error in Mission Control agent: {e}", exc_info=True)
+    #         error_msg = "A critical mission error occurred. Please review the challenge parameters and document URL."
+    #         return QueryResponse(answers=[error_msg] * len(request.questions))
+    async def run(self, request: QueryRequest) -> QueryResponse:
+        """
+        Acts as a 'Planner' to determine the user's intent and then calls the
+        appropriate 'Executor' to solve the problem. This is the core of the
+        agentic behavior.
+        """
+        logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+        self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+        
+        # --- AGENTIC PLANNER ---
+        # The agent first analyzes the questions to determine the overall mission objective.
+        mission_type = self._determine_mission_type(request.questions)
+        logger.info(f"✅ Mission Type Identified: {mission_type}")
+
+        try:
+            # --- AGENTIC EXECUTOR ---
+            # Based on the plan, the agent calls the correct tool/executor function.
+            if mission_type == "Strategy & Full Walkthrough":
+                answers = await self._execute_full_strategy(request.questions)
+            elif mission_type == "Fact & Detail Extraction":
+                answers = await self._execute_fact_extraction(request.questions)
+            else: # Default to the full strategy
+                answers = await self._execute_full_strategy(request.questions)
+                
+            return QueryResponse(answers=answers)
+
+        except Exception as e:
+            logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+            return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+
+    def _determine_mission_type(self, questions: List[str]) -> str:
+        """A simple classifier to understand the user's primary goal."""
+        # Check for strategic, high-level questions
+        strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step"]
+        if any(keyword in q.lower() for q in questions for keyword in strategy_keywords):
+            return "Strategy & Full Walkthrough"
+        
+        # If questions are more about specific facts
+        fact_keywords = ["what is", "who is", "when was", "list the", "how many", "what are"]
+        if all(any(keyword in q.lower() for keyword in fact_keywords) for q in questions):
+            return "Fact & Detail Extraction"
+            
+        return "Strategy & Full Walkthrough" # Default to a full strategy
+
+    async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+        """Executor for creating a comprehensive solution guide."""
+        logger.info("Executing full strategy...")
+        master_plan = await self._generate_master_plan(questions)
+        
+        tasks = [self._answer_question_from_plan(q, master_plan) for q in questions]
+        return await asyncio.gather(*tasks)
+
+    async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
+        """Executor for answering direct, factual questions quickly."""
+        logger.info("Executing fast fact extraction...")
+        # This uses the older, direct investigation method for speed.
+        tasks = [self.investigate_question(q) for q in questions]
+        return await asyncio.gather(*tasks)
+
+    # --- KEEP ALL YOUR OTHER METHODS ---
+    # The methods like _generate_master_plan, _answer_question_from_plan,
+    # investigate_question, etc., are now the "tools" that the executors use.
+    # No changes are needed for them.
+
+        
+    async def investigate_question(self, question: str) -> str:
+        """Conduct a full investigation and generate a strategic report."""
+        cache_key = f"{self.rag_pipeline.settings.EMBEDDING_MODEL_NAME}_{question}"
+        if cache_key in self.investigation_cache:
+            logger.info(f"Returning cached investigation for: '{question}'")
+            return self.investigation_cache[cache_key]
+
+        logger.info(f"🕵️  New Investigation: '{question}'")
+        
+        # 1. Get a clean, direct answer
+        direct_answer_text = await self.rag_pipeline.answer_question(question, self.vector_store)
+        
+        # 2. Search for contradictions and inconsistencies
+        contradictions = await self._find_inconsistencies(question, direct_answer_text)
+        
+        # 3. Investigate for hidden details (exceptions, conditions, etc.)
+        investigation_findings = await self._investigate_hidden_details(question, direct_answer_text)
+        
+        # 4. Synthesize everything into a final, strategic report
+        final_report = self._create_final_report(
+            question,
+            self._clean_text(direct_answer_text),
+            contradictions,
+            investigation_findings
+        )
+        
+        self.investigation_cache[cache_key] = final_report
+        return final_report
+
+    async def _find_inconsistencies(self, question: str, context_text: str) -> Dict[str, str]:
+        """Finds contradictions and ambiguities and explains their importance."""
+        inconsistencies = {}
+        
+        # Use a targeted prompt to the LLM
+        prompt = f"""
+        Analyze the following text for critical inconsistencies, ambiguities, or contradictions related to the user's question.
+        Focus on details that would break a script or lead to a wrong answer.
+
+        USER QUESTION: "{question}"
+
+        TEXT TO ANALYZE:
+        "{self._clean_text(context_text)}"
+
+        Identify up to 2 critical issues. For each, provide:
+        1. A short title for the issue (e.g., "Conflicting Locations for Landmark").
+        2. A one-sentence explanation of *why* it's a critical problem.
+
+        Format the output as:
+        ISSUE_TITLE_1: [Explanation of why it's a problem]
+        ISSUE_TITLE_2: [Explanation of why it's a problem]
+        
+        If no critical issues are found, respond with "No significant inconsistencies found.".
+        """
+        
+        try:
+            model = self.rag_pipeline.llm_precise
+            response = await model.generate_content_async(prompt)
+            
+            if "No significant inconsistencies" not in response.text:
+                for line in response.text.strip().split('\n'):
+                    if ':' in line:
+                        title, explanation = line.split(':', 1)
+                        inconsistencies[title.strip()] = explanation.strip()
+        except Exception as e:
+            logger.warning(f"Inconsistency check failed: {e}")
+
+        logger.info(f"Found {len(inconsistencies)} critical inconsistencies.")
+        return inconsistencies
+
+    async def _investigate_hidden_details(self, question: str, context_text: str) -> Dict[str, List[str]]:
+        """Uncover non-obvious details like edge cases, prerequisites, and gotchas."""
+        hidden_details = defaultdict(list)
+        
+        # Define investigation categories and keywords
+        investigation_map = {
+            "Edge Cases & Failure Points": ["edge case", "fail", "error", "what if not", "alternative"],
+            "Prerequisites & Requirements": ["must", "require", "before", "prerequisite", "document", "need to"],
+            "Exclusions & Limitations": ["but not", "except", "exclude", "limitation", "maximum", "only if"],
+        }
+        
+        # Generate investigation queries
+        base_topic = self._extract_main_topic(question)
+        search_queries = []
+        for category, keywords in investigation_map.items():
+            for keyword in keywords:
+                search_queries.append((category, f"'{base_topic}' {keyword}"))
+
+        # Execute searches
+        tasks = [self.vector_store.search(query, k=2) for _, query in search_queries]
+        search_results = await asyncio.gather(*tasks)
+
+        # Process and synthesize results
+        for (category, _), results in zip(search_queries, search_results):
+            for chunk, score, _ in results:
+                if score > 0.2: # Relevance threshold
+                    cleaned_chunk = self._clean_text(chunk)
+                    # Avoid adding duplicates or text already in the main answer
+                    if cleaned_chunk and cleaned_chunk not in hidden_details[category] and cleaned_chunk not in context_text:
+                        hidden_details[category].append(cleaned_chunk)
+        
+        logger.info(f"Found {sum(len(v) for v in hidden_details.values())} hidden details.")
+        return hidden_details
+
+    def _extract_main_topic(self, question: str) -> str:
+        """Extracts the core subject from the question for targeted searches."""
+        # A simple but effective method: remove common question words and return the rest.
+        q_words = ["what", "who", "when", "where", "why", "how", "is", "are", "do", "does", "can", "list all"]
+        q_lower = question.lower()
+        for word in q_words:
+            q_lower = q_lower.replace(word, "")
+        return q_lower.strip().replace("?", "")
+
+    def _create_final_report(self, question: str, direct_answer: str,
+                             inconsistencies: Dict[str, str],
+                             hidden_details: Dict[str, List[str]]) -> str:
+        """Builds a comprehensive, easy-to-read report from all findings."""
+        report = []
+
+        # 1. Start with the most direct answer
+        report.append("## 🎯 Direct Answer")
+        report.append(direct_answer or "No direct answer could be formulated.")
+        report.append("---")
+
+        # 2. Highlight critical inconsistencies
+        if inconsistencies:
+            report.append("## ⚡ **CRITICAL ALERTS**")
+            report.append("_These issues could lead to incorrect results if not handled:_")
+            for title, explanation in inconsistencies.items():
+                report.append(f"\n* **{title}:** {explanation}")
+            report.append("---")
+            
+        # 3. Detail the hidden requirements and edge cases
+        if any(hidden_details.values()):
+            report.append("## 🕵️ Detective's Findings")
+            report.append("_Here are important details and potential gotchas to be aware of:_")
+            for category, details in hidden_details.items():
+                if details:
+                    report.append(f"\n### {category}")
+                    for detail in details[:2]: # Limit to the top 2 for clarity
+                        report.append(f"* {detail}")
+            report.append("---")
+
+        # 4. Provide a concluding strategic summary
+        report.append("## 💡 Strategic Summary")
+        if not inconsistencies and not any(hidden_details.values()):
+            report.append("The information appears straightforward. The direct answer should be sufficient.")
+        else:
+            report.append("This task has multiple potential failure points. Pay close attention to the **Critical Alerts** and **Detective's Findings** to ensure a successful outcome.")
+            
+        return "\n".join(report)
