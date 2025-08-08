@@ -73,11 +73,11 @@ class AdvancedQueryAgent:
         # logic is not needed to fix the current error.
         return {"exceptions": [], "conditions": []}
 
-    async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
-        """A placeholder for the self-correction logic."""
-        # This method is required by `investigate_question` but its complex
-        # logic is not needed to fix the current error.
-        return original_answer
+    # async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
+    #     """A placeholder for the self-correction logic."""
+    #     # This method is required by `investigate_question` but its complex
+    #     # logic is not needed to fix the current error.
+    #     return original_answer
 
     # --- FIX END ---    
 
@@ -394,7 +394,9 @@ class AdvancedQueryAgent:
         context_for_refinement = original_answer
         for category, details in findings.items():
             if details:
-                context_for_refinement += f"\n\nAdditional context on {category}:\n- {'\n- '.join(details)}"
+                # context_for_refinement += f"\n\nAdditional context on {category}:\n- {'\n- '.join(details)}"
+                formatted_details = "\n- ".join(details)
+                context_for_refinement += f"\n\nAdditional context on {category}:\n- {formatted_details}"
 
         # Create a prompt for the LLM to generate a final, comprehensive answer
         prompt = f"""
@@ -532,72 +534,72 @@ class AdvancedQueryAgent:
         except Exception as e:
             logger.error(f"Investigation failed for question: {e}", exc_info=True)
             return f"Investigation error: {str(e)[:200]}"
-    async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
-        """
-        A new agentic step where the LLM critiques its own answer and
-        performs a targeted search to fix potential flaws.
-        """
-        logger.info("🧐 Performing self-correction and refinement...")
+    # async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
+    #     """
+    #     A new agentic step where the LLM critiques its own answer and
+    #     performs a targeted search to fix potential flaws.
+    #     """
+    #     logger.info("🧐 Performing self-correction and refinement...")
         
-        # Consolidate all the information gathered so far
-        full_context = original_answer + "\n" + "\n".join(
-            " ".join(items) for items in findings.values() if items
-        )
+    #     # Consolidate all the information gathered so far
+    #     full_context = original_answer + "\n" + "\n".join(
+    #         " ".join(items) for items in findings.values() if items
+    #     )
 
-        # Prompt the agent to critique its own work
-        critique_prompt = f"""
-        You are a meticulous fact-checker. Review the following DRAFT ANSWER for a user's question and identify potential flaws, missing details, or contradictions based on the provided CONTEXT.
+    #     # Prompt the agent to critique its own work
+    #     critique_prompt = f"""
+    #     You are a meticulous fact-checker. Review the following DRAFT ANSWER for a user's question and identify potential flaws, missing details, or contradictions based on the provided CONTEXT.
 
-        USER QUESTION: "{question}"
+    #     USER QUESTION: "{question}"
         
-        CONTEXT:
-        {self._clean_text(full_context)}
+    #     CONTEXT:
+    #     {self._clean_text(full_context)}
 
-        DRAFT ANSWER:
-        "{self._clean_text(original_answer)}"
+    #     DRAFT ANSWER:
+    #     "{self._clean_text(original_answer)}"
 
-        CRITIQUE:
-        Identify one critical flaw in the draft answer. For example:
-        - "The answer is missing the specific percentage for the tariff."
-        - "The answer mentions Big Ben is in two places but doesn't explain the implication."
-        - "The answer is too generic and doesn't provide a direct, actionable step."
+    #     CRITIQUE:
+    #     Identify one critical flaw in the draft answer. For example:
+    #     - "The answer is missing the specific percentage for the tariff."
+    #     - "The answer mentions Big Ben is in two places but doesn't explain the implication."
+    #     - "The answer is too generic and doesn't provide a direct, actionable step."
         
-        If no flaws are found, respond with "No significant flaws found.".
-        """
+    #     If no flaws are found, respond with "No significant flaws found.".
+    #     """
         
-        try:
-            # Generate a critique
-            critique_response = await self.rag_pipeline.llm_precise.generate_content_async(critique_prompt)
-            critique = self._clean_text(critique_response.text)
+    #     try:
+    #         # Generate a critique
+    #         critique_response = await self.rag_pipeline.llm_precise.generate_content_async(critique_prompt)
+    #         critique = self._clean_text(critique_response.text)
 
-            if "no significant flaws" in critique.lower():
-                logger.info("✅ No flaws found. Finalizing original answer.")
-                return original_answer # The original answer is good enough
+    #         if "no significant flaws" in critique.lower():
+    #             logger.info("✅ No flaws found. Finalizing original answer.")
+    #             return original_answer # The original answer is good enough
 
-            logger.warning(f"⚠️ Flaw identified: {critique}. Attempting refinement.")
+    #         logger.warning(f"⚠️ Flaw identified: {critique}. Attempting refinement.")
             
-            # If a flaw is found, use the critique to generate a better answer
-            refinement_prompt = f"""
-            You are a solution-oriented agent. An initial answer was drafted, but a flaw was found. 
-            Your task is to generate a final, improved answer that directly addresses the identified flaw using the full context provided.
+    #         # If a flaw is found, use the critique to generate a better answer
+    #         refinement_prompt = f"""
+    #         You are a solution-oriented agent. An initial answer was drafted, but a flaw was found. 
+    #         Your task is to generate a final, improved answer that directly addresses the identified flaw using the full context provided.
 
-            USER QUESTION: "{question}"
+    #         USER QUESTION: "{question}"
             
-            FULL CONTEXT:
-            {self._clean_text(full_context)}
+    #         FULL CONTEXT:
+    #         {self._clean_text(full_context)}
             
-            IDENTIFIED FLAW:
-            "{critique}"
+    #         IDENTIFIED FLAW:
+    #         "{critique}"
 
-            IMPROVED ANSWER:
-            """
+    #         IMPROVED ANSWER:
+    #         """
             
-            final_response = await self.rag_pipeline.llm_precise.generate_content_async(refinement_prompt)
-            return self._clean_text(final_response.text)
+    #         final_response = await self.rag_pipeline.llm_precise.generate_content_async(refinement_prompt)
+    #         return self._clean_text(final_response.text)
 
-        except Exception as e:
-            logger.error(f"Self-correction failed: {e}. Returning original answer.")
-            return original_answer # Fallback to the original answer if refinement fails
+    #     except Exception as e:
+    #         logger.error(f"Self-correction failed: {e}. Returning original answer.")
+    #         return original_answer # Fallback to the original answer if refinement fails
 
     # --- KEEP ALL OTHER METHODS ---
     # Your other methods like _get_basic_answer, _conduct_investigation,
