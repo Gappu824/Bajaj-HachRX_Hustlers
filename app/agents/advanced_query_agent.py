@@ -324,6 +324,39 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
     #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Acts as a 'Planner' that first validates if the mission is possible
+    #     before calling the appropriate 'Executor'.
+    #     """
+    #     logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+        
+    #     # --- AGENTIC FAIL-SAFE (NEW) ---
+    #     # The agent first performs a quick check to see if the mission is relevant.
+    #     is_relevant, reason = await self._is_mission_relevant(request.questions)
+    #     if not is_relevant:
+    #         logger.warning(f"Mission is not relevant. Reason: {reason}")
+    #         # Return a helpful, consistent message for all questions.
+    #         fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
+    #         return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
+    #     # --- END OF FAIL-SAFE ---
+
+    #     # (The rest of your run method remains the same)
+    #     mission_type = self._determine_mission_type(request.questions)
+    #     logger.info(f"✅ Mission Type Identified: {mission_type}")
+
+    #     try:
+    #         if mission_type == "Strategy & Full Walkthrough":
+    #             answers = await self._execute_full_strategy(request.questions)
+    #         else:
+    #             answers = await self._execute_fact_extraction(request.questions)
+                
+    #         return QueryResponse(answers=answers)
+
+    #     except Exception as e:
+    #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
         Acts as a 'Planner' that first validates if the mission is possible
@@ -332,17 +365,12 @@ class AdvancedQueryAgent:
         logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
         
-        # --- AGENTIC FAIL-SAFE (NEW) ---
-        # The agent first performs a quick check to see if the mission is relevant.
         is_relevant, reason = await self._is_mission_relevant(request.questions)
         if not is_relevant:
             logger.warning(f"Mission is not relevant. Reason: {reason}")
-            # Return a helpful, consistent message for all questions.
             fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
             return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
-        # --- END OF FAIL-SAFE ---
 
-        # (The rest of your run method remains the same)
         mission_type = self._determine_mission_type(request.questions)
         logger.info(f"✅ Mission Type Identified: {mission_type}")
 
@@ -351,12 +379,25 @@ class AdvancedQueryAgent:
                 answers = await self._execute_full_strategy(request.questions)
             else:
                 answers = await self._execute_fact_extraction(request.questions)
+            
+            # --- FINAL SANITY CHECK ---
+            # If all answers are identical and contain an error message, something went wrong.
+            # Try one last time with the direct, non-agentic approach.
+            if len(set(answers)) == 1 and ("error" in answers[0].lower() or "does not contain" in answers[0].lower()):
+                logger.warning("Agentic approach failed. Falling back to direct RAG.")
+                direct_tasks = [self.rag_pipeline.answer_question(q, self.vector_store) for q in request.questions]
+                answers = await asyncio.gather(*direct_tasks)
+            # --- END OF SANITY CHECK ---
                 
             return QueryResponse(answers=answers)
 
         except Exception as e:
             logger.error(f"A critical mission error occurred: {e}", exc_info=True)
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+
+# ... (the rest of the file remains the same)
+    
+    
     async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
         """
         Conducts a focused investigation based on question type and keywords.
@@ -678,50 +719,81 @@ class AdvancedQueryAgent:
         
         logger.info(f"Found {sum(len(v) for v in hidden_details.values())} hidden details.")
         return hidden_details
+    # async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
+    #     """
+    #     A new agentic check to determine if the document is relevant to the questions.
+    #     """
+    #     logger.info("🧐 Performing mission relevance check...")
+        
+    #     # Use a small, representative sample of the document's content for a fast check.
+    #     context_sample = "\n".join(self.vector_store.chunks[:2])
+
+    #     # --- FIX ---
+    #     # The list of questions is joined into a single string *before* being placed in the f-string.
+    #     question_list = "\n- ".join(questions)
+
+    #     prompt = f"""
+    #     You are an AI assistant. Your task is to determine if the provided DOCUMENT CONTEXT can answer the given QUESTIONS.
+    #     Answer with only "Yes" or "No", followed by a very brief reason.
+
+    #     DOCUMENT CONTEXT:
+    #     "{context_sample[:1500]}"
+
+    #     QUESTIONS:
+    #     - {question_list}
+
+    #     Example 1:
+    #     No. The document is about a new tariff policy, but the questions are about flight numbers and landmarks.
+
+    #     Example 2:
+    #     Yes. The document contains tables of landmarks and flight endpoints, which matches the questions.
+    #     """
+
+    #     try:
+    #         model = self.rag_pipeline.llm_precise
+    #         response = await model.generate_content_async(prompt, generation_config={'temperature': 0.0})
+            
+    #         answer = response.text.strip()
+    #         if answer.lower().startswith("yes"):
+    #             return True, answer
+    #         else:
+    #             return False, answer
+
+    #     except Exception as e:
+    #         logger.warning(f"Relevance check failed: {e}")
+    #         return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
     async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
         """
         A new agentic check to determine if the document is relevant to the questions.
+        This version is more robust and performs targeted searches.
         """
         logger.info("🧐 Performing mission relevance check...")
         
-        # Use a small, representative sample of the document's content for a fast check.
-        context_sample = "\n".join(self.vector_store.chunks[:2])
+        # --- NEW ROBUST LOGIC ---
+        # Extract key nouns and terms from the questions
+        question_keywords = set()
+        for q in questions:
+            # A simple regex to find potential nouns or key terms
+            keywords = re.findall(r'\b[A-Z][a-z]+\b|\b[a-z]{4,}\b', q)
+            question_keywords.update(kw.lower() for kw in keywords)
 
-        # --- FIX ---
-        # The list of questions is joined into a single string *before* being placed in the f-string.
-        question_list = "\n- ".join(questions)
-
-        prompt = f"""
-        You are an AI assistant. Your task is to determine if the provided DOCUMENT CONTEXT can answer the given QUESTIONS.
-        Answer with only "Yes" or "No", followed by a very brief reason.
-
-        DOCUMENT CONTEXT:
-        "{context_sample[:1500]}"
-
-        QUESTIONS:
-        - {question_list}
-
-        Example 1:
-        No. The document is about a new tariff policy, but the questions are about flight numbers and landmarks.
-
-        Example 2:
-        Yes. The document contains tables of landmarks and flight endpoints, which matches the questions.
-        """
-
+        # Perform a quick, targeted search for these keywords in the document
+        search_query = " ".join(list(question_keywords)[:10]) # Use up to 10 keywords for the search
         try:
-            model = self.rag_pipeline.llm_precise
-            response = await model.generate_content_async(prompt, generation_config={'temperature': 0.0})
+            # We are looking for just one relevant chunk to confirm relevance
+            search_results = self.vector_store.search(search_query, k=1)
+            if not search_results or search_results[0][1] < 0.1: # Check if any result was found with a reasonable score
+                logger.warning(f"Relevance check failed: No relevant chunks found for keywords: {search_query}")
+                return False, "The document does not seem to contain content related to the key topics in the questions."
             
-            answer = response.text.strip()
-            if answer.lower().startswith("yes"):
-                return True, answer
-            else:
-                return False, answer
+            logger.info("✅ Relevance check passed. The document contains relevant information.")
+            return True, "Document is relevant."
 
         except Exception as e:
-            logger.warning(f"Relevance check failed: {e}")
+            logger.warning(f"Relevance check failed due to an error: {e}")
             return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
-
+    
+# ... (the rest of the file remains the same)
     def _extract_main_topic(self, question: str) -> str:
         """Extracts the core subject from the question for targeted searches."""
         # A simple but effective method: remove common question words and return the rest.
