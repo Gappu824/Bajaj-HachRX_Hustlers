@@ -358,33 +358,33 @@ class AdvancedQueryAgent:
         distillation step to create a dense, relevant context.
         """
         logger.info("🧠 Generating fast and accurate master strategy...")
-        
-        # --- NEW STRATEGY ---
 
-        # 1. Broad Search: Gather a wide net of potentially relevant chunks.
+        # 1. Broad Search
         all_question_text = " ".join(questions)
-        # Get a larger pool of candidate chunks than before.
         candidate_chunks = self.vector_store.search(all_question_text, k=25)
         raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
 
-        # 2. AI-Powered Distillation: Use a fast AI call to distill the raw context.
+        # 2. AI-Powered Distillation
         distilled_context = await self._distill_context(questions, raw_context)
         
-        # 3. Final Plan Generation: Use the high-quality, distilled context to create the final plan.
+        # --- FIX START: Move the .join() operation out of the f-string ---
+        question_list = "\n- ".join(questions)
+        # --- FIX END ---
+
+        # 3. Final Plan Generation
         prompt = f"""You are an expert AI strategist. Based on the following CRITICAL CONTEXT, create a clear, step-by-step action plan to answer all the user's questions.
 
 CRITICAL CONTEXT:
 {distilled_context}
 
 USER QUESTIONS:
-- {"\n- ".join(questions)}
+- {question_list}
 
 YOUR TASK:
 Generate a definitive, step-by-step plan. The plan must explicitly detail the logic, list all necessary API calls, and explain how to resolve any ambiguities mentioned in the context.
 """
         
         try:
-            # Use the more powerful model now that the context is small and perfect.
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
             
             response = await asyncio.wait_for(
@@ -396,7 +396,7 @@ Generate a definitive, step-by-step plan. The plan must explicitly detail the lo
                         'candidate_count': 1
                     }
                 ),
-                timeout=12.0  # A balanced timeout.
+                timeout=12.0
             )
             
             logger.info("✅ High-quality master plan generated quickly.")
@@ -408,6 +408,47 @@ Generate a definitive, step-by-step plan. The plan must explicitly detail the lo
         except Exception as e:
             logger.error(f"Failed to generate master plan: {e}")
             return "Error during plan generation. Proceeding with direct answers."
+
+    # REPLACE the _distill_context method
+    async def _distill_context(self, questions: List[str], raw_context: str) -> str:
+        """
+        Uses a fast LLM to read a large, noisy context and distill it into
+        a small set of critical "clues" for the main planner.
+        """
+        logger.info(" distilling context to find critical clues...")
+        
+        # --- FIX START: Move the .join() operation out of the f-string ---
+        question_list = "\n- ".join(questions)
+        # --- FIX END ---
+        
+        distill_prompt = f"""You are a lead detective. From the RAW INFORMATION below, extract only the most critical facts, rules, and ambiguities needed to answer the list of QUESTIONS.
+
+- Extract every unique API endpoint.
+- Extract the specific rules for choosing which API to call.
+- Extract any conflicting information (e.g., a landmark in two cities).
+- Be extremely concise. Use bullet points.
+
+RAW INFORMATION:
+{raw_context[:20000]} 
+
+QUESTIONS:
+- {question_list}
+
+CRITICAL FACTS:
+"""
+        try:
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    distill_prompt,
+                    generation_config={'max_output_tokens': 500, 'temperature': 0.0}
+                ),
+                timeout=5.0
+            )
+            return response.text
+        except Exception as e:
+            logger.warning(f"Context distillation failed: {e}. Using raw context.")
+            return raw_context[:3000]
 
     # --- ADD THIS NEW HELPER METHOD ---
     async def _distill_context(self, questions: List[str], raw_context: str) -> str:
