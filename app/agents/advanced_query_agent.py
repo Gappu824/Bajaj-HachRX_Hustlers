@@ -1748,43 +1748,45 @@ class AdvancedQueryAgent:
                 else:
                     answers.append(token)
             return QueryResponse(answers=answers)
-        # --- CHANGED: Create two tasks to run in parallel ---
+        # --- CHANGED: Create three tasks to run in parallel ---
         # Path 1: The fast, direct-answering path
         direct_path_task = asyncio.create_task(
             self._execute_fact_extraction(request.questions)
         )
-
         # Path 2: The deep, strategic planning and answering path
         strategic_path_task = asyncio.create_task(
             self._execute_full_strategy(request.questions)
         )
-
-        tasks = [direct_path_task, strategic_path_task]
+        # Path 3: New fastest batched direct Q&A path (single LLM call)
+        batch_direct_task = asyncio.create_task(
+            self._execute_batch_direct_qa(request.questions)
+        )
+        tasks = [direct_path_task, strategic_path_task, batch_direct_task]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
         # --- CHANGED: Process the results of the first completed task ---
         try:
-            # Get the result from the task that finished
             result_task = done.pop()
             final_answers = result_task.result()
-
             # Identify which path won the race
-            if result_task is direct_path_task:
+            if result_task is batch_direct_task:
+                logger.info("✅ Batch Direct Q&A finished first. Returning fastest batched answers.")
+            elif result_task is direct_path_task:
                 logger.info("✅ Direct Path finished first. Returning fast answers.")
             else:
                 logger.info("✅ Strategic Path finished first. Returning high-quality answers.")
-
-            # --- CHANGED: Cancel the losing task to save resources ---
+            # --- CHANGED: Cancel the losing tasks to save resources ---
             for task in pending:
                 task.cancel()
-                
             return QueryResponse(answers=final_answers)
-
         except Exception as e:
             logger.error(f"A critical error occurred during speculative execution: {e}", exc_info=True)
             # Fallback in case of a critical failure in the winning task
-            if direct_path_task.done() and not direct_path_task.cancelled():
-                return QueryResponse(answers=direct_path_task.result())
+            for t in [batch_direct_task, direct_path_task, strategic_path_task]:
+                if t.done() and not t.cancelled():
+                    try:
+                        return QueryResponse(answers=t.result())
+                    except Exception:
+                        continue
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     
     async def _precompute_distillation(self, questions: List[str]) -> None:
@@ -2674,3 +2676,46 @@ class AdvancedQueryAgent:
             report.append("This task has multiple potential failure points. Pay close attention to the **Critical Alerts** and **Detective's Findings** to ensure a successful outcome.")
             
         return "\n".join(report)
+
+    async def _execute_batch_direct_qa(self, questions: List[str]) -> List[str]:
+        """
+        New fastest path: single LLM call answering all questions using per-question top context.
+        Maintains quality by retrieving top chunks for each question and composing one prompt.
+        """
+        logger.info("⚡ Executing Batch Direct Q&A Path...")
+        # Retrieve small, high-signal contexts per question
+        per_q_context: Dict[str, List[str]] = {}
+        for q in questions:
+            results = self.vector_store.search(q, k=6)
+            # Use top 4 chunks for tight context
+            per_q_context[q] = [r[0] for r in results[:4]] if results else []
+        # Build a single prompt
+        parts = ["You are a precise assistant. Answer each question strictly from its provided CONTEXT. Be concise and specific."]
+        for idx, q in enumerate(questions, start=1):
+            ctx = "\n---\n".join(per_q_context.get(q, []))
+            parts.append(f"Q{idx}: {q}\nCONTEXT:\n{ctx}\nA{idx}:")
+        prompt = "\n\n".join(parts)
+        try:
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={
+                    'temperature': 0.0,
+                    'max_output_tokens': 2048,
+                    'top_k': 40,
+                    'top_p': 0.95,
+                    'candidate_count': 1
+                }
+            )
+            text = (response.text or "").strip()
+            # Parse A1..An
+            answers: List[str] = []
+            for idx, q in enumerate(questions, start=1):
+                m = re.search(rf"^A{idx}:\s*(.*)", text, re.MULTILINE)
+                answers.append(m.group(1).strip() if m else "Answer not found.")
+            return answers
+        except Exception as e:
+            logger.warning(f"Batch direct Q&A failed: {e}")
+            # Fallback to fast per-question answers
+            tasks = [self._fast_answer(q) for q in questions]
+            return await asyncio.gather(*tasks)

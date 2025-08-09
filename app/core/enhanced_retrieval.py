@@ -11,12 +11,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Download NLTK data
+# CHANGED: Avoid runtime downloads; provide safe fallbacks
 try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-except:
-    pass
+    _NLTK_AVAILABLE = True
+    # Probe for resources without triggering downloads
+    nltk.data.find('tokenizers/punkt')
+except Exception:
+    _NLTK_AVAILABLE = False
+
+
+def _fast_tokenize(text: str) -> list:
+    """Fast, dependency-light tokenizer as a fallback."""
+    # Alphanum tokens only, lowercased
+    return re.findall(r"[A-Za-z0-9]+", text.lower())
+
 
 class EnhancedRetriever:
     """Advanced retrieval with multiple strategies"""
@@ -62,139 +70,21 @@ class EnhancedRetriever:
                     self.keyword_index[num] = set()
                 self.keyword_index[num].add(idx)
     
-    # def _init_bm25(self):
-    #     """Initialize BM25 for probabilistic retrieval"""
-    #     try:
-    #         stop_words = set(stopwords.words('english'))
-    #     except:
-    #         stop_words = set()
-        
-    #     tokenized_chunks = []
-    #     for chunk in self.chunks:
-    #         tokens = word_tokenize(chunk.lower())
-    #         tokens = [t for t in tokens if t.isalnum() and t not in stop_words]
-    #         tokenized_chunks.append(tokens if tokens else ['empty'])
-        
-    #     self.bm25 = BM25Okapi(tokenized_chunks)
-    # def _init_bm25(self):
-    #     """Initialize BM25 for probabilistic retrieval"""
-    #     # No longer using language-specific stopwords
-    #     tokenized_chunks = []
-    #     for chunk in self.chunks:
-    #         tokens = word_tokenize(chunk.lower())
-    #         # Tokenization is kept, but stopword filtering is removed
-    #         tokens = [t for t in tokens if t.isalnum()]
-    #         tokenized_chunks.append(tokens if tokens else ['empty'])
-        
-    #     self.bm25 = BM25Okapi(tokenized_chunks)
     def _init_bm25(self):
         """Initialize BM25 for probabilistic retrieval"""
-        # No longer using language-specific stopwords
         tokenized_chunks = []
         for chunk in self.chunks:
-            tokens = word_tokenize(chunk.lower())
-            # Tokenization is kept, but stopword filtering is removed
-            tokens = [t for t in tokens if t.isalnum()]
+            if _NLTK_AVAILABLE:
+                try:
+                    tokens = word_tokenize(chunk.lower())
+                    tokens = [t for t in tokens if t.isalnum()]
+                except Exception:
+                    tokens = _fast_tokenize(chunk)
+            else:
+                tokens = _fast_tokenize(chunk)
             tokenized_chunks.append(tokens if tokens else ['empty'])
-        
         self.bm25 = BM25Okapi(tokenized_chunks)
     
-    # def _init_tfidf(self):
-    #     """Initialize TF-IDF for term frequency analysis"""
-    #     if len(self.chunks) < 2:
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
-    #         return
-        
-    #     try:
-    #         # self.tfidf_vectorizer = TfidfVectorizer(
-    #         #     max_features=min(5000, len(self.chunks) * 10),
-    #         #     ngram_range=(1, 2),
-    #         #     stop_words='english',
-    #         #     min_df=1,
-    #         #     max_df=0.95
-    #         # )
-    #         # Adjust parameters based on collection size
-    #         if len(self.chunks) < 10:
-    #             # Very small collections - be more permissive
-    #             self.tfidf_vectorizer = TfidfVectorizer(
-    #                 max_features=min(100, len(self.chunks) * 20),
-    #                 ngram_range=(1, 1),  # Only unigrams for small collections
-    #                 stop_words=None,     # Don't remove stop words for small collections
-    #                 min_df=1,
-    #                 max_df=1.0           # Allow all terms
-    #             )
-    #         else:
-    #             # Larger collections - use original settings
-    #             self.tfidf_vectorizer = TfidfVectorizer(
-    #                 max_features=min(5000, len(self.chunks) * 10),
-    #                 ngram_range=(1, 2),
-    #                 stop_words='english',
-    #                 min_df=1,
-    #                 max_df=0.95
-    #             )
-    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
-    #     except Exception as e:
-    #         logger.warning(f"TF-IDF initialization failed: {e}")
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
-    # def _init_tfidf(self):
-    #     """Initialize TF-IDF for term frequency analysis"""
-    #     if len(self.chunks) < 2:
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
-    #         return
-        
-    #     try:
-    #         # Adjust parameters based on collection size
-    #         if len(self.chunks) < 10:
-    #             # Very small collections - be more permissive
-    #             self.tfidf_vectorizer = TfidfVectorizer(
-    #                 max_features=min(100, len(self.chunks) * 20),
-    #                 ngram_range=(1, 1),  # Only unigrams for small collections
-    #                 stop_words=None,     # Don't remove stop words for small collections
-    #                 min_df=1,
-    #                 max_df=1.0           # Allow all terms
-    #             )
-    #         else:
-    #             # Larger collections - use original settings
-    #             self.tfidf_vectorizer = TfidfVectorizer(
-    #                 max_features=min(5000, len(self.chunks) * 10),
-    #                 ngram_range=(1, 2),
-    #                 stop_words='english',
-    #                 min_df=1,
-    #                 max_df=0.95
-    #             )
-    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
-    #     except Exception as e:
-    #         logger.warning(f"TF-IDF initialization failed: {e}")
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
-    # def _init_tfidf(self):
-    #     """Initialize TF-IDF for term frequency analysis with robust fallbacks."""
-    #     if len(self.chunks) < 2:
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
-    #         return
-        
-    #     try:
-    #         # For very small collections, be extremely permissive.
-    #         # Only apply stop words if we have a decent number of documents.
-    #         use_stop_words = 'english' if len(self.chunks) >= 20 else None
-
-    #         self.tfidf_vectorizer = TfidfVectorizer(
-    #             max_features=min(5000, len(self.chunks) * 10),
-    #             ngram_range=(1, 2),
-    #             stop_words=use_stop_words,
-    #             min_df=1, # Always include terms that appear at least once
-    #             max_df=1.0 # Always include terms that appear in all documents
-    #         )
-
-    #         self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
-    #     except Exception as e:
-    #         logger.warning(f"TF-IDF initialization failed: {e}")
-    #         self.tfidf_vectorizer = None
-    #         self.tfidf_matrix = None
     def _init_tfidf(self):
         """Initialize TF-IDF for term frequency analysis with robust fallbacks."""
         if len(self.chunks) < 2:
@@ -203,18 +93,14 @@ class EnhancedRetriever:
             return
         
         try:
-            # For very small collections, be extremely permissive.
-            # Only apply stop words if we have a decent number of documents.
             use_stop_words = 'english' if len(self.chunks) >= 20 else None
-
             self.tfidf_vectorizer = TfidfVectorizer(
                 max_features=min(5000, len(self.chunks) * 10),
                 ngram_range=(1, 2),
                 stop_words=use_stop_words,
-                min_df=1, # Always include terms that appear at least once
-                max_df=1.0 # Always include terms that appear in all documents
+                min_df=1,
+                max_df=1.0
             )
-
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.chunks)
         except Exception as e:
             logger.warning(f"TF-IDF initialization failed: {e}")
@@ -246,19 +132,13 @@ class EnhancedRetriever:
                     scores[idx] += 3.0
         
         # 3. BM25 scoring
-        # try:
-        #     stop_words = set(stopwords.words('english'))
-        # except:
-        #     stop_words = set()
-        
-        # query_tokens = word_tokenize(query_lower)
-        # query_tokens = [t for t in query_tokens if t.isalnum() and t not in stop_words]
-        
-        # if query_tokens:
-        #     bm25_scores = self.bm25.get_scores(query_tokens)
-        #     scores += np.array(bm25_scores) * 2.0
-        query_tokens = word_tokenize(query_lower)
-        query_tokens = [t for t in query_tokens if t.isalnum()]
+        if _NLTK_AVAILABLE:
+            try:
+                query_tokens = [t for t in word_tokenize(query_lower) if t.isalnum()]
+            except Exception:
+                query_tokens = _fast_tokenize(query_lower)
+        else:
+            query_tokens = _fast_tokenize(query_lower)
         
         if query_tokens:
             bm25_scores = self.bm25.get_scores(query_tokens)
@@ -270,7 +150,7 @@ class EnhancedRetriever:
                 query_vec = self.tfidf_vectorizer.transform([query])
                 tfidf_scores = (self.tfidf_matrix * query_vec.T).toarray().flatten()
                 scores += tfidf_scores * 1.5
-            except:
+            except Exception:
                 pass
         
         # Get top-k results
