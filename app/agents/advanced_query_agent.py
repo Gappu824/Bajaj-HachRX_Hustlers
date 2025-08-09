@@ -360,13 +360,33 @@ class AdvancedQueryAgent:
         logger.info("🧠 Generating fast and accurate master strategy...")
 
         # 1. Broad Search
-        all_question_text = " ".join(questions)
-        candidate_chunks = self.vector_store.search(all_question_text, k=25)
-        raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
+        # all_question_text = " ".join(questions)
+        # candidate_chunks = self.vector_store.search(all_question_text, k=25)
+        # raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
 
-        # 2. AI-Powered Distillation
-        distilled_context = await self._distill_context(questions, raw_context)
-        
+        # # 2. AI-Powered Distillation
+        # distilled_context = await self._distill_context(questions, raw_context)
+        # --- FIX START: AGGRESSIVE CACHING OF DISTILLED CONTEXT ---
+        # Create a unique key for this specific set of questions and document.
+        question_hash = hashlib.md5("".join(sorted(questions)).encode()).hexdigest()
+        doc_hash = hashlib.md5(self.vector_store.chunks[0].encode()).hexdigest() # Hash of first chunk as doc ID
+        cache_key = f"distilled_context_{doc_hash}_{question_hash}"
+
+        # Check instance cache for a pre-distilled context.
+        if cache_key in self.investigation_cache:
+            logger.info("✅ Found cached distilled context. Skipping distillation step.")
+            distilled_context = self.investigation_cache[cache_key]
+        else:
+            # If not cached, perform the distillation and then cache the result.
+            logger.info("No cached context found. Performing one-time distillation...")
+            # 1. Broad Search
+            all_question_text = " ".join(questions)
+            candidate_chunks = self.vector_store.search(all_question_text, k=25)
+            raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
+
+            # 2. AI-Powered Distillation
+            distilled_context = await self._distill_context(questions, raw_context)
+            self.investigation_cache[cache_key] = distilled_context # Save to cache
         # --- FIX START: Move the .join() operation out of the f-string ---
         question_list = "\n- ".join(questions)
         # --- FIX END ---
@@ -921,6 +941,8 @@ CRITICAL FACTS:
             # Based on the plan, the agent calls the correct tool/executor function.
             if mission_type == "Strategy & Full Walkthrough":
                 answers = await self._execute_full_strategy(request.questions)
+            elif mission_type == "Direct Document Q&A": # NEW PATH
+                answers = await self._execute_fact_extraction(request.questions)
             else: # Default to fact extraction for simpler queries
                 answers = await self._execute_fact_extraction(request.questions)
             logger.info(f"✅ Final Answers Generated: {answers}")    
@@ -1044,15 +1066,42 @@ CRITICAL FACTS:
     #     # This uses the older, direct investigation method for speed.
     #     tasks = [self.investigate_question(q) for q in questions]
     #     return await asyncio.gather(*tasks)
-    def _determine_mission_type(self, questions: List[str]) -> str:
-        """A simple, fast classifier to understand the user's primary goal."""
-        # Check for strategic, high-level questions that require planning.
-        strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step", "inconsistencies"]
-        if any(keyword in q.lower() for q in questions for keyword in strategy_keywords):
-            return "Strategy & Full Walkthrough"
+    # def _determine_mission_type(self, questions: List[str]) -> str:
+    #     """A simple, fast classifier to understand the user's primary goal."""
+    #     # Check for strategic, high-level questions that require planning.
+    #     strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step", "inconsistencies"]
+    #     if any(keyword in q.lower() for q in questions for keyword in strategy_keywords):
+    #         return "Strategy & Full Walkthrough"
         
-        # If no strategic keywords are found, default to fast fact extraction.
-        return "Fact & Detail Extraction"
+    #     # If no strategic keywords are found, default to fast fact extraction.
+    #     return "Fact & Detail Extraction"
+    def _determine_mission_type(self, questions: List[str]) -> str:
+        """
+        A more nuanced classifier that identifies three distinct user intents.
+        """
+        # --- FIX: Enhanced keyword detection ---
+        strategy_keywords = ["how do i", "solution guide", "step-by-step", "what should i do", "walkthrough"]
+        complex_q_keywords = ["explain the logic", "trace the process", "find all inconsistencies", "list all api"]
+        fact_keywords = ["what is", "who is", "when was", "list the", "how many"]
+
+        num_complex = sum(1 for q in questions if any(kw in q.lower() for kw in complex_q_keywords))
+        num_strategy = sum(1 for q in questions if any(kw in q.lower() for kw in strategy_keywords))
+        
+        # If there's a clear instruction to build a guide, it's a full strategy mission.
+        if num_strategy > 0:
+            return "Strategy & Full Walkthrough"
+            
+        # If there are multiple complex questions that require synthesis from the doc, use the direct Q&A path.
+        # This is the key for the flight number challenge.
+        if num_complex >= 2:
+            return "Direct Document Q&A"
+
+        # If most questions are simple fact-finding, use the fastest path.
+        if all(any(kw in q.lower() for kw in fact_keywords) for q in questions):
+            return "Fact & Detail Extraction"
+            
+        # Default to the robust direct Q&A for mixed or unclear cases.
+        return "Direct Document Q&A"
 
     # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
     #     """Executor for creating a comprehensive solution guide for complex tasks."""
