@@ -181,27 +181,77 @@ class AdvancedQueryAgent:
 
 
 
+    # async def _generate_master_plan(self, questions: List[str]) -> str:
+    #     """
+    #     Analyzes all questions to create a single, unified strategy.
+    #     This version is optimized to use only relevant context, preventing memory overload.
+    #     """
+    #     logger.info("🧠 Analyzing all questions to formulate a master strategy...")
+
+    #     # --- MEMORY FIX START ---
+    #     # Instead of loading the entire document, perform a broad search to gather
+    #     # the most relevant context for the overall mission.
+        
+    #     # Consolidate keywords from all questions to form a representative search query
+    #     all_question_text = " ".join(questions)
+        
+    #     # Retrieve a diverse set of chunks that are relevant to the questions as a whole
+    #     # This provides a high-quality summary of the document's key information
+    #     relevant_chunks = self.vector_store.search(all_question_text, k=20) # Get top 20 chunks
+        
+    #     # Use only the text from these relevant chunks as the context
+    #     full_context = "\n---\n".join([chunk[0] for chunk in relevant_chunks])
+    #     # --- MEMORY FIX END ---
+        
+    #     question_list = "\n- ".join(questions)
+        
+    #     prompt = f"""
+    #     You are an elite AI agent. Your goal is to devise a complete, step-by-step strategy to solve the entire problem.
+    #     Analyze the provided CONTEXT and the list of USER QUESTIONS to understand the overall mission.
+
+    #     CONTEXT:
+    #     {full_context}
+
+    #     USER QUESTIONS:
+    #     - {question_list}
+
+    #     YOUR TASK:
+    #     Create a single, comprehensive 'Master Plan' as a step-by-step guide.
+    #     This plan should be a clear, actionable walkthrough.
+    #     """
+        
+    #     try:
+    #         model = self.rag_pipeline.llm_precise
+    #         response = await model.generate_content_async(
+    #             prompt,
+    #             generation_config={'temperature': 0.1}
+    #         )
+    #         logger.info("✅ Master Plan generated successfully.")
+    #         return response.text
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate master plan: {e}")
+    #         return "Error: Could not formulate a master plan."
     async def _generate_master_plan(self, questions: List[str]) -> str:
         """
         Analyzes all questions to create a single, unified strategy.
-        This version is optimized to use only relevant context, preventing memory overload.
+        This version is optimized to use only relevant context, preventing memory overload and speeding up generation.
         """
         logger.info("🧠 Analyzing all questions to formulate a master strategy...")
 
-        # --- MEMORY FIX START ---
+        # --- MEMORY & SPEED FIX START ---
         # Instead of loading the entire document, perform a broad search to gather
         # the most relevant context for the overall mission.
         
-        # Consolidate keywords from all questions to form a representative search query
+        # Consolidate keywords from all questions to form a representative search query.
         all_question_text = " ".join(questions)
         
-        # Retrieve a diverse set of chunks that are relevant to the questions as a whole
-        # This provides a high-quality summary of the document's key information
+        # Retrieve a diverse set of chunks that are relevant to the questions as a whole.
+        # This provides a high-quality summary of the document's key information for the planner.
         relevant_chunks = self.vector_store.search(all_question_text, k=20) # Get top 20 chunks
         
-        # Use only the text from these relevant chunks as the context
+        # Use only the text from these relevant chunks as the context.
         full_context = "\n---\n".join([chunk[0] for chunk in relevant_chunks])
-        # --- MEMORY FIX END ---
+        # --- MEMORY & SPEED FIX END ---
         
         question_list = "\n- ".join(questions)
         
