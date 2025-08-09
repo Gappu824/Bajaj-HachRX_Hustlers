@@ -451,42 +451,42 @@ CRITICAL FACTS:
             return raw_context[:3000]
 
     # --- ADD THIS NEW HELPER METHOD ---
-    async def _distill_context(self, questions: List[str], raw_context: str) -> str:
-        """
-        Uses a fast LLM to read a large, noisy context and distill it into
-        a small set of critical "clues" for the main planner.
-        """
-        logger.info(" distilling context to find critical clues...")
+#     async def _distill_context(self, questions: List[str], raw_context: str) -> str:
+#         """
+#         Uses a fast LLM to read a large, noisy context and distill it into
+#         a small set of critical "clues" for the main planner.
+#         """
+#         logger.info(" distilling context to find critical clues...")
         
-        distill_prompt = f"""You are a lead detective. From the RAW INFORMATION below, extract only the most critical facts, rules, and ambiguities needed to answer the list of QUESTIONS.
+#         distill_prompt = f"""You are a lead detective. From the RAW INFORMATION below, extract only the most critical facts, rules, and ambiguities needed to answer the list of QUESTIONS.
 
-- Extract every unique API endpoint.
-- Extract the specific rules for choosing which API to call.
-- Extract any conflicting information (e.g., a landmark in two cities).
-- Be extremely concise. Use bullet points.
+# - Extract every unique API endpoint.
+# - Extract the specific rules for choosing which API to call.
+# - Extract any conflicting information (e.g., a landmark in two cities).
+# - Be extremely concise. Use bullet points.
 
-RAW INFORMATION:
-{raw_context[:20000]} 
+# RAW INFORMATION:
+# {raw_context[:20000]} 
 
-QUESTIONS:
-- {"\n- ".join(questions)}
+# QUESTIONS:
+# - {"\n- ".join(questions)}
 
-CRITICAL FACTS:
-"""
-        try:
-            # Use the FAST model for this distillation task.
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    distill_prompt,
-                    generation_config={'max_output_tokens': 500, 'temperature': 0.0}
-                ),
-                timeout=5.0
-            )
-            return response.text
-        except Exception as e:
-            logger.warning(f"Context distillation failed: {e}. Using raw context.")
-            return raw_context[:3000] # Fallback to truncated raw context
+# CRITICAL FACTS:
+# """
+#         try:
+#             # Use the FAST model for this distillation task.
+#             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+#             response = await asyncio.wait_for(
+#                 model.generate_content_async(
+#                     distill_prompt,
+#                     generation_config={'max_output_tokens': 500, 'temperature': 0.0}
+#                 ),
+#                 timeout=5.0
+#             )
+#             return response.text
+#         except Exception as e:
+#             logger.warning(f"Context distillation failed: {e}. Using raw context.")
+#             return raw_context[:3000] # Fallback to truncated raw context
 
     # ... (the rest of the existing code in the file) ...
 
