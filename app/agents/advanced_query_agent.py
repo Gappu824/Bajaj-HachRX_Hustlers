@@ -534,42 +534,71 @@ class AdvancedQueryAgent:
     #     # Direct answer without investigation
     #     return await self.rag_pipeline.answer_question(question, self.vector_store)
     
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """Optimized agent with faster decision making"""
+    #     logger.info(f"🚀 Speed-optimized Agent activated")
+        
+    #     # CHANGED: Start loading vector store immediately in the background
+    #     vector_store_task = asyncio.create_task(
+    #         self.rag_pipeline.get_or_create_vector_store(request.documents)
+    #     )
+        
+    #     # CHANGED: Determine strategy while the vector store loads
+    #     mission_type = self._determine_mission_type(request.questions)
+        
+    #     # Now, wait for the vector store to be ready
+    #     self.vector_store = await vector_store_task
+        
+    #     # CHANGED: Skip the relevance check for speed and try to answer directly
+    #     try:
+    #         # Use a new, ultra-fast method for all questions
+    #         tasks = [
+    #             self._fast_answer(q) for q in request.questions
+    #         ]
+    #         answers = await asyncio.gather(*tasks, return_exceptions=True)
+            
+    #         # Process results
+    #         final_answers = []
+    #         for answer in answers:
+    #             if isinstance(answer, Exception):
+    #                 final_answers.append("Error processing question.")
+    #             else:
+    #                 final_answers.append(answer)
+            
+    #         return QueryResponse(answers=final_answers)
+            
+    #     except Exception as e:
+    #         logger.error(f"Critical error: {e}")
+    #         return QueryResponse(answers=["Error"] * len(request.questions))
+
     async def run(self, request: QueryRequest) -> QueryResponse:
-        """Optimized agent with faster decision making"""
-        logger.info(f"🚀 Speed-optimized Agent activated")
+        """
+        Acts as a 'Planner' to determine the user's intent and then calls the
+        appropriate 'Executor' to solve the problem. This is the core of the
+        agentic behavior.
+        """
+        logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+        self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
         
-        # CHANGED: Start loading vector store immediately in the background
-        vector_store_task = asyncio.create_task(
-            self.rag_pipeline.get_or_create_vector_store(request.documents)
-        )
-        
-        # CHANGED: Determine strategy while the vector store loads
+        # --- AGENTIC PLANNER ---
+        # The agent first analyzes the questions to determine the overall mission objective.
         mission_type = self._determine_mission_type(request.questions)
-        
-        # Now, wait for the vector store to be ready
-        self.vector_store = await vector_store_task
-        
-        # CHANGED: Skip the relevance check for speed and try to answer directly
+        logger.info(f"✅ Mission Type Identified: {mission_type}")
+
         try:
-            # Use a new, ultra-fast method for all questions
-            tasks = [
-                self._fast_answer(q) for q in request.questions
-            ]
-            answers = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            final_answers = []
-            for answer in answers:
-                if isinstance(answer, Exception):
-                    final_answers.append("Error processing question.")
-                else:
-                    final_answers.append(answer)
-            
-            return QueryResponse(answers=final_answers)
-            
+            # --- AGENTIC EXECUTOR ---
+            # Based on the plan, the agent calls the correct tool/executor function.
+            if mission_type == "Strategy & Full Walkthrough":
+                answers = await self._execute_full_strategy(request.questions)
+            else: # Default to fact extraction for simpler queries
+                answers = await self._execute_fact_extraction(request.questions)
+                
+            return QueryResponse(answers=answers)
+
         except Exception as e:
-            logger.error(f"Critical error: {e}")
-            return QueryResponse(answers=["Error"] * len(request.questions))
+            logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+            return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+
 
     # ADD this new fast answer method:
     async def _fast_answer(self, question: str) -> str:
@@ -651,34 +680,61 @@ class AdvancedQueryAgent:
 # ... (keep all the existing code after this method, including the `run` and other helper functions)
     
 
+    # def _determine_mission_type(self, questions: List[str]) -> str:
+    #     """A simple classifier to understand the user's primary goal."""
+    #     # Check for strategic, high-level questions
+    #     strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step"]
+    #     if any(keyword in q.lower() for q in questions for keyword in strategy_keywords):
+    #         return "Strategy & Full Walkthrough"
+        
+    #     # If questions are more about specific facts
+    #     fact_keywords = ["what is", "who is", "when was", "list the", "how many", "what are"]
+    #     if all(any(keyword in q.lower() for keyword in fact_keywords) for q in questions):
+    #         return "Fact & Detail Extraction"
+            
+    #     return "Strategy & Full Walkthrough" # Default to a full strategy
+
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """Executor for creating a comprehensive solution guide."""
+    #     logger.info("Executing full strategy...")
+    #     master_plan = await self._generate_master_plan(questions)
+        
+    #     tasks = [self._answer_question_from_plan(q, master_plan) for q in questions]
+    #     return await asyncio.gather(*tasks)
+
+    # async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
+    #     """Executor for answering direct, factual questions quickly."""
+    #     logger.info("Executing fast fact extraction...")
+    #     # This uses the older, direct investigation method for speed.
+    #     tasks = [self.investigate_question(q) for q in questions]
+    #     return await asyncio.gather(*tasks)
     def _determine_mission_type(self, questions: List[str]) -> str:
-        """A simple classifier to understand the user's primary goal."""
-        # Check for strategic, high-level questions
-        strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step"]
+        """A simple, fast classifier to understand the user's primary goal."""
+        # Check for strategic, high-level questions that require planning.
+        strategy_keywords = ["how do i", "explain the logic", "solution guide", "what should i do", "walkthrough", "step-by-step", "inconsistencies"]
         if any(keyword in q.lower() for q in questions for keyword in strategy_keywords):
             return "Strategy & Full Walkthrough"
         
-        # If questions are more about specific facts
-        fact_keywords = ["what is", "who is", "when was", "list the", "how many", "what are"]
-        if all(any(keyword in q.lower() for keyword in fact_keywords) for q in questions):
-            return "Fact & Detail Extraction"
-            
-        return "Strategy & Full Walkthrough" # Default to a full strategy
+        # If no strategic keywords are found, default to fast fact extraction.
+        return "Fact & Detail Extraction"
 
     async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
-        """Executor for creating a comprehensive solution guide."""
+        """Executor for creating a comprehensive solution guide for complex tasks."""
         logger.info("Executing full strategy...")
+        # 1. Generate a single "Master Plan" by analyzing all questions together.
         master_plan = await self._generate_master_plan(questions)
         
+        # 2. Answer each question by intelligently referencing the master plan.
         tasks = [self._answer_question_from_plan(q, master_plan) for q in questions]
         return await asyncio.gather(*tasks)
 
     async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
         """Executor for answering direct, factual questions quickly."""
         logger.info("Executing fast fact extraction...")
-        # This uses the older, direct investigation method for speed.
-        tasks = [self.investigate_question(q) for q in questions]
+        # This uses the direct, high-speed RAG method.
+        tasks = [self._fast_answer(q) for q in questions]
         return await asyncio.gather(*tasks)
+
 
     # --- KEEP ALL YOUR OTHER METHODS ---
     # The methods like _generate_master_plan, _answer_question_from_plan,
