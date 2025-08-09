@@ -524,86 +524,117 @@ class AdvancedQueryAgent:
        
     # In app/agents/advanced_query_agent.py
     # In app/agents/advanced_query_agent.py
-
-# REPLACE the existing _generate_master_plan method
     async def _generate_master_plan(self, questions: List[str]) -> str:
-        """
-        FAST & ACCURATE: Final version using single-pass distillation.
-        """
-        logger.info("🧠 Generating fast and accurate master strategy...")
+        """EMERGENCY FIX: Faster master plan with pre-filtering"""
         
-        question_hash = hashlib.md5("".join(sorted(questions)).encode()).hexdigest()
-        doc_hash = hashlib.md5(str(self.vector_store.chunks[:5]).encode()).hexdigest()
-        cache_key = f"master_plan_{doc_hash}_{question_hash}"
+        # CHANGED: Only use first 3 questions to understand intent
+        sample_questions = questions[:3] if len(questions) > 3 else questions
         
-        cached_plan = await cache.get(cache_key)
-        if cached_plan:
-            logger.info("✅ Found cached master plan. Instant return!")
-            return cached_plan
+        # CHANGED: Get only the most relevant chunks upfront
+        all_keywords = " ".join(sample_questions)
+        relevant_chunks = self.vector_store.search(all_keywords, k=10)  # Reduced from 25
         
-        distilled_cache_key = f"distilled_{doc_hash}_{question_hash}"
-        distilled_context = await cache.get(distilled_cache_key)
+        # CHANGED: Much shorter context
+        context = "\n---\n".join([chunk[0][:500] for chunk in relevant_chunks[:5]])
         
-        if not distilled_context:
-            logger.info("No cached context found. Performing one-time distillation...")
-            all_question_text = " ".join(questions)
-            candidate_chunks = self.vector_store.search(all_question_text, k=25)
-            raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
-            
-            # --- CHANGED: Call the new, faster distillation method ---
-            distilled_context = await self._distill_context_optimized(questions, raw_context)
-            
-            await cache.set(distilled_cache_key, distilled_context, ttl=14400)
-        else:
-            logger.info("✅ Using cached distilled context")
-        
-        question_list = "\n- ".join(questions)
-        
-        prompt = f"""You are an expert AI strategist. Based on the CRITICAL CONTEXT, create a step-by-step action plan.
+        # CHANGED: Simpler, faster prompt
+        prompt = f"""Based on this context, create a BRIEF action plan to answer user questions.
 
-    CRITICAL CONTEXT:
-    {distilled_context}
+    CONTEXT: {context[:2000]}
 
-    USER QUESTIONS:
-    - {question_list}
+    QUESTIONS (sample): {' | '.join(sample_questions)}
 
-    IMPORTANT: Generate your plan using this exact format for fastest processing:
-    STEP 1: [Action]
-    STEP 2: [Action]
-    (Continue as needed)
-
-    YOUR TASK: Generate the definitive plan now."""
+    Generate 3-5 key steps. Be concise:"""
         
         try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
-            
-            # --- CHANGED: Adjusted timeout for reliability ---
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)  # Use FAST model
             response = await asyncio.wait_for(
-                model.generate_content_async(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.0,
-                        'max_output_tokens': 1000,
-                        'candidate_count': 1,
-                        'top_k': 40,
-                        'top_p': 0.95
-                    }
-                ),
-                timeout=10.0  # A more realistic 10-second timeout
+                model.generate_content_async(prompt, 
+                    generation_config={'temperature': 0.0, 'max_output_tokens': 300}),
+                timeout=5.0  # Strict 5 second timeout
             )
+            return response.text
+        except:
+            return "Quick plan: Extract facts -> Match patterns -> Generate answers"
+# REPLACE the existing _generate_master_plan method
+    # async def _generate_master_plan(self, questions: List[str]) -> str:
+    #     """
+    #     FAST & ACCURATE: Final version using single-pass distillation.
+    #     """
+    #     logger.info("🧠 Generating fast and accurate master strategy...")
+        
+    #     question_hash = hashlib.md5("".join(sorted(questions)).encode()).hexdigest()
+    #     doc_hash = hashlib.md5(str(self.vector_store.chunks[:5]).encode()).hexdigest()
+    #     cache_key = f"master_plan_{doc_hash}_{question_hash}"
+        
+    #     cached_plan = await cache.get(cache_key)
+    #     if cached_plan:
+    #         logger.info("✅ Found cached master plan. Instant return!")
+    #         return cached_plan
+        
+    #     distilled_cache_key = f"distilled_{doc_hash}_{question_hash}"
+    #     distilled_context = await cache.get(distilled_cache_key)
+        
+    #     if not distilled_context:
+    #         logger.info("No cached context found. Performing one-time distillation...")
+    #         all_question_text = " ".join(questions)
+    #         candidate_chunks = self.vector_store.search(all_question_text, k=25)
+    #         raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
             
-            master_plan = response.text
-            await cache.set(cache_key, master_plan, ttl=14400)
+    #         # --- CHANGED: Call the new, faster distillation method ---
+    #         distilled_context = await self._distill_context_optimized(questions, raw_context)
             
-            logger.info("✅ Master plan generated and cached successfully")
-            return master_plan
+    #         await cache.set(distilled_cache_key, distilled_context, ttl=14400)
+    #     else:
+    #         logger.info("✅ Using cached distilled context")
+        
+    #     question_list = "\n- ".join(questions)
+        
+    #     prompt = f"""You are an expert AI strategist. Based on the CRITICAL CONTEXT, create a step-by-step action plan.
+
+    # CRITICAL CONTEXT:
+    # {distilled_context}
+
+    # USER QUESTIONS:
+    # - {question_list}
+
+    # IMPORTANT: Generate your plan using this exact format for fastest processing:
+    # STEP 1: [Action]
+    # STEP 2: [Action]
+    # (Continue as needed)
+
+    # YOUR TASK: Generate the definitive plan now."""
+        
+    #     try:
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
             
-        except asyncio.TimeoutError:
-            logger.warning("Master plan generation timed out, using fallback.")
-            return "Quick plan: Check document -> Extract information -> Answer questions directly"
-        except Exception as e:
-            logger.error(f"Failed to generate master plan: {e}")
-            return "Error during plan generation. Proceeding with direct answers."
+    #         # --- CHANGED: Adjusted timeout for reliability ---
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.0,
+    #                     'max_output_tokens': 1000,
+    #                     'candidate_count': 1,
+    #                     'top_k': 40,
+    #                     'top_p': 0.95
+    #                 }
+    #             ),
+    #             timeout=10.0  # A more realistic 10-second timeout
+    #         )
+            
+    #         master_plan = response.text
+    #         await cache.set(cache_key, master_plan, ttl=14400)
+            
+    #         logger.info("✅ Master plan generated and cached successfully")
+    #         return master_plan
+            
+    #     except asyncio.TimeoutError:
+    #         logger.warning("Master plan generation timed out, using fallback.")
+    #         return "Quick plan: Check document -> Extract information -> Answer questions directly"
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate master plan: {e}")
+    #         return "Error during plan generation. Proceeding with direct answers."
 # REPLACE the _generate_master_plan method
     # async def _generate_master_plan(self, questions: List[str]) -> str:
     #     """
@@ -1289,68 +1320,196 @@ class AdvancedQueryAgent:
     # In app/agents/advanced_query_agent.py
 
 # REPLACE the existing _batch_answer_from_plan method
+    # async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
+    #     """
+    #     Generate all answers in a single AI call - now more robust.
+    #     """
+    #     questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
+        
+    #     # --- CHANGED: More explicit prompt to enforce the output format ---
+    #     prompt = f"""Based on the MASTER PLAN, answer ALL of the following QUESTIONS concisely.
+
+    # MASTER PLAN:
+    # {master_plan}
+
+    # QUESTIONS:
+    # {questions_formatted}
+
+    # IMPORTANT: You MUST generate answers in this exact format, with each answer on a new line:
+    # A1: [answer to Q1]
+    # A2: [answer to Q2]
+    # (continue for all questions)
+
+    # ANSWERS:"""
+        
+    #     try:
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+            
+    #         # --- CHANGED: Increased timeout for more complex batch jobs ---
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.0,
+    #                     'max_output_tokens': 2048,  # Increased token limit for more answers
+    #                     'top_k': 40,
+    #                     'top_p': 0.95
+    #                 }
+    #             ),
+    #             timeout=15.0  # Increased from 8.0 to 15.0 seconds
+    #         )
+            
+    #         # --- CHANGED: More robust parsing logic ---
+    #         answers = {}
+    #         text_response = response.text.strip()
+            
+    #         for i, question in enumerate(questions):
+    #             # Use regex to find the answer corresponding to each question number
+    #             pattern = re.compile(rf'^A{i+1}:\s*(.*)', re.MULTILINE)
+    #             match = pattern.search(text_response)
+                
+    #             if match:
+    #                 answers[question] = match.group(1).strip()
+    #             else:
+    #                 answers[question] = "Answer not found in batch response. The model may have deviated from the required format."
+
+    #         return answers
+            
+    #     except Exception as e:
+    #         logger.error(f"Batch answer generation failed: {e}", exc_info=True)
+    #         # Fallback to individual generation remains as a safety net
+    #         answers = {}
+    #         for q in questions:
+    #             answers[q] = await self._single_answer_from_plan(q, master_plan)
+    #         return answers
+
+    def _validate_and_fix_answer(self, question: str, answer: str) -> str:
+        """Fix common answer problems"""
+        
+        # Fix cut-off answers
+        if len(answer) < 50 or answer.count('.') == 0:
+            return f"Based on the document, {answer}. Please refer to the source for complete details."
+        
+        # Fix garbled text
+        if answer.count(answer[:20]) > 2:  # Repeated text
+            # Take only first occurrence
+            clean = answer[:answer.index(answer[:20], 20)]
+            return clean if len(clean) > 50 else "The information requested cannot be clearly extracted from the document."
+        
+        # Ensure completeness
+        if not answer.strip().endswith(('.', '!', '?')):
+            answer = answer.strip() + "."
+        
+        return answer
+
+    # async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
+    #     """FIXED: Ensure complete answers"""
+        
+    #     questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
+        
+    #     prompt = f"""Based on the plan, provide COMPLETE, NATURAL answers to ALL questions.
+
+    # PLAN: {master_plan}
+
+    # QUESTIONS:
+    # {questions_formatted}
+
+    # IMPORTANT: 
+    # - Each answer must be complete (no cutting off mid-sentence)
+    # - Use natural, conversational language
+    # - Include reasoning where applicable
+    # - Format: A1: [complete answer]\n A2: [complete answer] etc.
+
+    # ANSWERS:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+        
+    #     # CHANGED: Increased token limit and timeout
+    #     response = await asyncio.wait_for(
+    #         model.generate_content_async(
+    #             prompt,
+    #             generation_config={
+    #                 'temperature': 0.1,
+    #                 'max_output_tokens': 3000,  # Increased significantly
+    #                 'top_k': 50,
+    #                 'top_p': 0.95
+    #             }
+    #         ),
+    #         timeout=20.0  # Increased timeout
+    #     )
+        
+    #     # Better parsing
+    #     answers = {}
+    #     text = response.text.strip()
+        
+    #     for i, question in enumerate(questions):
+    #         # More robust extraction
+    #         pattern = rf'A{i+1}:\s*(.+?)(?=A\d+:|$)'
+    #         match = re.search(pattern, text, re.DOTALL)
+    #         if match:
+    #             answer = match.group(1).strip()
+    #             # Ensure answer is complete
+    #             if not answer.endswith(('.', '!', '?', '"')):
+    #                 answer += "."
+    #             answers[question] = answer
+    #         else:
+    #             answers[question] = await self._fast_comprehensive_answer(question)
+        
+    #     return answers
     async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
-        """
-        Generate all answers in a single AI call - now more robust.
-        """
+        """FIXED: Ensure complete answers with validation"""
+        
         questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
         
-        # --- CHANGED: More explicit prompt to enforce the output format ---
-        prompt = f"""Based on the MASTER PLAN, answer ALL of the following QUESTIONS concisely.
+        prompt = f"""Based on the plan, provide COMPLETE, NATURAL answers to ALL questions.
 
-    MASTER PLAN:
-    {master_plan}
+    PLAN: {master_plan}
 
     QUESTIONS:
     {questions_formatted}
 
-    IMPORTANT: You MUST generate answers in this exact format, with each answer on a new line:
-    A1: [answer to Q1]
-    A2: [answer to Q2]
-    (continue for all questions)
+    IMPORTANT: 
+    - Each answer must be complete (no cutting off mid-sentence)
+    - Use natural, conversational language
+    - Include reasoning where applicable
+    - Format: A1: [complete answer]\n A2: [complete answer] etc.
 
     ANSWERS:"""
         
-        try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
-            
-            # --- CHANGED: Increased timeout for more complex batch jobs ---
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.0,
-                        'max_output_tokens': 2048,  # Increased token limit for more answers
-                        'top_k': 40,
-                        'top_p': 0.95
-                    }
-                ),
-                timeout=15.0  # Increased from 8.0 to 15.0 seconds
-            )
-            
-            # --- CHANGED: More robust parsing logic ---
-            answers = {}
-            text_response = response.text.strip()
-            
-            for i, question in enumerate(questions):
-                # Use regex to find the answer corresponding to each question number
-                pattern = re.compile(rf'^A{i+1}:\s*(.*)', re.MULTILINE)
-                match = pattern.search(text_response)
-                
-                if match:
-                    answers[question] = match.group(1).strip()
-                else:
-                    answers[question] = "Answer not found in batch response. The model may have deviated from the required format."
-
-            return answers
-            
-        except Exception as e:
-            logger.error(f"Batch answer generation failed: {e}", exc_info=True)
-            # Fallback to individual generation remains as a safety net
-            answers = {}
-            for q in questions:
-                answers[q] = await self._single_answer_from_plan(q, master_plan)
-            return answers
+        model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+        
+        response = await asyncio.wait_for(
+            model.generate_content_async(
+                prompt,
+                generation_config={
+                    'temperature': 0.1,
+                    'max_output_tokens': 3000,
+                    'top_k': 50,
+                    'top_p': 0.95
+                }
+            ),
+            timeout=20.0
+        )
+        
+        # Better parsing with VALIDATION
+        answers = {}
+        text = response.text.strip()
+        
+        for i, question in enumerate(questions):
+            pattern = rf'A{i+1}:\s*(.+?)(?=A\d+:|$)'
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                answer = match.group(1).strip()
+                # 🔥 CRITICAL: Apply validation here
+                validated_answer = self._validate_and_fix_answer(question, answer)
+                answers[question] = validated_answer
+            else:
+                # Fallback with validation
+                fallback_answer = await self._fast_comprehensive_answer(question)
+                validated_answer = self._validate_and_fix_answer(question, fallback_answer)
+                answers[question] = validated_answer
+        
+        return answers
 
     # async def run(self, request: QueryRequest) -> QueryResponse:
     #     """Main entry point for the detective agent."""
@@ -1721,7 +1880,16 @@ class AdvancedQueryAgent:
     #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     
     # In app/agents/advanced_query_agent.py
-
+    async def _execute_direct_document_qa(self, questions: List[str]) -> List[str]:
+        """
+        Direct Document Q&A: Uses investigation for each question without master plan.
+        Better than fact extraction for complex questions, faster than full strategy.
+        """
+        logger.info("📚 Executing Direct Document Q&A...")
+        
+        # Use the investigation approach which provides better answers than simple RAG
+        tasks = [self.investigate_question(q) for q in questions]
+        return await asyncio.gather(*tasks)
 # REPLACE the existing run method
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
@@ -2149,24 +2317,209 @@ class AdvancedQueryAgent:
     #     finally:
     #         if hasattr(self, '_batch_answers'):
     #             del self._batch_answers
-    async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
-        """
-        The STRATEGIC PATH: Executor for creating a comprehensive solution guide.
-        """
-        logger.info("🤔 Executing Strategic Path...")
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """
+    #     The STRATEGIC PATH: Executor for creating a comprehensive solution guide.
+    #     """
+    #     logger.info("🤔 Executing Strategic Path...")
         
-        # Generate the high-quality master plan (with distillation and caching)
+    #     # Generate the high-quality master plan (with distillation and caching)
+    #     master_plan = await self._generate_master_plan(questions)
+        
+    #     # If plan generation fails, this path will not produce useful results quickly
+    #     if "Quick plan" in master_plan or "Error generating plan" in master_plan:
+    #         # This allows the direct path to win by not producing a valid result
+    #         raise asyncio.CancelledError("Master plan failed, yielding to direct path.")
+            
+    #     # Use the fast, robust batching method to get answers from the plan
+    #     batch_answers = await self._batch_answer_from_plan(questions, master_plan)
+    #     return [batch_answers.get(q, "Error processing question.") for q in questions]
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """
+    #     The STRATEGIC PATH: Executor for creating a comprehensive solution guide.
+    #     """
+    #     logger.info("🤔 Executing Strategic Path...")
+        
+    #     # Generate the high-quality master plan (with distillation and caching)
+    #     master_plan = await self._generate_master_plan(questions)
+        
+    #     # If plan generation fails, this path will not produce useful results quickly
+    #     if "Quick plan" in master_plan or "Error generating plan" in master_plan:
+    #         # --- CHANGED: Fall back to Direct Document Q&A instead of fact extraction ---
+    #         logger.warning("Master plan failed. Falling back to Direct Document Q&A.")
+    #         return await self._execute_direct_document_qa(questions)
+    #         # --- END OF CHANGE ---
+            
+    #     # Use the fast, robust batching method to get answers from the plan
+    #     batch_answers = await self._batch_answer_from_plan(questions, master_plan)
+    #     return [batch_answers.get(q, "Error processing question.") for q in questions]
+    
+    async def _execute_direct_document_qa_fast(self, questions: List[str]) -> List[str]:
+        """
+        OPTIMIZED: Direct Q&A with parallel processing and no investigation overhead
+        """
+        logger.info("📚 Executing Fast Direct Document Q&A...")
+        
+        # CHANGED: Skip investigation, use direct RAG with better context
+        async def enhanced_answer(question: str) -> str:
+            # Get more chunks for better context (like investigation does)
+            search_results = self.vector_store.search(question, k=15)
+            if not search_results:
+                return "No relevant information found."
+            
+            # Use top chunks with better coverage
+            chunks = [result[0] for result in search_results[:8]]
+            
+            # Direct answer generation with precise model for quality
+            return await self.rag_pipeline._generate_answer(
+                question, chunks, 
+                is_complex=True  # Always treat as complex for better answers
+            )
+        
+        # Process all questions in parallel for speed
+        tasks = [enhanced_answer(q) for q in questions]
+        return await asyncio.gather(*tasks)
+    
+    
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """
+    #     The STRATEGIC PATH: Executor for creating a comprehensive solution guide.
+    #     """
+    #     logger.info("🤔 Executing Strategic Path...")
+        
+    #     # Generate the high-quality master plan (with distillation and caching)
+    #     master_plan = await self._generate_master_plan(questions)
+        
+    #     # If plan generation fails, this path will not produce useful results quickly
+    #     if "Quick plan" in master_plan or "Error generating plan" in master_plan:
+    #         # --- CHANGED: Use optimized Direct Q&A - better than fact extraction, faster than investigation ---
+    #         logger.warning("Master plan failed. Using Fast Direct Document Q&A.")
+    #         return await self._execute_direct_document_qa_fast(questions)
+    #         # --- END OF CHANGE ---
+            
+    #     # Use the fast, robust batching method to get answers from the plan
+    #     batch_answers = await self._batch_answer_from_plan(questions, master_plan)
+    #     return [batch_answers.get(q, "Error processing question.") for q in questions]
+    async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+        """OPTIMIZED: Better fallback handling"""
+        logger.info("Executing strategic path...")
+        
         master_plan = await self._generate_master_plan(questions)
         
-        # If plan generation fails, this path will not produce useful results quickly
-        if "Quick plan" in master_plan or "Error generating plan" in master_plan:
-            # This allows the direct path to win by not producing a valid result
-            raise asyncio.CancelledError("Master plan failed, yielding to direct path.")
+        if "Quick plan" in master_plan or "Error" in master_plan:
+            # CHANGED: Use hybrid approach - fast but comprehensive
+            logger.warning("Master plan weak. Using enhanced hybrid approach.")
             
-        # Use the fast, robust batching method to get answers from the plan
+            # Group similar questions for batch processing
+            factual_qs = [q for q in questions if any(w in q.lower() for w in ['what', 'list', 'which', 'how many'])]
+            complex_qs = [q for q in questions if q not in factual_qs]
+            
+            # Process factual questions fast
+            factual_answers = await asyncio.gather(*[self._fast_comprehensive_answer(q) for q in factual_qs])
+            
+            # Process complex questions with more context
+            complex_answers = await asyncio.gather(*[self._deep_answer(q) for q in complex_qs])
+            
+            # Reconstruct in original order
+            answers = []
+            for q in questions:
+                if q in factual_qs:
+                    answers.append(factual_answers[factual_qs.index(q)])
+                else:
+                    answers.append(complex_answers[complex_qs.index(q)])
+            return answers
+        
+        # Normal batch processing if plan is good
         batch_answers = await self._batch_answer_from_plan(questions, master_plan)
-        return [batch_answers.get(q, "Error processing question.") for q in questions]
+        return [batch_answers.get(q, "Unable to process") for q in questions]
+    # async def _fast_comprehensive_answer(self, question: str) -> str:
+    #     """Fast but complete answers"""
+    #     # Get good context quickly
+    #     results = self.vector_store.search(question, k=10)
+    #     chunks = [r[0] for r in results[:5]]
+    #     context = "\n---\n".join(chunks)
+        
+    #     prompt = f"""Answer this question completely and naturally:
 
+    # Context: {context[:3000]}
+
+    # Question: {question}
+
+    # Provide a complete, human-readable answer:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    #     response = await model.generate_content_async(
+    #         prompt,
+    #         generation_config={'temperature': 0.1, 'max_output_tokens': 400}
+    #     )
+    #     return response.text.strip()
+    async def _fast_comprehensive_answer(self, question: str) -> str:
+        """Fast but complete answers with validation"""
+        results = self.vector_store.search(question, k=10)
+        chunks = [r[0] for r in results[:5]]
+        context = "\n---\n".join(chunks)
+        
+        prompt = f"""Answer this question completely and naturally:
+
+    Context: {context[:3000]}
+
+    Question: {question}
+
+    Provide a complete, human-readable answer:"""
+        
+        model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+        response = await model.generate_content_async(
+            prompt,
+            generation_config={'temperature': 0.1, 'max_output_tokens': 400}
+        )
+        
+        # 🔥 CRITICAL: Apply validation
+        raw_answer = response.text.strip()
+        return self._validate_and_fix_answer(question, raw_answer)
+    
+    # async def _deep_answer(self, question: str) -> str:
+    #     """Deeper analysis for complex questions"""
+    #     # More comprehensive search
+    #     results = self.vector_store.search(question, k=20)
+    #     chunks = [r[0] for r in results[:10]]
+    #     context = "\n---\n".join(chunks)
+        
+    #     prompt = f"""Provide a comprehensive answer with reasoning:
+
+    # Context: {context[:5000]}
+
+    # Question: {question}
+
+    # Answer with clear explanation and all relevant details:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+    #     response = await model.generate_content_async(
+    #         prompt,
+    #         generation_config={'temperature': 0.1, 'max_output_tokens': 600}
+    #     )
+    async def _deep_answer(self, question: str) -> str:
+        """Deeper analysis for complex questions with validation"""
+        results = self.vector_store.search(question, k=20)
+        chunks = [r[0] for r in results[:10]]
+        context = "\n---\n".join(chunks)
+        
+        prompt = f"""Provide a comprehensive answer with reasoning:
+
+    Context: {context[:5000]}
+
+    Question: {question}
+
+    Answer with clear explanation and all relevant details:"""
+        
+        model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+        response = await model.generate_content_async(
+            prompt,
+            generation_config={'temperature': 0.1, 'max_output_tokens': 600}
+        )
+        
+        # 🔥 CRITICAL: Apply validation
+        raw_answer = response.text.strip()
+        return self._validate_and_fix_answer(question, raw_answer)
     # --- KEEP ALL YOUR OTHER METHODS ---
     # The methods like _generate_master_plan, _answer_question_from_plan,
     # investigate_question, etc., are now the "tools" that the executors use.
@@ -2405,6 +2758,7 @@ class AdvancedQueryAgent:
             
             # Clean and cache
             final_answer = self._clean_text(final_answer)
+            final_answer = self._validate_and_fix_answer(question, final_answer) 
             self.investigation_cache[cache_key] = final_answer
             
             return final_answer
