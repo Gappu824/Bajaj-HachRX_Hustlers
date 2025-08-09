@@ -1427,21 +1427,47 @@ class HybridRAGPipeline:
     
     
     
-    def _is_complex_question(self, question: str) -> bool:
-        """Detect if question requires complex reasoning"""
-        complex_indicators = [
-            'calculate', 'compare', 'analyze', 'explain in detail',
-            'list all', 'how many', 'what is the total', 'summarize',
-            'what are the differences', 'evaluate', 'assess'
-        ]
+    # def _is_complex_question(self, question: str) -> bool:
+    #     """Detect if question requires complex reasoning"""
+    #     complex_indicators = [
+    #         'calculate', 'compare', 'analyze', 'explain in detail',
+    #         'list all', 'how many', 'what is the total', 'summarize',
+    #         'what are the differences', 'evaluate', 'assess'
+    #     ]
         
-        question_lower = question.lower()
-        return any(indicator in question_lower for indicator in complex_indicators)
+    #     question_lower = question.lower()
+    #     return any(indicator in question_lower for indicator in complex_indicators)
     
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=1, min=2, max=5)
-    )
+    # @retry(
+    #     stop=stop_after_attempt(2),
+    #     wait=wait_exponential(multiplier=1, min=2, max=5)
+    # )
+
+    def _is_complex_question(self, question: str) -> bool:
+        """Detect if question requires complex reasoning, now with pattern recognition."""
+        question_lower = question.lower()
+        
+        # --- CHANGED: Added pattern matching for implicitly complex queries ---
+        # Keywords that signal a need for detailed, multi-step answers
+        complex_indicators = [
+            'calculate', 'compare', 'analyze', 'explain', 'list all', 
+            'how many', 'what is the total', 'summarize', 'what are the differences',
+            'evaluate', 'assess', 'trace the process', 'logic flow'
+        ]
+        if any(indicator in question_lower for indicator in complex_indicators):
+            return True
+
+        # --- CHANGED: Added regex for questions that imply a process ---
+        # Catches questions like "What is my flight number?" which require a procedure
+        process_patterns = [
+            r'what is my \w+',
+            r'how do i find \w+',
+            r'what are the steps to \w+'
+        ]
+        if any(re.search(pattern, question_lower) for pattern in process_patterns):
+            return True
+        
+        return False
     async def _generate_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
         """Generate answer using Gemini"""
         
