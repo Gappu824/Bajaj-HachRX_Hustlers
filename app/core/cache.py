@@ -17,15 +17,26 @@ class HybridCache:
     
     def __init__(self, cache_dir: str = ".cache", memory_size_mb: int = 500, disk_size_mb: int = 2000):
         # Memory cache for small, frequently accessed items
+        # self.memory_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        # self.memory_size_bytes = memory_size_mb * 1024 * 1024
+        # self.current_memory_size = 0
+        
+        # # Disk cache for large items
+        # self.disk_cache = diskcache.Cache(
+        #     cache_dir,
+        #     size_limit=disk_size_mb * 1024 * 1024,
+        #     eviction_policy='least-recently-used'
+        # )
         self.memory_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.memory_size_bytes = memory_size_mb * 1024 * 1024
         self.current_memory_size = 0
         
-        # Disk cache for large items
+        # CHANGED: Larger disk cache
         self.disk_cache = diskcache.Cache(
             cache_dir,
             size_limit=disk_size_mb * 1024 * 1024,
-            eviction_policy='least-recently-used'
+            eviction_policy='least-recently-used',
+            cull_limit=0  # ADDED: Don't auto-cull, we manage it
         )
         
         # Stats

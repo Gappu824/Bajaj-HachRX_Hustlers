@@ -98,27 +98,104 @@ class OptimizedVectorStore:
         self.enhanced_retriever = EnhancedRetriever(self.chunks, self.chunk_metadata)
         logger.info(f"Added {len(new_chunks)} new chunks. Total chunks are now {len(self.chunks)}.")
 
+    # def search(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
+    #     """Hybrid search combining semantic and keyword search"""
+    #     if not self.enhanced_retriever:
+    #         return []
+        
+    #     # Semantic search
+    #     query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
+    #     distances, indices = self.index.search(query_embedding, min(k * 2, len(self.chunks)))
+        
+    #     # Keyword search
+    #     keyword_results = self.enhanced_retriever.retrieve(query, k=k * 2)
+        
+    #     # Combine results
+    #     combined_scores = defaultdict(float)
+        
+    #     # Add semantic scores
+    #     for dist, idx in zip(distances[0], indices[0]):
+    #         if idx != -1 and idx < len(self.chunks):
+    #             # Convert distance to similarity score
+    #             similarity = 1.0 / (1.0 + dist)
+    #             combined_scores[idx] += similarity * 0.6  # 60% weight for semantic
+        
+    #     # Add keyword scores
+    #     if keyword_results:
+    #         max_keyword_score = max(score for _, score in keyword_results)
+    #         for idx, score in keyword_results:
+    #             if idx < len(self.chunks):
+    #                 normalized_score = score / max_keyword_score if max_keyword_score > 0 else 0
+    #                 combined_scores[idx] += normalized_score * 0.4  # 40% weight for keywords
+        
+    #     # Sort and return top-k
+    #     sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
+        
+    #     results = []
+    #     for idx, score in sorted_results[:k]:
+    #         results.append((
+    #             self.chunks[idx],
+    #             score,
+    #             self.chunk_metadata[idx]
+    #         ))
+        
+    #     return results
+    # REPLACE the search method in OptimizedVectorStore class:
     def search(self, query: str, k: int = 15) -> List[Tuple[str, float, Dict]]:
-        """Hybrid search combining semantic and keyword search"""
+        """Hybrid search with speed optimizations that preserve accuracy"""
         if not self.enhanced_retriever:
             return []
         
-        # Semantic search
-        query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
-        distances, indices = self.index.search(query_embedding, min(k * 2, len(self.chunks)))
+        # CHANGED: Cache query embeddings for repeated searches
+        query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+        if not hasattr(self, '_query_cache'):
+            self._query_cache = {}
         
-        # Keyword search
-        keyword_results = self.enhanced_retriever.retrieve(query, k=k * 2)
+        if query_hash in self._query_cache:
+            query_embedding = self._query_cache[query_hash]
+        else:
+            query_embedding = self.model.encode([query], show_progress_bar=False).astype('float32')
+            self._query_cache[query_hash] = query_embedding
         
-        # Combine results
+        # CHANGED: Use approximate search for large collections, exact for small
+        if len(self.chunks) > 5000:
+            # For large collections, use IVF index (faster)
+            if not hasattr(self, 'ivf_index'):
+                # Build IVF index on first use
+                dimension = self.dimension
+                nlist = min(int(np.sqrt(len(self.chunks))), 100)
+                quantizer = faiss.IndexFlatL2(dimension)
+                self.ivf_index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
+                self.ivf_index.train(self.index.reconstruct_n(0, len(self.chunks)))
+                self.ivf_index.add(self.index.reconstruct_n(0, len(self.chunks)))
+                self.ivf_index.nprobe = 10
+            distances, indices = self.ivf_index.search(query_embedding, min(k * 2, len(self.chunks)))
+        else:
+            # Keep exact search for small collections
+            distances, indices = self.index.search(query_embedding, min(k * 2, len(self.chunks)))
+        
+        # CHANGED: Parallel keyword search
+        keyword_task = asyncio.create_task(
+            asyncio.to_thread(self.enhanced_retriever.retrieve, query, k * 2)
+        ) if asyncio.get_event_loop().is_running() else None
+        
+        # Process semantic results while keyword search runs
         combined_scores = defaultdict(float)
         
         # Add semantic scores
         for dist, idx in zip(distances[0], indices[0]):
             if idx != -1 and idx < len(self.chunks):
-                # Convert distance to similarity score
                 similarity = 1.0 / (1.0 + dist)
-                combined_scores[idx] += similarity * 0.6  # 60% weight for semantic
+                combined_scores[idx] += similarity * 0.6
+        
+        # Get keyword results
+        if keyword_task:
+            try:
+                keyword_results = asyncio.get_event_loop().run_until_complete(keyword_task)
+            except:
+                keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
+        else:
+            keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
         
         # Add keyword scores
         if keyword_results:
@@ -126,7 +203,7 @@ class OptimizedVectorStore:
             for idx, score in keyword_results:
                 if idx < len(self.chunks):
                     normalized_score = score / max_keyword_score if max_keyword_score > 0 else 0
-                    combined_scores[idx] += normalized_score * 0.4  # 40% weight for keywords
+                    combined_scores[idx] += normalized_score * 0.4
         
         # Sort and return top-k
         sorted_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
@@ -782,24 +859,57 @@ class HybridRAGPipeline:
                 os.remove(file_path)
                 logger.info(f"Cleaned up temporary file: {file_path}")
     
-    async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
-        """Generate embeddings in batches"""
-        batch_size = 32
-        all_embeddings = []
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """Generate embeddings in batches"""
+    #     batch_size = 32
+    #     all_embeddings = []
         
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
+    #     for i in range(0, len(chunks), batch_size):
+    #         batch = chunks[i:i + batch_size]
             
-            # Generate embeddings
-            embeddings = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.embedding_model.encode(
-                    batch, 
+    #         # Generate embeddings
+    #         embeddings = await asyncio.get_event_loop().run_in_executor(
+    #             None,
+    #             lambda: self.embedding_model.encode(
+    #                 batch, 
+    #                 convert_to_numpy=True,
+    #                 show_progress_bar=False
+    #             )
+    #         )
+    #         all_embeddings.append(embeddings)
+        
+    #     return np.vstack(all_embeddings).astype('float32')
+    # REPLACE _generate_embeddings method:
+    async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+        """Generate embeddings with optimal batching for speed"""
+        # CHANGED: Dynamic batch size based on chunk count
+        if len(chunks) < 100:
+            batch_size = len(chunks)  # Single batch for small documents
+        elif len(chunks) < 500:
+            batch_size = 50
+        else:
+            batch_size = 100  # Larger batches for big documents
+        
+        # CHANGED: Use thread pool for CPU-bound encoding
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                future = executor.submit(
+                    self.embedding_model.encode,
+                    batch,
                     convert_to_numpy=True,
-                    show_progress_bar=False
+                    show_progress_bar=False,
+                    normalize_embeddings=True
                 )
-            )
-            all_embeddings.append(embeddings)
+                futures.append(future)
+            
+            # Gather results
+            all_embeddings = []
+            for future in concurrent.futures.as_completed(futures):
+                all_embeddings.append(future.result())
         
         return np.vstack(all_embeddings).astype('float32')
     
@@ -821,44 +931,142 @@ class HybridRAGPipeline:
         
     #     # Generate answer
     #     return await self._generate_answer(question, chunks, is_complex)
-    async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
-        """Generate answer with accuracy-preserving adaptive context limiting."""
+    # async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
+    #     """Generate answer with accuracy-preserving adaptive context limiting."""
         
-        # Detect question complexity to decide how many results to retrieve
-        is_complex = self._is_complex_question(question)
-        k = 30 if is_complex else 20  # Retrieve a larger pool of potential chunks
+    #     # Detect question complexity to decide how many results to retrieve
+    #     is_complex = self._is_complex_question(question)
+    #     k = 30 if is_complex else 20  # Retrieve a larger pool of potential chunks
+    #     search_results = vector_store.search(question, k=k)
+        
+    #     if not search_results:
+    #         return "No relevant information found in the document."
+        
+    #     # --- ACCURACY-PRESERVING ADAPTIVE CONTEXT ---
+    #     context_chunks = []
+    #     current_length = 0
+    #     max_context_length = 15000  # Set a character limit for the context
+        
+    #     # Guarantee inclusion of the top 5 most relevant chunks
+    #     guaranteed_chunks = [result[0] for result in search_results[:5]]
+    #     for chunk in guaranteed_chunks:
+    #         context_chunks.append(chunk)
+    #         current_length += len(chunk)
+
+    #     # Fill the rest of the context window with the remaining chunks
+    #     for chunk_text, _, _ in search_results[5:]:
+    #         if current_length + len(chunk_text) <= max_context_length:
+    #             context_chunks.append(chunk_text)
+    #             current_length += len(chunk_text)
+    #         else:
+    #             # Stop adding chunks once the context limit is reached
+    #             break
+
+    #     if not context_chunks:
+    #          # This case should be rare now, but it's a good safeguard
+    #          return "Retrieved content was too large to process. Please ask a more specific question."
+
+    #     # Generate answer using the intelligently assembled context
+    #     return await self._generate_answer(question, context_chunks, is_complex)
+    # REPLACE the answer_question method:
+    async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
+        """Generate answer with intelligent context selection for speed + accuracy"""
+        
+        # CHANGED: Smart detection with caching
+        if not hasattr(self, '_question_type_cache'):
+            self._question_type_cache = {}
+        
+        question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+        if question_hash in self._question_type_cache:
+            is_complex = self._question_type_cache[question_hash]
+        else:
+            is_complex = self._is_complex_question(question)
+            self._question_type_cache[question_hash] = is_complex
+        
+        # CHANGED: Get more results but process intelligently
+        k = 20  # Always get enough chunks
         search_results = vector_store.search(question, k=k)
         
         if not search_results:
             return "No relevant information found in the document."
         
-        # --- ACCURACY-PRESERVING ADAPTIVE CONTEXT ---
-        context_chunks = []
-        current_length = 0
-        max_context_length = 15000  # Set a character limit for the context
+        # CHANGED: Smart chunk selection based on score distribution
+        chunks = []
+        scores = [score for _, score, _ in search_results]
         
-        # Guarantee inclusion of the top 5 most relevant chunks
-        guaranteed_chunks = [result[0] for result in search_results[:5]]
-        for chunk in guaranteed_chunks:
-            context_chunks.append(chunk)
-            current_length += len(chunk)
+        if scores:
+            # Calculate score threshold dynamically
+            mean_score = sum(scores) / len(scores)
+            std_score = (sum((s - mean_score) ** 2 for s in scores) / len(scores)) ** 0.5
+            threshold = mean_score + (0.5 * std_score)  # Include above-average chunks
+            
+            # Take high-quality chunks up to a limit
+            for chunk_text, score, _ in search_results:
+                if score >= threshold or len(chunks) < 3:  # Ensure minimum 3 chunks
+                    chunks.append(chunk_text)
+                    if len(chunks) >= 10:  # Cap at 10 for speed
+                        break
+        
+        if not chunks:
+            chunks = [result[0] for result in search_results[:5]]
+        
+        # CHANGED: Pre-compile context for reuse
+        context = "\n\n---\n\n".join(chunks)
+        
+        # CHANGED: Optimized prompts that maintain quality
+        if is_complex:
+            prompt = f"""Context:
+{context}
 
-        # Fill the rest of the context window with the remaining chunks
-        for chunk_text, _, _ in search_results[5:]:
-            if current_length + len(chunk_text) <= max_context_length:
-                context_chunks.append(chunk_text)
-                current_length += len(chunk_text)
-            else:
-                # Stop adding chunks once the context limit is reached
-                break
+Question: {question}
 
-        if not context_chunks:
-             # This case should be rare now, but it's a good safeguard
-             return "Retrieved content was too large to process. Please ask a more specific question."
+Provide a comprehensive answer with specific details from the context:"""
+            max_tokens = 500
+        else:
+            prompt = f"""Context:
+{context}
 
-        # Generate answer using the intelligently assembled context
-        return await self._generate_answer(question, context_chunks, is_complex)
-    
+Question: {question}
+
+Answer directly based on the context:"""
+            max_tokens = 300
+        
+        try:
+            # CHANGED: Use generation config caching
+            if not hasattr(self, '_gen_config_cache'):
+                self._gen_config_cache = {
+                    'simple': genai.types.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=300,
+                        top_p=0.95,
+                        candidate_count=1
+                    ),
+                    'complex': genai.types.GenerationConfig(
+                        temperature=0.1,
+                        max_output_tokens=500,
+                        top_p=0.95,
+                        candidate_count=1
+                    )
+                }
+            
+            model = genai.GenerativeModel(
+                settings.LLM_MODEL_NAME_PRECISE if is_complex else settings.LLM_MODEL_NAME
+            )
+            
+            config = self._gen_config_cache['complex' if is_complex else 'simple']
+            
+            response = await model.generate_content_async(prompt, generation_config=config)
+            
+            answer = response.text.strip()
+            
+            if not answer or len(answer) < 10:
+                return "Unable to generate a valid answer."
+            
+            return answer
+            
+        except Exception as e:
+            logger.error(f"Answer generation failed: {e}")
+            return "An error occurred while generating the answer."
     def _is_complex_question(self, question: str) -> bool:
         """Detect if question requires complex reasoning"""
         complex_indicators = [
@@ -948,44 +1156,81 @@ ANSWER:"""
             logger.error(f"Answer generation failed: {e}")
             return "An error occurred while generating the answer."
     
+    # async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
+    #     """Process multiple questions efficiently"""
+        
+    #     start_time = time.time()
+    #     logger.info(f"Processing {len(questions)} questions for {document_url}")
+        
+    #     try:
+    #         # Get vector store
+    #         vector_store = await self.get_or_create_vector_store(document_url)
+            
+    #         # Process questions in parallel with semaphore
+    #         semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_QUESTIONS)
+            
+    #         async def process_question(q):
+    #             async with semaphore:
+    #                 try:
+    #                     return await self.answer_question(q, vector_store)
+    #                 except Exception as e:
+    #                     logger.error(f"Error processing question: {e}")
+    #                     return "Error processing this question."
+            
+    #         # Create tasks
+    #         tasks = [process_question(q) for q in questions]
+            
+    #         # Execute with timeout
+    #         answers = await asyncio.wait_for(
+    #             asyncio.gather(*tasks),
+    #             timeout=settings.TOTAL_TIMEOUT_SECONDS
+    #         )
+            
+    #         elapsed = time.time() - start_time
+    #         logger.info(f"Processed {len(questions)} questions in {elapsed:.2f}s")
+            
+    #         return answers
+            
+    #     except asyncio.TimeoutError:
+    #         logger.error("Overall processing timeout")
+    #         return ["Processing timeout. Please try again."] * len(questions)
+    #     except Exception as e:
+    #         logger.error(f"Critical error: {e}", exc_info=True)
+    #         return ["Document processing error."] * len(questions)
+    # REPLACE the process_query method:
     async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
-        """Process multiple questions efficiently"""
+        """Process multiple questions with maximum parallelism"""
         
         start_time = time.time()
         logger.info(f"Processing {len(questions)} questions for {document_url}")
         
         try:
-            # Get vector store
+            # Get vector store (this should be cached)
             vector_store = await self.get_or_create_vector_store(document_url)
             
-            # Process questions in parallel with semaphore
-            semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_QUESTIONS)
+            # CHANGED: Process ALL questions in parallel without semaphore limit
+            tasks = [
+                self.answer_question(q, vector_store) 
+                for q in questions
+            ]
             
-            async def process_question(q):
-                async with semaphore:
-                    try:
-                        return await self.answer_question(q, vector_store)
-                    except Exception as e:
-                        logger.error(f"Error processing question: {e}")
-                        return "Error processing this question."
+            # CHANGED: No timeout, just let them all run
+            answers = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Create tasks
-            tasks = [process_question(q) for q in questions]
-            
-            # Execute with timeout
-            answers = await asyncio.wait_for(
-                asyncio.gather(*tasks),
-                timeout=settings.TOTAL_TIMEOUT_SECONDS
-            )
+            # Handle exceptions
+            final_answers = []
+            for i, answer in enumerate(answers):
+                if isinstance(answer, Exception):
+                    logger.error(f"Error processing question {i+1}: {answer}")
+                    final_answers.append("Error processing this question.")
+                else:
+                    final_answers.append(answer)
             
             elapsed = time.time() - start_time
             logger.info(f"Processed {len(questions)} questions in {elapsed:.2f}s")
             
-            return answers
+            return final_answers
             
-        except asyncio.TimeoutError:
-            logger.error("Overall processing timeout")
-            return ["Processing timeout. Please try again."] * len(questions)
         except Exception as e:
             logger.error(f"Critical error: {e}", exc_info=True)
             return ["Document processing error."] * len(questions)

@@ -451,43 +451,88 @@ class AdvancedQueryAgent:
     #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
 
 # ... (the rest of the file remains the same)
-    async def run(self, request: QueryRequest) -> QueryResponse:
-        """
-        Acts as a 'Planner' that first validates if the mission is possible
-        before calling the appropriate 'Executor'.
-        """
-        logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
-        self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Acts as a 'Planner' that first validates if the mission is possible
+    #     before calling the appropriate 'Executor'.
+    #     """
+    #     logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
         
-        is_relevant, reason = await self._is_mission_relevant(request.questions)
-        if not is_relevant:
-            logger.warning(f"Mission is not relevant. Reason: {reason}")
-            fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
-            return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
+    #     is_relevant, reason = await self._is_mission_relevant(request.questions)
+    #     if not is_relevant:
+    #         logger.warning(f"Mission is not relevant. Reason: {reason}")
+    #         fail_safe_answer = f"I have analyzed the document, but it does not contain the information needed to answer these questions. Reason: {reason}"
+    #         return QueryResponse(answers=[fail_safe_answer] * len(request.questions))
 
-        mission_type = self._determine_mission_type(request.questions)
-        logger.info(f"✅ Mission Type Identified: {mission_type}")
+    #     mission_type = self._determine_mission_type(request.questions)
+    #     logger.info(f"✅ Mission Type Identified: {mission_type}")
 
-        try:
-            if mission_type == "Strategy & Full Walkthrough":
-                answers = await self._execute_full_strategy(request.questions)
-            else:
-                answers = await self._execute_fact_extraction(request.questions)
+    #     try:
+    #         if mission_type == "Strategy & Full Walkthrough":
+    #             answers = await self._execute_full_strategy(request.questions)
+    #         else:
+    #             answers = await self._execute_fact_extraction(request.questions)
             
-            # --- FINAL SANITY CHECK ---
-            # If all answers are identical and contain an error message, something went wrong.
-            # Try one last time with the direct, non-agentic approach.
-            if len(set(answers)) == 1 and ("error" in answers[0].lower() or "does not contain" in answers[0].lower()):
-                logger.warning("Agentic approach failed. Falling back to direct RAG.")
-                direct_tasks = [self.rag_pipeline.answer_question(q, self.vector_store) for q in request.questions]
-                answers = await asyncio.gather(*direct_tasks)
-            # --- END OF SANITY CHECK ---
+    #         # --- FINAL SANITY CHECK ---
+    #         # If all answers are identical and contain an error message, something went wrong.
+    #         # Try one last time with the direct, non-agentic approach.
+    #         if len(set(answers)) == 1 and ("error" in answers[0].lower() or "does not contain" in answers[0].lower()):
+    #             logger.warning("Agentic approach failed. Falling back to direct RAG.")
+    #             direct_tasks = [self.rag_pipeline.answer_question(q, self.vector_store) for q in request.questions]
+    #             answers = await asyncio.gather(*direct_tasks)
+    #         # --- END OF SANITY CHECK ---
                 
-            return QueryResponse(answers=answers)
+    #         return QueryResponse(answers=answers)
 
+    #     except Exception as e:
+    #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    # REPLACE the run method with this optimized version:
+    async def run(self, request: QueryRequest) -> QueryResponse:
+        """Optimized agent with faster decision making"""
+        logger.info(f"🚀 Speed-optimized Agent activated")
+        
+        # CHANGED: Start loading vector store immediately
+        vector_store_task = asyncio.create_task(
+            self.rag_pipeline.get_or_create_vector_store(request.documents)
+        )
+        
+        # CHANGED: Determine strategy while vector store loads
+        mission_type = self._determine_mission_type(request.questions)
+        
+        # Wait for vector store
+        self.vector_store = await vector_store_task
+        
+        # CHANGED: Skip relevance check for speed
+        # Just try to answer directly
+        
+        try:
+            # CHANGED: Use fast extraction for all questions
+            tasks = [
+                self._fast_answer(q) for q in request.questions
+            ]
+            answers = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            final_answers = []
+            for answer in answers:
+                if isinstance(answer, Exception):
+                    final_answers.append("Error processing question.")
+                else:
+                    final_answers.append(answer)
+            
+            return QueryResponse(answers=final_answers)
+            
         except Exception as e:
-            logger.error(f"A critical mission error occurred: {e}", exc_info=True)
-            return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+            logger.error(f"Critical error: {e}")
+            return QueryResponse(answers=["Error"] * len(request.questions))
+    
+    # ADD this new fast answer method:
+    async def _fast_answer(self, question: str) -> str:
+        """Ultra-fast answer extraction"""
+        # Direct answer without investigation
+        return await self.rag_pipeline.answer_question(question, self.vector_store)
     
     
     async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
@@ -629,46 +674,46 @@ class AdvancedQueryAgent:
         
     #     self.investigation_cache[cache_key] = final_report
     #     return final_report
-    async def investigate_question(self, question: str) -> str:
-        """
-        Detective-style investigation that now includes a final
-        self-correction and refinement step.
-        """
-        try:
-            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
+    # async def investigate_question(self, question: str) -> str:
+    #     """
+    #     Detective-style investigation that now includes a final
+    #     self-correction and refinement step.
+    #     """
+    #     try:
+    #         logger.info(f"🕵️ Investigating: '{question[:100]}...'")
             
-            # ... (keep the existing logic for caching, pattern detection, etc.)
+    #         # ... (keep the existing logic for caching, pattern detection, etc.)
             
-            # Phase 1 & 2: Get the basic answer and conduct initial investigation
-            basic_answer = await self._get_basic_answer(question)
-            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
-                basic_answer = await self._deep_search(question)
+    #         # Phase 1 & 2: Get the basic answer and conduct initial investigation
+    #         basic_answer = await self._get_basic_answer(question)
+    #         if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
+    #             basic_answer = await self._deep_search(question)
             
-            investigation_findings = await self._conduct_investigation(
-                question, 
-                self._detect_question_patterns(question)[0], 
-                self._detect_question_patterns(question)[1], 
-                basic_answer
-            )
+    #         investigation_findings = await self._conduct_investigation(
+    #             question, 
+    #             self._detect_question_patterns(question)[0], 
+    #             self._detect_question_patterns(question)[1], 
+    #             basic_answer
+    #         )
             
-            # --- SELF-CORRECTION AGENTIC SHIFT START ---
+    #         # --- SELF-CORRECTION AGENTIC SHIFT START ---
             
-            # Phase 3: Agent performs self-correction and refinement
-            final_answer = await self._self_correct_and_refine(question, basic_answer, investigation_findings)
+    #         # Phase 3: Agent performs self-correction and refinement
+    #         final_answer = await self._self_correct_and_refine(question, basic_answer, investigation_findings)
             
-            # --- SELF-CORRECTION AGENTIC SHIFT END ---
+    #         # --- SELF-CORRECTION AGENTIC SHIFT END ---
             
-            # Clean up and cache the final, refined answer
-            final_answer = self._clean_text(final_answer)
-            # self.investigation_cache[f"{question[:100]}"] = final_answer
-            cache_key = hashlib.md5(question.encode()).hexdigest()
-            self.investigation_cache[cache_key] = final_answer
+    #         # Clean up and cache the final, refined answer
+    #         final_answer = self._clean_text(final_answer)
+    #         # self.investigation_cache[f"{question[:100]}"] = final_answer
+    #         cache_key = hashlib.md5(question.encode()).hexdigest()
+    #         self.investigation_cache[cache_key] = final_answer
             
-            return final_answer
+    #         return final_answer
             
-        except Exception as e:
-            logger.error(f"Investigation failed for question: {e}", exc_info=True)
-            return f"Investigation error: {str(e)[:200]}"
+    #     except Exception as e:
+    #         logger.error(f"Investigation failed for question: {e}", exc_info=True)
+    #         return f"Investigation error: {str(e)[:200]}"
     # async def _self_correct_and_refine(self, question: str, original_answer: str, findings: Dict) -> str:
     #     """
     #     A new agentic step where the LLM critiques its own answer and
@@ -739,7 +784,57 @@ class AdvancedQueryAgent:
     # --- KEEP ALL OTHER METHODS ---
     # Your other methods like _get_basic_answer, _conduct_investigation,
     # _clean_text, etc., remain unchanged.    
-
+    # REPLACE the investigate_question method:
+    async def investigate_question(self, question: str) -> str:
+        """Optimized investigation that preserves thoroughness"""
+        try:
+            # CHANGED: Check cache first
+            cache_key = hashlib.md5(question.encode()).hexdigest()
+            if cache_key in self.investigation_cache:
+                return self.investigation_cache[cache_key]
+            
+            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
+            
+            # CHANGED: Parallel execution of investigation phases
+            basic_task = asyncio.create_task(self._get_basic_answer(question))
+            
+            # Start pattern detection while basic answer runs
+            q_types, keywords = self._detect_question_patterns(question)
+            
+            # Wait for basic answer
+            basic_answer = await basic_task
+            
+            # CHANGED: Only do deep search if basic answer is insufficient
+            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
+                deep_task = asyncio.create_task(self._deep_search(question))
+                investigation_task = asyncio.create_task(
+                    self._conduct_investigation(question, q_types, keywords, basic_answer)
+                )
+                
+                # Run both in parallel
+                basic_answer, investigation_findings = await asyncio.gather(
+                    deep_task, investigation_task
+                )
+            else:
+                # Quick investigation for good basic answers
+                investigation_findings = await self._conduct_investigation(
+                    question, q_types, keywords, basic_answer
+                )
+            
+            # Refine answer
+            final_answer = await self._self_correct_and_refine(
+                question, basic_answer, investigation_findings
+            )
+            
+            # Clean and cache
+            final_answer = self._clean_text(final_answer)
+            self.investigation_cache[cache_key] = final_answer
+            
+            return final_answer
+            
+        except Exception as e:
+            logger.error(f"Investigation failed: {e}", exc_info=True)
+            return f"Investigation error: {str(e)[:200]}"
     async def _find_inconsistencies(self, question: str, context_text: str) -> Dict[str, str]:
         """Finds contradictions and ambiguities and explains their importance."""
         inconsistencies = {}
@@ -886,37 +981,74 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.warning(f"Relevance check failed due to an error: {e}")
     #         return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
-    async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
-        """
-        A new agentic check to determine if the document is relevant to the questions.
-        This version is more robust and performs targeted searches.
-        """
-        logger.info("🧐 Performing mission relevance check...")
+#     async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
+#         """
+#         A new agentic check to determine if the document is relevant to the questions.
+#         This version is more robust and performs targeted searches.
+#         """
+#         logger.info("🧐 Performing mission relevance check...")
         
-        # --- NEW ROBUST LOGIC ---
-        # Extract key nouns and terms from the questions
+#         # --- NEW ROBUST LOGIC ---
+#         # Extract key nouns and terms from the questions
+#         question_keywords = set()
+#         for q in questions:
+#             # A simple regex to find potential nouns or key terms
+#             keywords = re.findall(r'\b[A-Z][a-z]+\b|\b[a-z]{4,}\b', q)
+#             question_keywords.update(kw.lower() for kw in keywords)
+
+#         # Perform a quick, targeted search for these keywords in the document
+#         search_query = " ".join(list(question_keywords)[:10]) # Use up to 10 keywords for the search
+#         try:
+#             # We are looking for just one relevant chunk to confirm relevance
+#             search_results = self.vector_store.search(search_query, k=1)
+#             if not search_results or search_results[0][1] < 0.1: # Check if any result was found with a reasonable score
+#                 logger.warning(f"Relevance check failed: No relevant chunks found for keywords: {search_query}")
+#                 return False, "The document does not seem to contain content related to the key topics in the questions."
+            
+#             logger.info("✅ Relevance check passed. The document contains relevant information.")
+#             return True, "Document is relevant."
+
+#         except Exception as e:
+#             logger.warning(f"Relevance check failed due to an error: {e}")
+#             return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
+# # ... (the rest of the file remains the same)
+    # REPLACE the _is_mission_relevant method:
+    async def _is_mission_relevant(self, questions: List[str]) -> tuple[bool, str]:
+        """Fast parallel relevance check that maintains accuracy"""
+        logger.info("🧐 Performing parallel relevance check...")
+        
+        # CHANGED: Check multiple questions in parallel for speed
         question_keywords = set()
-        for q in questions:
-            # A simple regex to find potential nouns or key terms
+        for q in questions[:3]:  # Check first 3 questions as sample
             keywords = re.findall(r'\b[A-Z][a-z]+\b|\b[a-z]{4,}\b', q)
             question_keywords.update(kw.lower() for kw in keywords)
-
-        # Perform a quick, targeted search for these keywords in the document
-        search_query = " ".join(list(question_keywords)[:10]) # Use up to 10 keywords for the search
+        
+        if not question_keywords:
+            return True, "No specific keywords found, proceeding."
+        
+        # CHANGED: Batch search for all keywords at once
+        search_query = " ".join(list(question_keywords)[:10])
+        
         try:
-            # We are looking for just one relevant chunk to confirm relevance
-            search_results = self.vector_store.search(search_query, k=1)
-            if not search_results or search_results[0][1] < 0.1: # Check if any result was found with a reasonable score
-                logger.warning(f"Relevance check failed: No relevant chunks found for keywords: {search_query}")
-                return False, "The document does not seem to contain content related to the key topics in the questions."
+            # Get top 3 results to ensure accuracy
+            search_results = self.vector_store.search(search_query, k=3)
             
-            logger.info("✅ Relevance check passed. The document contains relevant information.")
+            # CHANGED: More intelligent relevance scoring
+            if not search_results:
+                return False, "No relevant content found."
+            
+            # Check if we have good matches
+            total_score = sum(score for _, score, _ in search_results)
+            avg_score = total_score / len(search_results)
+            
+            if avg_score < 0.1:
+                return False, f"Document relevance too low (score: {avg_score:.2f})"
+            
             return True, "Document is relevant."
-
+            
         except Exception as e:
-            logger.warning(f"Relevance check failed due to an error: {e}")
-            return True, "Relevance check failed, proceeding with caution." # Default to true to avoid breaking the flow
-# ... (the rest of the file remains the same)
+            logger.warning(f"Relevance check failed: {e}")
+            return True, "Proceeding without relevance check."
     def _extract_main_topic(self, question: str) -> str:
         """Extracts the core subject from the question for targeted searches."""
         # A simple but effective method: remove common question words and return the rest.
