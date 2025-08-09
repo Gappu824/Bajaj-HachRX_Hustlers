@@ -870,13 +870,64 @@ class AdvancedQueryAgent:
     # In app/agents/advanced_query_agent.py
 
 # REPLACE the existing _distill_context_optimized method
+    # async def _distill_context_optimized(self, questions: List[str], raw_context: str) -> str:
+    #     """
+    #     FINAL VERSION: Uses a single, powerful AI call for maximum speed and distillation quality.
+    #     """
+    #     logger.info("🔍 Performing final, single-pass context distillation...")
+        
+    #     # --- CHANGED: Use a single, powerful prompt on the entire raw context ---
+    #     distill_prompt = f"""You are a hyper-efficient analysis engine. Your task is to read the following raw context and distill it into a set of critical facts needed to answer the user's questions.
+
+    # - Extract every unique API endpoint.
+    # - Extract all rules, conditions, and logic for choosing which API to call.
+    # - Extract any conflicting or ambiguous information (e.g., a landmark in two cities).
+    # - Be extremely concise. Use bullet points for clarity.
+
+    # RAW CONTEXT:
+    # {raw_context[:25000]} # Use a large but capped context
+
+    # USER QUESTIONS:
+    # - {"\n- ".join(questions)}
+
+    # CRITICAL FACTS SUMMARY:
+    # """
+        
+    #     try:
+    #         # --- CHANGED: Use the fastest model with an aggressive timeout ---
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 distill_prompt,
+    #                 generation_config={'max_output_tokens': 400, 'temperature': 0.0}
+    #             ),
+    #             timeout=7.0  # Aggressive 7-second timeout
+    #         )
+    #         distilled_context = response.text.strip()
+            
+    #         if len(distilled_context) < 50:
+    #             logger.warning("Distillation produced very short output, falling back.")
+    #             return self._simple_extraction(raw_context, questions)
+
+    #         return distilled_context
+
+    #     except Exception as e:
+    #         logger.warning(f"Single-pass distillation failed: {e}. Using non-AI fallback.")
+    #         # --- CHANGED: Always fallback to the fast, non-AI extraction ---
+    #         return self._simple_extraction(raw_context, questions)
+
+    # In app/agents/advanced_query_agent.py
+
+# REPLACE the existing _distill_context_optimized method
     async def _distill_context_optimized(self, questions: List[str], raw_context: str) -> str:
         """
         FINAL VERSION: Uses a single, powerful AI call for maximum speed and distillation quality.
         """
         logger.info("🔍 Performing final, single-pass context distillation...")
         
-        # --- CHANGED: Use a single, powerful prompt on the entire raw context ---
+        # --- CHANGED: Pre-format the question list to fix the f-string SyntaxError ---
+        question_list = "\n- ".join(questions)
+        
         distill_prompt = f"""You are a hyper-efficient analysis engine. Your task is to read the following raw context and distill it into a set of critical facts needed to answer the user's questions.
 
     - Extract every unique API endpoint.
@@ -885,23 +936,22 @@ class AdvancedQueryAgent:
     - Be extremely concise. Use bullet points for clarity.
 
     RAW CONTEXT:
-    {raw_context[:25000]} # Use a large but capped context
+    {raw_context[:25000]}
 
     USER QUESTIONS:
-    - {"\n- ".join(questions)}
+    - {question_list}
 
     CRITICAL FACTS SUMMARY:
     """
         
         try:
-            # --- CHANGED: Use the fastest model with an aggressive timeout ---
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     distill_prompt,
                     generation_config={'max_output_tokens': 400, 'temperature': 0.0}
                 ),
-                timeout=7.0  # Aggressive 7-second timeout
+                timeout=7.0
             )
             distilled_context = response.text.strip()
             
@@ -913,10 +963,7 @@ class AdvancedQueryAgent:
 
         except Exception as e:
             logger.warning(f"Single-pass distillation failed: {e}. Using non-AI fallback.")
-            # --- CHANGED: Always fallback to the fast, non-AI extraction ---
             return self._simple_extraction(raw_context, questions)
-
-
     def _simple_extraction(self, raw_context: str, questions: List[str]) -> str:
         """
         Simple extraction without AI - fast fallback
@@ -1615,63 +1662,115 @@ class AdvancedQueryAgent:
     #         logger.error(f"Critical error: {e}")
     #         return QueryResponse(answers=["Error"] * len(request.questions))
 
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     Acts as a 'Planner' to determine the user's intent and then calls the
+    #     appropriate 'Executor' to solve the problem. This is the core of the
+    #     agentic behavior.
+    #     """
+        
+    #     logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+    #     distillation_task = None
+    #     if self._determine_mission_type(request.questions) == "Strategy & Full Walkthrough":
+    #         # Pre-start the expensive distillation
+    #         distillation_task = asyncio.create_task(
+    #             self._precompute_distillation(request.questions)
+    #         )
+    #     if 'get-secret-token' in request.documents and len(self.vector_store.chunks) == 1:
+    #         logger.info("✅ Secret Token URL detected. Providing direct answer.")
+    #         token = self.vector_store.chunks[0]
+    #         # Since all questions are about the token, we can answer them directly.
+    #         answers = []
+    #         for q in request.questions:
+    #             if "how many characters" in q.lower():
+    #                 answers.append(str(len(token)))
+    #             elif "encoding" in q.lower():
+    #                 answers.append("hexadecimal")
+    #             elif "non-alphanumeric" in q.lower():
+    #                 answers.append("No")
+    #             elif "jwt" in q.lower():
+    #                 answers.append("It is not a JWT token because it lacks the three-part structure separated by dots.")
+    #             else:
+    #                 answers.append(token)
+    #         return QueryResponse(answers=answers)
+    #     # --- FIX END ---
+    #     # --- AGENTIC PLANNER ---
+    #     # The agent first analyzes the questions to determine the overall mission objective.
+    #     mission_type = self._determine_mission_type(request.questions)
+    #     logger.info(f"✅ Mission Type Identified: {mission_type}")
+    #     if distillation_task and mission_type == "Strategy & Full Walkthrough":
+    #         try:
+    #             await asyncio.wait_for(distillation_task, timeout=2.0)
+    #         except asyncio.TimeoutError:
+    #             pass 
+    #     try:
+    #         # --- AGENTIC EXECUTOR ---
+    #         # Based on the plan, the agent calls the correct tool/executor function.
+    #         if mission_type == "Strategy & Full Walkthrough":
+    #             answers = await self._execute_full_strategy(request.questions)
+    #         elif mission_type == "Direct Document Q&A": # NEW PATH
+    #             answers = await self._execute_fact_extraction(request.questions)
+    #         else: # Default to fact extraction for simpler queries
+    #             answers = await self._execute_fact_extraction(request.questions)
+    #         logger.info(f"✅ Final Answers Generated: {answers}")    
+    #         return QueryResponse(answers=answers)
+
+    #     except Exception as e:
+    #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    
+    # In app/agents/advanced_query_agent.py
+
+# REPLACE the existing run method
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
-        Acts as a 'Planner' to determine the user's intent and then calls the
-        appropriate 'Executor' to solve the problem. This is the core of the
-        agentic behavior.
+        FINAL VERSION: Implements a speculative execution strategy for maximum performance.
+        It runs a fast, direct path and a deep, strategic path in parallel,
+        returning the results of whichever finishes first.
         """
-        
-        logger.info(f"🚀 Agentic Planner activated for: {request.documents}")
+        logger.info("🚀 Agent activating with speculative execution strategy...")
         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
-        distillation_task = None
-        if self._determine_mission_type(request.questions) == "Strategy & Full Walkthrough":
-            # Pre-start the expensive distillation
-            distillation_task = asyncio.create_task(
-                self._precompute_distillation(request.questions)
-            )
-        if 'get-secret-token' in request.documents and len(self.vector_store.chunks) == 1:
-            logger.info("✅ Secret Token URL detected. Providing direct answer.")
-            token = self.vector_store.chunks[0]
-            # Since all questions are about the token, we can answer them directly.
-            answers = []
-            for q in request.questions:
-                if "how many characters" in q.lower():
-                    answers.append(str(len(token)))
-                elif "encoding" in q.lower():
-                    answers.append("hexadecimal")
-                elif "non-alphanumeric" in q.lower():
-                    answers.append("No")
-                elif "jwt" in q.lower():
-                    answers.append("It is not a JWT token because it lacks the three-part structure separated by dots.")
-                else:
-                    answers.append(token)
-            return QueryResponse(answers=answers)
-        # --- FIX END ---
-        # --- AGENTIC PLANNER ---
-        # The agent first analyzes the questions to determine the overall mission objective.
-        mission_type = self._determine_mission_type(request.questions)
-        logger.info(f"✅ Mission Type Identified: {mission_type}")
-        if distillation_task and mission_type == "Strategy & Full Walkthrough":
-            try:
-                await asyncio.wait_for(distillation_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                pass 
+
+        # --- CHANGED: Create two tasks to run in parallel ---
+        # Path 1: The fast, direct-answering path
+        direct_path_task = asyncio.create_task(
+            self._execute_fact_extraction(request.questions)
+        )
+
+        # Path 2: The deep, strategic planning and answering path
+        strategic_path_task = asyncio.create_task(
+            self._execute_full_strategy(request.questions)
+        )
+
+        tasks = [direct_path_task, strategic_path_task]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        # --- CHANGED: Process the results of the first completed task ---
         try:
-            # --- AGENTIC EXECUTOR ---
-            # Based on the plan, the agent calls the correct tool/executor function.
-            if mission_type == "Strategy & Full Walkthrough":
-                answers = await self._execute_full_strategy(request.questions)
-            elif mission_type == "Direct Document Q&A": # NEW PATH
-                answers = await self._execute_fact_extraction(request.questions)
-            else: # Default to fact extraction for simpler queries
-                answers = await self._execute_fact_extraction(request.questions)
-            logger.info(f"✅ Final Answers Generated: {answers}")    
-            return QueryResponse(answers=answers)
+            # Get the result from the task that finished
+            result_task = done.pop()
+            final_answers = result_task.result()
+
+            # Identify which path won the race
+            if result_task is direct_path_task:
+                logger.info("✅ Direct Path finished first. Returning fast answers.")
+            else:
+                logger.info("✅ Strategic Path finished first. Returning high-quality answers.")
+
+            # --- CHANGED: Cancel the losing task to save resources ---
+            for task in pending:
+                task.cancel()
+                
+            return QueryResponse(answers=final_answers)
 
         except Exception as e:
-            logger.error(f"A critical mission error occurred: {e}", exc_info=True)
+            logger.error(f"A critical error occurred during speculative execution: {e}", exc_info=True)
+            # Fallback in case of a critical failure in the winning task
+            if direct_path_task.done() and not direct_path_task.cancelled():
+                return QueryResponse(answers=direct_path_task.result())
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
+    
     async def _precompute_distillation(self, questions: List[str]) -> None:
         """
         Pre-compute and cache distillation in background
@@ -1697,13 +1796,21 @@ class AdvancedQueryAgent:
             
         except Exception as e:
             logger.debug(f"Pre-computation failed (non-critical): {e}")
+    # async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
+    #     """Executor for answering direct, factual questions quickly."""
+    #     logger.info("Executing fast fact extraction...")
+    #     # This uses the direct, high-speed RAG method.
+    #     tasks = [self._fast_answer(q) for q in questions]
+    #     return await asyncio.gather(*tasks)
+    # ADD this new fast answer method:
+
     async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
-        """Executor for answering direct, factual questions quickly."""
-        logger.info("Executing fast fact extraction...")
-        # This uses the direct, high-speed RAG method.
+        """
+        The DIRECT PATH: Executor for answering questions as fast as possible using direct RAG.
+        """
+        logger.info("🏎️  Executing Direct Path...")
         tasks = [self._fast_answer(q) for q in questions]
         return await asyncio.gather(*tasks)
-    # ADD this new fast answer method:
     async def _fast_answer(self, question: str) -> str:
         """Ultra-fast answer extraction without deep investigation."""
         return await self.rag_pipeline.answer_question(question, self.vector_store)
@@ -2004,28 +2111,45 @@ class AdvancedQueryAgent:
     # In app/agents/advanced_query_agent.py
 
 # REPLACE the existing _execute_full_strategy method
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """
+    #     Final Version: Executes the full strategy with a robust fallback to direct answering.
+    #     """
+    #     logger.info("Executing final full strategy...")
+        
+    #     master_plan = await self._generate_master_plan(questions)
+        
+    #     # --- CHANGED: Intelligent fallback logic ---
+    #     # If plan generation failed, switch to the direct, high-quality fact extraction method
+    #     if "Quick plan" in master_plan or "Error generating plan" in master_plan:
+    #         logger.warning(f"Master plan failed. Pivoting to direct fact extraction for all questions.")
+    #         return await self._execute_fact_extraction(questions)
+            
+    #     # If plan is good, proceed with the fast batching method
+    #     try:
+    #         batch_answers = await self._batch_answer_from_plan(questions, master_plan)
+    #         return [batch_answers.get(q, "Error processing this specific question.") for q in questions]
+            
+    #     finally:
+    #         if hasattr(self, '_batch_answers'):
+    #             del self._batch_answers
     async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
         """
-        Final Version: Executes the full strategy with a robust fallback to direct answering.
+        The STRATEGIC PATH: Executor for creating a comprehensive solution guide.
         """
-        logger.info("Executing final full strategy...")
+        logger.info("🤔 Executing Strategic Path...")
         
+        # Generate the high-quality master plan (with distillation and caching)
         master_plan = await self._generate_master_plan(questions)
         
-        # --- CHANGED: Intelligent fallback logic ---
-        # If plan generation failed, switch to the direct, high-quality fact extraction method
+        # If plan generation fails, this path will not produce useful results quickly
         if "Quick plan" in master_plan or "Error generating plan" in master_plan:
-            logger.warning(f"Master plan failed. Pivoting to direct fact extraction for all questions.")
-            return await self._execute_fact_extraction(questions)
+            # This allows the direct path to win by not producing a valid result
+            raise asyncio.CancelledError("Master plan failed, yielding to direct path.")
             
-        # If plan is good, proceed with the fast batching method
-        try:
-            batch_answers = await self._batch_answer_from_plan(questions, master_plan)
-            return [batch_answers.get(q, "Error processing this specific question.") for q in questions]
-            
-        finally:
-            if hasattr(self, '_batch_answers'):
-                del self._batch_answers
+        # Use the fast, robust batching method to get answers from the plan
+        batch_answers = await self._batch_answer_from_plan(questions, master_plan)
+        return [batch_answers.get(q, "Error processing question.") for q in questions]
 
     # --- KEEP ALL YOUR OTHER METHODS ---
     # The methods like _generate_master_plan, _answer_question_from_plan,
