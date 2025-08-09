@@ -9,6 +9,9 @@ import hashlib
 from app.models.query import QueryRequest, QueryResponse
 from app.core.rag_pipeline import HybridRAGPipeline, OptimizedVectorStore
 
+import google.generativeai as genai
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 class AdvancedQueryAgent:
