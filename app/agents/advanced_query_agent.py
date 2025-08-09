@@ -286,71 +286,169 @@ class AdvancedQueryAgent:
     #         return "Error: Could not formulate a master plan."
 
     # REPLACE the _generate_master_plan method in advanced_query_agent.py:
+    # async def _generate_master_plan(self, questions: List[str]) -> str:
+    #     """
+    #     OPTIMIZED: Faster master plan generation with minimal context and parallel processing.
+    #     """
+    #     logger.info("🧠 Generating optimized master strategy...")
+        
+    #     # CHANGED: Use only the most relevant chunks instead of full search
+    #     # Create a condensed query from all questions for efficiency
+    #     all_keywords = set()
+    #     for q in questions[:5]:  # CHANGED: Sample first 5 questions for speed
+    #         words = re.findall(r'\b\w{4,}\b', q.lower())
+    #         all_keywords.update(words[:3])  # CHANGED: Limit keywords per question
+        
+    #     search_query = " ".join(list(all_keywords)[:15])  # CHANGED: Cap total keywords
+        
+    #     # CHANGED: Get fewer but more relevant chunks
+    #     relevant_chunks = self.vector_store.search(search_query, k=10)  # CHANGED: Reduced from 20 to 10
+        
+    #     # CHANGED: Use only the text, limit context size
+    #     context_texts = [chunk[0][:500] for chunk in relevant_chunks[:8]]  # CHANGED: Truncate chunks, use only 8
+    #     full_context = "\n---\n".join(context_texts)
+        
+    #     # CHANGED: Shorter, more focused prompt for speed
+    #     question_list = "\n- ".join(questions[:10])  # CHANGED: Limit questions shown
+    #     if len(questions) > 10:
+    #         question_list += f"\n... and {len(questions) - 10} more questions"
+        
+    #     prompt = f"""You are an AI assistant. Create a concise action plan.
+
+    # CONTEXT (key information):
+    # {full_context[:3000]}
+
+    # QUESTIONS TO ADDRESS:
+    # - {question_list}
+
+    # Generate a BRIEF step-by-step plan (max 5 steps) that addresses these questions.
+    # Focus on the core logic and API flow if mentioned.
+    # Be direct and actionable."""
+        
+    #     try:
+    #         # CHANGED: Use faster model with lower token limit
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)  # CHANGED: Use fast model instead of precise
+            
+    #         # CHANGED: Aggressive generation config for speed
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.0,
+    #                     'max_output_tokens': 400,  # CHANGED: Reduced from unlimited
+    #                     'candidate_count': 1
+    #                 }
+    #             ),
+    #             timeout=8.0  # CHANGED: Add timeout for speed
+    #         )
+            
+    #         logger.info("✅ Master Plan generated in optimized time")
+    #         return response.text
+            
+    #     except asyncio.TimeoutError:
+    #         logger.warning("Master plan generation timed out, using fallback")
+    #         return "Quick plan: Check document -> Extract information -> Answer questions directly"
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate master plan: {e}")
+    #         return "Error generating plan. Proceeding with direct answers."
+
     async def _generate_master_plan(self, questions: List[str]) -> str:
         """
-        OPTIMIZED: Faster master plan generation with minimal context and parallel processing.
+        FAST & ACCURATE: Generates a high-quality plan by first using an AI-powered
+        distillation step to create a dense, relevant context.
         """
-        logger.info("🧠 Generating optimized master strategy...")
+        logger.info("🧠 Generating fast and accurate master strategy...")
         
-        # CHANGED: Use only the most relevant chunks instead of full search
-        # Create a condensed query from all questions for efficiency
-        all_keywords = set()
-        for q in questions[:5]:  # CHANGED: Sample first 5 questions for speed
-            words = re.findall(r'\b\w{4,}\b', q.lower())
-            all_keywords.update(words[:3])  # CHANGED: Limit keywords per question
-        
-        search_query = " ".join(list(all_keywords)[:15])  # CHANGED: Cap total keywords
-        
-        # CHANGED: Get fewer but more relevant chunks
-        relevant_chunks = self.vector_store.search(search_query, k=10)  # CHANGED: Reduced from 20 to 10
-        
-        # CHANGED: Use only the text, limit context size
-        context_texts = [chunk[0][:500] for chunk in relevant_chunks[:8]]  # CHANGED: Truncate chunks, use only 8
-        full_context = "\n---\n".join(context_texts)
-        
-        # CHANGED: Shorter, more focused prompt for speed
-        question_list = "\n- ".join(questions[:10])  # CHANGED: Limit questions shown
-        if len(questions) > 10:
-            question_list += f"\n... and {len(questions) - 10} more questions"
-        
-        prompt = f"""You are an AI assistant. Create a concise action plan.
+        # --- NEW STRATEGY ---
 
-    CONTEXT (key information):
-    {full_context[:3000]}
+        # 1. Broad Search: Gather a wide net of potentially relevant chunks.
+        all_question_text = " ".join(questions)
+        # Get a larger pool of candidate chunks than before.
+        candidate_chunks = self.vector_store.search(all_question_text, k=25)
+        raw_context = "\n---\n".join([chunk[0] for chunk in candidate_chunks])
 
-    QUESTIONS TO ADDRESS:
-    - {question_list}
+        # 2. AI-Powered Distillation: Use a fast AI call to distill the raw context.
+        distilled_context = await self._distill_context(questions, raw_context)
+        
+        # 3. Final Plan Generation: Use the high-quality, distilled context to create the final plan.
+        prompt = f"""You are an expert AI strategist. Based on the following CRITICAL CONTEXT, create a clear, step-by-step action plan to answer all the user's questions.
 
-    Generate a BRIEF step-by-step plan (max 5 steps) that addresses these questions.
-    Focus on the core logic and API flow if mentioned.
-    Be direct and actionable."""
+CRITICAL CONTEXT:
+{distilled_context}
+
+USER QUESTIONS:
+- {"\n- ".join(questions)}
+
+YOUR TASK:
+Generate a definitive, step-by-step plan. The plan must explicitly detail the logic, list all necessary API calls, and explain how to resolve any ambiguities mentioned in the context.
+"""
         
         try:
-            # CHANGED: Use faster model with lower token limit
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)  # CHANGED: Use fast model instead of precise
+            # Use the more powerful model now that the context is small and perfect.
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
             
-            # CHANGED: Aggressive generation config for speed
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     prompt,
                     generation_config={
                         'temperature': 0.0,
-                        'max_output_tokens': 400,  # CHANGED: Reduced from unlimited
+                        'max_output_tokens': 1000,
                         'candidate_count': 1
                     }
                 ),
-                timeout=8.0  # CHANGED: Add timeout for speed
+                timeout=12.0  # A balanced timeout.
             )
             
-            logger.info("✅ Master Plan generated in optimized time")
+            logger.info("✅ High-quality master plan generated quickly.")
             return response.text
             
         except asyncio.TimeoutError:
-            logger.warning("Master plan generation timed out, using fallback")
-            return "Quick plan: Check document -> Extract information -> Answer questions directly"
+            logger.warning("Master plan generation timed out, using fallback.")
+            return "Quick plan: The system timed out during deep planning. Check the document and answer questions directly."
         except Exception as e:
             logger.error(f"Failed to generate master plan: {e}")
-            return "Error generating plan. Proceeding with direct answers."
+            return "Error during plan generation. Proceeding with direct answers."
+
+    # --- ADD THIS NEW HELPER METHOD ---
+    async def _distill_context(self, questions: List[str], raw_context: str) -> str:
+        """
+        Uses a fast LLM to read a large, noisy context and distill it into
+        a small set of critical "clues" for the main planner.
+        """
+        logger.info(" distilling context to find critical clues...")
+        
+        distill_prompt = f"""You are a lead detective. From the RAW INFORMATION below, extract only the most critical facts, rules, and ambiguities needed to answer the list of QUESTIONS.
+
+- Extract every unique API endpoint.
+- Extract the specific rules for choosing which API to call.
+- Extract any conflicting information (e.g., a landmark in two cities).
+- Be extremely concise. Use bullet points.
+
+RAW INFORMATION:
+{raw_context[:20000]} 
+
+QUESTIONS:
+- {"\n- ".join(questions)}
+
+CRITICAL FACTS:
+"""
+        try:
+            # Use the FAST model for this distillation task.
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    distill_prompt,
+                    generation_config={'max_output_tokens': 500, 'temperature': 0.0}
+                ),
+                timeout=5.0
+            )
+            return response.text
+        except Exception as e:
+            logger.warning(f"Context distillation failed: {e}. Using raw context.")
+            return raw_context[:3000] # Fallback to truncated raw context
+
+    # ... (the rest of the existing code in the file) ...
+
     # async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
     #     """Answers a specific question by extracting relevant info from the master plan."""
     #     logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
