@@ -770,7 +770,12 @@ class AdvancedQueryAgent:
             logger.error(f"A critical mission error occurred: {e}", exc_info=True)
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
 
-
+    async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
+        """Executor for answering direct, factual questions quickly."""
+        logger.info("Executing fast fact extraction...")
+        # This uses the direct, high-speed RAG method.
+        tasks = [self._fast_answer(q) for q in questions]
+        return await asyncio.gather(*tasks)
     # ADD this new fast answer method:
     async def _fast_answer(self, question: str) -> str:
         """Ultra-fast answer extraction without deep investigation."""
