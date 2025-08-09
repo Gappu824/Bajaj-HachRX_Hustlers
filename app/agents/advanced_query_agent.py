@@ -489,26 +489,69 @@ class AdvancedQueryAgent:
     #         logger.error(f"A critical mission error occurred: {e}", exc_info=True)
     #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     # REPLACE the run method with this optimized version:
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """Optimized agent with faster decision making"""
+    #     logger.info(f"🚀 Speed-optimized Agent activated")
+        
+    #     # CHANGED: Start loading vector store immediately
+    #     vector_store_task = asyncio.create_task(
+    #         self.rag_pipeline.get_or_create_vector_store(request.documents)
+    #     )
+        
+    #     # CHANGED: Determine strategy while vector store loads
+    #     mission_type = self._determine_mission_type(request.questions)
+        
+    #     # Wait for vector store
+    #     self.vector_store = await vector_store_task
+        
+    #     # CHANGED: Skip relevance check for speed
+    #     # Just try to answer directly
+        
+    #     try:
+    #         # CHANGED: Use fast extraction for all questions
+    #         tasks = [
+    #             self._fast_answer(q) for q in request.questions
+    #         ]
+    #         answers = await asyncio.gather(*tasks, return_exceptions=True)
+            
+    #         # Process results
+    #         final_answers = []
+    #         for answer in answers:
+    #             if isinstance(answer, Exception):
+    #                 final_answers.append("Error processing question.")
+    #             else:
+    #                 final_answers.append(answer)
+            
+    #         return QueryResponse(answers=final_answers)
+            
+    #     except Exception as e:
+    #         logger.error(f"Critical error: {e}")
+    #         return QueryResponse(answers=["Error"] * len(request.questions))
+    
+    # # ADD this new fast answer method:
+    # async def _fast_answer(self, question: str) -> str:
+    #     """Ultra-fast answer extraction"""
+    #     # Direct answer without investigation
+    #     return await self.rag_pipeline.answer_question(question, self.vector_store)
+    
     async def run(self, request: QueryRequest) -> QueryResponse:
         """Optimized agent with faster decision making"""
         logger.info(f"🚀 Speed-optimized Agent activated")
         
-        # CHANGED: Start loading vector store immediately
+        # CHANGED: Start loading vector store immediately in the background
         vector_store_task = asyncio.create_task(
             self.rag_pipeline.get_or_create_vector_store(request.documents)
         )
         
-        # CHANGED: Determine strategy while vector store loads
+        # CHANGED: Determine strategy while the vector store loads
         mission_type = self._determine_mission_type(request.questions)
         
-        # Wait for vector store
+        # Now, wait for the vector store to be ready
         self.vector_store = await vector_store_task
         
-        # CHANGED: Skip relevance check for speed
-        # Just try to answer directly
-        
+        # CHANGED: Skip the relevance check for speed and try to answer directly
         try:
-            # CHANGED: Use fast extraction for all questions
+            # Use a new, ultra-fast method for all questions
             tasks = [
                 self._fast_answer(q) for q in request.questions
             ]
@@ -527,14 +570,11 @@ class AdvancedQueryAgent:
         except Exception as e:
             logger.error(f"Critical error: {e}")
             return QueryResponse(answers=["Error"] * len(request.questions))
-    
+
     # ADD this new fast answer method:
     async def _fast_answer(self, question: str) -> str:
-        """Ultra-fast answer extraction"""
-        # Direct answer without investigation
+        """Ultra-fast answer extraction without deep investigation."""
         return await self.rag_pipeline.answer_question(question, self.vector_store)
-    
-    
     async def _conduct_investigation(self, question: str, q_types: List[str], keywords: List[str], basic_answer: str) -> Dict:
         """
         Conducts a focused investigation based on question type and keywords.

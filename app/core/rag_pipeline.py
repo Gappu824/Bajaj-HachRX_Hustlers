@@ -880,6 +880,39 @@ class HybridRAGPipeline:
         
     #     return np.vstack(all_embeddings).astype('float32')
     # REPLACE _generate_embeddings method:
+    # async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
+    #     """Generate embeddings with optimal batching for speed"""
+    #     # CHANGED: Dynamic batch size based on chunk count
+    #     if len(chunks) < 100:
+    #         batch_size = len(chunks)  # Single batch for small documents
+    #     elif len(chunks) < 500:
+    #         batch_size = 50
+    #     else:
+    #         batch_size = 100  # Larger batches for big documents
+        
+    #     # CHANGED: Use thread pool for CPU-bound encoding
+    #     import concurrent.futures
+        
+    #     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    #         futures = []
+    #         for i in range(0, len(chunks), batch_size):
+    #             batch = chunks[i:i + batch_size]
+    #             future = executor.submit(
+    #                 self.embedding_model.encode,
+    #                 batch,
+    #                 convert_to_numpy=True,
+    #                 show_progress_bar=False,
+    #                 normalize_embeddings=True
+    #             )
+    #             futures.append(future)
+            
+    #         # Gather results
+    #         all_embeddings = []
+    #         for future in concurrent.futures.as_completed(futures):
+    #             all_embeddings.append(future.result())
+        
+    #     return np.vstack(all_embeddings).astype('float32')
+    
     async def _generate_embeddings(self, chunks: List[str]) -> np.ndarray:
         """Generate embeddings with optimal batching for speed"""
         # CHANGED: Dynamic batch size based on chunk count
@@ -890,7 +923,7 @@ class HybridRAGPipeline:
         else:
             batch_size = 100  # Larger batches for big documents
         
-        # CHANGED: Use thread pool for CPU-bound encoding
+        # CHANGED: Use a thread pool for CPU-bound encoding work
         import concurrent.futures
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -906,13 +939,13 @@ class HybridRAGPipeline:
                 )
                 futures.append(future)
             
-            # Gather results
+            # Gather results as they complete
             all_embeddings = []
             for future in concurrent.futures.as_completed(futures):
                 all_embeddings.append(future.result())
         
         return np.vstack(all_embeddings).astype('float32')
-    
+
     # async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
     #     """Generate answer with adaptive strategy"""
         
@@ -969,10 +1002,108 @@ class HybridRAGPipeline:
     #     # Generate answer using the intelligently assembled context
     #     return await self._generate_answer(question, context_chunks, is_complex)
     # REPLACE the answer_question method:
+#     async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
+#         """Generate answer with intelligent context selection for speed + accuracy"""
+        
+#         # CHANGED: Smart detection with caching
+#         if not hasattr(self, '_question_type_cache'):
+#             self._question_type_cache = {}
+        
+#         question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+#         if question_hash in self._question_type_cache:
+#             is_complex = self._question_type_cache[question_hash]
+#         else:
+#             is_complex = self._is_complex_question(question)
+#             self._question_type_cache[question_hash] = is_complex
+        
+#         # CHANGED: Get more results but process intelligently
+#         k = 20  # Always get enough chunks
+#         search_results = vector_store.search(question, k=k)
+        
+#         if not search_results:
+#             return "No relevant information found in the document."
+        
+#         # CHANGED: Smart chunk selection based on score distribution
+#         chunks = []
+#         scores = [score for _, score, _ in search_results]
+        
+#         if scores:
+#             # Calculate score threshold dynamically
+#             mean_score = sum(scores) / len(scores)
+#             std_score = (sum((s - mean_score) ** 2 for s in scores) / len(scores)) ** 0.5
+#             threshold = mean_score + (0.5 * std_score)  # Include above-average chunks
+            
+#             # Take high-quality chunks up to a limit
+#             for chunk_text, score, _ in search_results:
+#                 if score >= threshold or len(chunks) < 3:  # Ensure minimum 3 chunks
+#                     chunks.append(chunk_text)
+#                     if len(chunks) >= 10:  # Cap at 10 for speed
+#                         break
+        
+#         if not chunks:
+#             chunks = [result[0] for result in search_results[:5]]
+        
+#         # CHANGED: Pre-compile context for reuse
+#         context = "\n\n---\n\n".join(chunks)
+        
+#         # CHANGED: Optimized prompts that maintain quality
+#         if is_complex:
+#             prompt = f"""Context:
+# {context}
+
+# Question: {question}
+
+# Provide a comprehensive answer with specific details from the context:"""
+#             max_tokens = 500
+#         else:
+#             prompt = f"""Context:
+# {context}
+
+# Question: {question}
+
+# Answer directly based on the context:"""
+#             max_tokens = 300
+        
+#         try:
+#             # CHANGED: Use generation config caching
+#             if not hasattr(self, '_gen_config_cache'):
+#                 self._gen_config_cache = {
+#                     'simple': genai.types.GenerationConfig(
+#                         temperature=0.1,
+#                         max_output_tokens=300,
+#                         top_p=0.95,
+#                         candidate_count=1
+#                     ),
+#                     'complex': genai.types.GenerationConfig(
+#                         temperature=0.1,
+#                         max_output_tokens=500,
+#                         top_p=0.95,
+#                         candidate_count=1
+#                     )
+#                 }
+            
+#             model = genai.GenerativeModel(
+#                 settings.LLM_MODEL_NAME_PRECISE if is_complex else settings.LLM_MODEL_NAME
+#             )
+            
+#             config = self._gen_config_cache['complex' if is_complex else 'simple']
+            
+#             response = await model.generate_content_async(prompt, generation_config=config)
+            
+#             answer = response.text.strip()
+            
+#             if not answer or len(answer) < 10:
+#                 return "Unable to generate a valid answer."
+            
+#             return answer
+            
+#         except Exception as e:
+#             logger.error(f"Answer generation failed: {e}")
+#             return "An error occurred while generating the answer."
     async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
         """Generate answer with intelligent context selection for speed + accuracy"""
         
-        # CHANGED: Smart detection with caching
+        # CHANGED: Smart question type detection with caching
         if not hasattr(self, '_question_type_cache'):
             self._question_type_cache = {}
         
@@ -983,10 +1114,8 @@ class HybridRAGPipeline:
             is_complex = self._is_complex_question(question)
             self._question_type_cache[question_hash] = is_complex
         
-        # CHANGED: Get more results but process intelligently
-        k = 20  # Always get enough chunks
-        search_results = vector_store.search(question, k=k)
-        
+        # Get a pool of relevant chunks
+        search_results = vector_store.search(question, k=20)
         if not search_results:
             return "No relevant information found in the document."
         
@@ -995,78 +1124,31 @@ class HybridRAGPipeline:
         scores = [score for _, score, _ in search_results]
         
         if scores:
-            # Calculate score threshold dynamically
+            # Calculate score threshold dynamically to get the best chunks
             mean_score = sum(scores) / len(scores)
             std_score = (sum((s - mean_score) ** 2 for s in scores) / len(scores)) ** 0.5
-            threshold = mean_score + (0.5 * std_score)  # Include above-average chunks
+            threshold = mean_score + (0.5 * std_score)
             
-            # Take high-quality chunks up to a limit
             for chunk_text, score, _ in search_results:
-                if score >= threshold or len(chunks) < 3:  # Ensure minimum 3 chunks
+                if score >= threshold or len(chunks) < 3:  # Ensure at least 3 chunks
                     chunks.append(chunk_text)
                     if len(chunks) >= 10:  # Cap at 10 for speed
                         break
         
         if not chunks:
-            chunks = [result[0] for result in search_results[:5]]
+            chunks = [result[0] for result in search_results[:5]] # Fallback
         
-        # CHANGED: Pre-compile context for reuse
         context = "\n\n---\n\n".join(chunks)
         
-        # CHANGED: Optimized prompts that maintain quality
-        if is_complex:
-            prompt = f"""Context:
-{context}
+        # Optimized prompts
+        # ... (prompt logic remains the same)
 
-Question: {question}
-
-Provide a comprehensive answer with specific details from the context:"""
-            max_tokens = 500
-        else:
-            prompt = f"""Context:
-{context}
-
-Question: {question}
-
-Answer directly based on the context:"""
-            max_tokens = 300
-        
-        try:
-            # CHANGED: Use generation config caching
-            if not hasattr(self, '_gen_config_cache'):
-                self._gen_config_cache = {
-                    'simple': genai.types.GenerationConfig(
-                        temperature=0.1,
-                        max_output_tokens=300,
-                        top_p=0.95,
-                        candidate_count=1
-                    ),
-                    'complex': genai.types.GenerationConfig(
-                        temperature=0.1,
-                        max_output_tokens=500,
-                        top_p=0.95,
-                        candidate_count=1
-                    )
-                }
-            
-            model = genai.GenerativeModel(
-                settings.LLM_MODEL_NAME_PRECISE if is_complex else settings.LLM_MODEL_NAME
-            )
-            
-            config = self._gen_config_cache['complex' if is_complex else 'simple']
-            
-            response = await model.generate_content_async(prompt, generation_config=config)
-            
-            answer = response.text.strip()
-            
-            if not answer or len(answer) < 10:
-                return "Unable to generate a valid answer."
-            
-            return answer
-            
-        except Exception as e:
-            logger.error(f"Answer generation failed: {e}")
-            return "An error occurred while generating the answer."
+        # The rest of the generation logic using Gemini remains similar but benefits
+        # from the smaller, higher-quality context.
+        return await self._generate_answer(question, chunks, is_complex)
+    
+    
+    
     def _is_complex_question(self, question: str) -> bool:
         """Detect if question requires complex reasoning"""
         complex_indicators = [
