@@ -1049,14 +1049,77 @@ class AdvancedQueryAgent:
             # Fallback to a full investigation if plan-based synthesis fails
             return await self.investigate_question(question)
     # ADD this new method
+    # async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
+    #     """
+    #     Generate all answers in a single AI call - much faster
+    #     """
+    #     # CHANGED: Single prompt for all questions
+    #     questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
+        
+    #     prompt = f"""Based on this plan, answer ALL questions below concisely.
+
+    # MASTER PLAN:
+    # {master_plan}
+
+    # QUESTIONS:
+    # {questions_formatted}
+
+    # Generate answers in this exact format:
+    # A1: [answer to Q1]
+    # A2: [answer to Q2]
+    # (continue for all questions)
+
+    # ANSWERS:"""
+        
+    #     try:
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+            
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.0,
+    #                     'max_output_tokens': 1500,  # Enough for all answers
+    #                     'top_k': 40,
+    #                     'top_p': 0.95
+    #                 }
+    #             ),
+    #             timeout=8.0
+    #         )
+            
+    #         # Parse the batched response
+    #         answers = {}
+    #         lines = response.text.strip().split('\n')
+    #         for i, question in enumerate(questions):
+    #             # Find the corresponding answer
+    #             for line in lines:
+    #                 if line.startswith(f"A{i+1}:"):
+    #                     answers[question] = line[4:].strip()
+    #                     break
+    #             if question not in answers:
+    #                 answers[question] = "Answer not found in batch response"
+            
+    #         return answers
+            
+    #     except Exception as e:
+    #         logger.error(f"Batch answer generation failed: {e}")
+    #         # Fallback to individual generation
+    #         answers = {}
+    #         for q in questions:
+    #             answers[q] = await self._single_answer_from_plan(q, master_plan)
+    #         return answers
+
+    # In app/agents/advanced_query_agent.py
+
+# REPLACE the existing _batch_answer_from_plan method
     async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
         """
-        Generate all answers in a single AI call - much faster
+        Generate all answers in a single AI call - now more robust.
         """
-        # CHANGED: Single prompt for all questions
         questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
         
-        prompt = f"""Based on this plan, answer ALL questions below concisely.
+        # --- CHANGED: More explicit prompt to enforce the output format ---
+        prompt = f"""Based on the MASTER PLAN, answer ALL of the following QUESTIONS concisely.
 
     MASTER PLAN:
     {master_plan}
@@ -1064,7 +1127,7 @@ class AdvancedQueryAgent:
     QUESTIONS:
     {questions_formatted}
 
-    Generate answers in this exact format:
+    IMPORTANT: You MUST generate answers in this exact format, with each answer on a new line:
     A1: [answer to Q1]
     A2: [answer to Q2]
     (continue for all questions)
@@ -1074,40 +1137,44 @@ class AdvancedQueryAgent:
         try:
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
             
+            # --- CHANGED: Increased timeout for more complex batch jobs ---
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     prompt,
                     generation_config={
                         'temperature': 0.0,
-                        'max_output_tokens': 1500,  # Enough for all answers
+                        'max_output_tokens': 2048,  # Increased token limit for more answers
                         'top_k': 40,
                         'top_p': 0.95
                     }
                 ),
-                timeout=8.0
+                timeout=15.0  # Increased from 8.0 to 15.0 seconds
             )
             
-            # Parse the batched response
+            # --- CHANGED: More robust parsing logic ---
             answers = {}
-            lines = response.text.strip().split('\n')
-            for i, question in enumerate(questions):
-                # Find the corresponding answer
-                for line in lines:
-                    if line.startswith(f"A{i+1}:"):
-                        answers[question] = line[4:].strip()
-                        break
-                if question not in answers:
-                    answers[question] = "Answer not found in batch response"
+            text_response = response.text.strip()
             
+            for i, question in enumerate(questions):
+                # Use regex to find the answer corresponding to each question number
+                pattern = re.compile(rf'^A{i+1}:\s*(.*)', re.MULTILINE)
+                match = pattern.search(text_response)
+                
+                if match:
+                    answers[question] = match.group(1).strip()
+                else:
+                    answers[question] = "Answer not found in batch response. The model may have deviated from the required format."
+
             return answers
             
         except Exception as e:
-            logger.error(f"Batch answer generation failed: {e}")
-            # Fallback to individual generation
+            logger.error(f"Batch answer generation failed: {e}", exc_info=True)
+            # Fallback to individual generation remains as a safety net
             answers = {}
             for q in questions:
                 answers[q] = await self._single_answer_from_plan(q, master_plan)
             return answers
+
     # async def run(self, request: QueryRequest) -> QueryResponse:
     #     """Main entry point for the detective agent."""
     #     logger.info(f"🔍 Detective Agent activated for: {request.documents}")
