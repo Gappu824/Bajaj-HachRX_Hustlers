@@ -1081,7 +1081,7 @@ CRITICAL FACTS:
         try:
             master_plan = await asyncio.wait_for(
                 self._generate_master_plan(questions),
-                timeout=10.0  # CHANGED: Overall timeout for plan generation
+                timeout=20.0  # CHANGED: Overall timeout for plan generation
             )
         except asyncio.TimeoutError:
             logger.warning("Master plan timed out, using direct answers")
