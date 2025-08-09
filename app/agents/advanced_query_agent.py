@@ -231,86 +231,207 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"Failed to generate master plan: {e}")
     #         return "Error: Could not formulate a master plan."
+    # async def _generate_master_plan(self, questions: List[str]) -> str:
+    #     """
+    #     Analyzes all questions to create a single, unified strategy.
+    #     This version is optimized to use only relevant context, preventing memory overload and speeding up generation.
+    #     """
+    #     logger.info("🧠 Analyzing all questions to formulate a master strategy...")
+
+    #     # --- MEMORY & SPEED FIX START ---
+    #     # Instead of loading the entire document, perform a broad search to gather
+    #     # the most relevant context for the overall mission.
+        
+    #     # Consolidate keywords from all questions to form a representative search query.
+    #     all_question_text = " ".join(questions)
+        
+    #     # Retrieve a diverse set of chunks that are relevant to the questions as a whole.
+    #     # This provides a high-quality summary of the document's key information for the planner.
+    #     relevant_chunks = self.vector_store.search(all_question_text, k=20) # Get top 20 chunks
+        
+    #     # Use only the text from these relevant chunks as the context.
+    #     full_context = "\n---\n".join([chunk[0] for chunk in relevant_chunks])
+    #     # --- MEMORY & SPEED FIX END ---
+        
+    #     question_list = "\n- ".join(questions)
+        
+    #     prompt = f"""
+    #     You are an elite AI agent. Your goal is to devise a complete, step-by-step strategy to solve the entire problem.
+    #     Analyze the provided CONTEXT and the list of USER QUESTIONS to understand the overall mission.
+
+    #     CONTEXT:
+    #     {full_context}
+
+    #     USER QUESTIONS:
+    #     - {question_list}
+
+    #     YOUR TASK:
+    #     Create a single, comprehensive 'Master Plan' as a step-by-step guide.
+    #     This plan should be a clear, actionable walkthrough.
+    #     """
+        
+    #     try:
+    #         model = self.rag_pipeline.llm_precise
+    #         response = await model.generate_content_async(
+    #             prompt,
+    #             generation_config={'temperature': 0.1}
+    #         )
+    #         logger.info("✅ Master Plan generated successfully.")
+    #         return response.text
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate master plan: {e}")
+    #         return "Error: Could not formulate a master plan."
+
+    # REPLACE the _generate_master_plan method in advanced_query_agent.py:
     async def _generate_master_plan(self, questions: List[str]) -> str:
         """
-        Analyzes all questions to create a single, unified strategy.
-        This version is optimized to use only relevant context, preventing memory overload and speeding up generation.
+        OPTIMIZED: Faster master plan generation with minimal context and parallel processing.
         """
-        logger.info("🧠 Analyzing all questions to formulate a master strategy...")
+        logger.info("🧠 Generating optimized master strategy...")
+        
+        # CHANGED: Use only the most relevant chunks instead of full search
+        # Create a condensed query from all questions for efficiency
+        all_keywords = set()
+        for q in questions[:5]:  # CHANGED: Sample first 5 questions for speed
+            words = re.findall(r'\b\w{4,}\b', q.lower())
+            all_keywords.update(words[:3])  # CHANGED: Limit keywords per question
+        
+        search_query = " ".join(list(all_keywords)[:15])  # CHANGED: Cap total keywords
+        
+        # CHANGED: Get fewer but more relevant chunks
+        relevant_chunks = self.vector_store.search(search_query, k=10)  # CHANGED: Reduced from 20 to 10
+        
+        # CHANGED: Use only the text, limit context size
+        context_texts = [chunk[0][:500] for chunk in relevant_chunks[:8]]  # CHANGED: Truncate chunks, use only 8
+        full_context = "\n---\n".join(context_texts)
+        
+        # CHANGED: Shorter, more focused prompt for speed
+        question_list = "\n- ".join(questions[:10])  # CHANGED: Limit questions shown
+        if len(questions) > 10:
+            question_list += f"\n... and {len(questions) - 10} more questions"
+        
+        prompt = f"""You are an AI assistant. Create a concise action plan.
 
-        # --- MEMORY & SPEED FIX START ---
-        # Instead of loading the entire document, perform a broad search to gather
-        # the most relevant context for the overall mission.
-        
-        # Consolidate keywords from all questions to form a representative search query.
-        all_question_text = " ".join(questions)
-        
-        # Retrieve a diverse set of chunks that are relevant to the questions as a whole.
-        # This provides a high-quality summary of the document's key information for the planner.
-        relevant_chunks = self.vector_store.search(all_question_text, k=20) # Get top 20 chunks
-        
-        # Use only the text from these relevant chunks as the context.
-        full_context = "\n---\n".join([chunk[0] for chunk in relevant_chunks])
-        # --- MEMORY & SPEED FIX END ---
-        
-        question_list = "\n- ".join(questions)
-        
-        prompt = f"""
-        You are an elite AI agent. Your goal is to devise a complete, step-by-step strategy to solve the entire problem.
-        Analyze the provided CONTEXT and the list of USER QUESTIONS to understand the overall mission.
+    CONTEXT (key information):
+    {full_context[:3000]}
 
-        CONTEXT:
-        {full_context}
+    QUESTIONS TO ADDRESS:
+    - {question_list}
 
-        USER QUESTIONS:
-        - {question_list}
-
-        YOUR TASK:
-        Create a single, comprehensive 'Master Plan' as a step-by-step guide.
-        This plan should be a clear, actionable walkthrough.
-        """
+    Generate a BRIEF step-by-step plan (max 5 steps) that addresses these questions.
+    Focus on the core logic and API flow if mentioned.
+    Be direct and actionable."""
         
         try:
-            model = self.rag_pipeline.llm_precise
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={'temperature': 0.1}
+            # CHANGED: Use faster model with lower token limit
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)  # CHANGED: Use fast model instead of precise
+            
+            # CHANGED: Aggressive generation config for speed
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.0,
+                        'max_output_tokens': 400,  # CHANGED: Reduced from unlimited
+                        'candidate_count': 1
+                    }
+                ),
+                timeout=8.0  # CHANGED: Add timeout for speed
             )
-            logger.info("✅ Master Plan generated successfully.")
+            
+            logger.info("✅ Master Plan generated in optimized time")
             return response.text
+            
+        except asyncio.TimeoutError:
+            logger.warning("Master plan generation timed out, using fallback")
+            return "Quick plan: Check document -> Extract information -> Answer questions directly"
         except Exception as e:
             logger.error(f"Failed to generate master plan: {e}")
-            return "Error: Could not formulate a master plan."
+            return "Error generating plan. Proceeding with direct answers."
+    # async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
+    #     """Answers a specific question by extracting relevant info from the master plan."""
+    #     logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
 
+    #     prompt = f"""
+    #     You are an intelligent assistant. Your task is to answer the user's question based *only* on the provided 'Master Plan'.
+    #     Do not add any new information. Extract the relevant steps or details from the plan to provide a direct and concise answer.
 
+    #     MASTER PLAN:
+    #     {master_plan}
+
+    #     QUESTION:
+    #     "{question}"
+
+    #     ANSWER:
+    #     """
+
+    #     try:
+    #         model = self.rag_pipeline.llm_precise # Use a precise model to extract info accurately
+    #         response = await model.generate_content_async(
+    #             prompt,
+    #             generation_config={'temperature': 0.0} # Zero temperature for direct extraction
+    #         )
+    #         return response.text.strip()
+    #     except Exception as e:
+    #         logger.error(f"Failed to answer from plan: {e}")
+    #         # Fallback to the original investigation method if plan-based answering fails
+    #         return await self.investigate_question(question)
+    
+    # REPLACE the _answer_question_from_plan method in advanced_query_agent.py:
     async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
-        """Answers a specific question by extracting relevant info from the master plan."""
-        logger.info(f"🎯 Answering '{question[:50]}...' using the master plan.")
-
-        prompt = f"""
-        You are an intelligent assistant. Your task is to answer the user's question based *only* on the provided 'Master Plan'.
-        Do not add any new information. Extract the relevant steps or details from the plan to provide a direct and concise answer.
-
-        MASTER PLAN:
-        {master_plan}
-
-        QUESTION:
-        "{question}"
-
-        ANSWER:
         """
+        OPTIMIZED: Faster answer extraction from master plan with caching.
+        """
+        # CHANGED: Add answer caching for repeated similar questions
+        question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+        cache_key = f"plan_answer_{question_hash}"
+        
+        if hasattr(self, '_plan_answer_cache') and cache_key in self._plan_answer_cache:
+            return self._plan_answer_cache[cache_key]
+        
+        if not hasattr(self, '_plan_answer_cache'):
+            self._plan_answer_cache = {}
+        
+        logger.info(f"🎯 Extracting answer for: '{question[:50]}...'")
+        
+        # CHANGED: Shorter prompt for speed
+        prompt = f"""Based on this plan, answer the question directly:
 
+    PLAN:
+    {master_plan[:1500]}
+
+    QUESTION: {question}
+
+    Give a direct, concise answer (max 3 sentences):"""
+        
         try:
-            model = self.rag_pipeline.llm_precise # Use a precise model to extract info accurately
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={'temperature': 0.0} # Zero temperature for direct extraction
+            # CHANGED: Use fast model with aggressive timeout
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.0,
+                        'max_output_tokens': 200,  # CHANGED: Limited tokens
+                        'candidate_count': 1
+                    }
+                ),
+                timeout=5.0  # CHANGED: Aggressive timeout
             )
-            return response.text.strip()
+            
+            answer = response.text.strip()
+            self._plan_answer_cache[cache_key] = answer
+            return answer
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"Answer extraction timed out for: {question[:30]}...")
+            # CHANGED: Fall back to direct RAG answer
+            return await self.rag_pipeline.answer_question(question, self.vector_store)
         except Exception as e:
             logger.error(f"Failed to answer from plan: {e}")
-            # Fallback to the original investigation method if plan-based answering fails
-            return await self.investigate_question(question)
+            return await self.rag_pipeline.answer_question(question, self.vector_store)
+    
     # async def run(self, request: QueryRequest) -> QueryResponse:
     #     """Main entry point for the detective agent."""
     #     logger.info(f"🔍 Detective Agent activated for: {request.documents}")
@@ -642,7 +763,7 @@ class AdvancedQueryAgent:
                 answers = await self._execute_full_strategy(request.questions)
             else: # Default to fact extraction for simpler queries
                 answers = await self._execute_fact_extraction(request.questions)
-                
+            logger.info(f"✅ Final Answers Generated: {answers}")    
             return QueryResponse(answers=answers)
 
         except Exception as e:
@@ -768,23 +889,73 @@ class AdvancedQueryAgent:
         # If no strategic keywords are found, default to fast fact extraction.
         return "Fact & Detail Extraction"
 
-    async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
-        """Executor for creating a comprehensive solution guide for complex tasks."""
-        logger.info("Executing full strategy...")
-        # 1. Generate a single "Master Plan" by analyzing all questions together.
-        master_plan = await self._generate_master_plan(questions)
+    # async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+    #     """Executor for creating a comprehensive solution guide for complex tasks."""
+    #     logger.info("Executing full strategy...")
+    #     # 1. Generate a single "Master Plan" by analyzing all questions together.
+    #     master_plan = await self._generate_master_plan(questions)
         
-        # 2. Answer each question by intelligently referencing the master plan.
-        tasks = [self._answer_question_from_plan(q, master_plan) for q in questions]
-        return await asyncio.gather(*tasks)
+    #     # 2. Answer each question by intelligently referencing the master plan.
+    #     tasks = [self._answer_question_from_plan(q, master_plan) for q in questions]
+    #     return await asyncio.gather(*tasks)
 
-    async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
-        """Executor for answering direct, factual questions quickly."""
-        logger.info("Executing fast fact extraction...")
-        # This uses the direct, high-speed RAG method.
-        tasks = [self._fast_answer(q) for q in questions]
-        return await asyncio.gather(*tasks)
-
+    # async def _execute_fact_extraction(self, questions: List[str]) -> List[str]:
+    #     """Executor for answering direct, factual questions quickly."""
+    #     logger.info("Executing fast fact extraction...")
+    #     # This uses the direct, high-speed RAG method.
+    #     tasks = [self._fast_answer(q) for q in questions]
+    #     return await asyncio.gather(*tasks)
+    # REPLACE the _execute_full_strategy method in advanced_query_agent.py:
+    async def _execute_full_strategy(self, questions: List[str]) -> List[str]:
+        """
+        OPTIMIZED: Faster execution with parallel processing and fallbacks.
+        """
+        logger.info("Executing optimized full strategy...")
+        
+        # CHANGED: Generate master plan with timeout
+        try:
+            master_plan = await asyncio.wait_for(
+                self._generate_master_plan(questions),
+                timeout=10.0  # CHANGED: Overall timeout for plan generation
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Master plan timed out, using direct answers")
+            # CHANGED: Fall back to direct parallel answers
+            tasks = [self._fast_answer(q) for q in questions]
+            return await asyncio.gather(*tasks)
+        
+        # CHANGED: Process answers in parallel with aggressive concurrency
+        tasks = []
+        for q in questions:
+            # CHANGED: Each answer task has its own timeout
+            task = asyncio.create_task(
+                asyncio.wait_for(
+                    self._answer_question_from_plan(q, master_plan),
+                    timeout=6.0
+                )
+            )
+            tasks.append(task)
+        
+        # CHANGED: Gather with return_exceptions to handle timeouts gracefully
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        final_answers = []
+        for i, result in enumerate(results):
+            if isinstance(result, (Exception, asyncio.TimeoutError)):
+                logger.warning(f"Question {i+1} failed/timed out, using fast answer")
+                # CHANGED: Fallback to fast answer for failed questions
+                try:
+                    answer = await asyncio.wait_for(
+                        self._fast_answer(questions[i]),
+                        timeout=3.0
+                    )
+                    final_answers.append(answer)
+                except:
+                    final_answers.append("Unable to process this question in time.")
+            else:
+                final_answers.append(result)
+        
+        return final_answers
 
     # --- KEEP ALL YOUR OTHER METHODS ---
     # The methods like _generate_master_plan, _answer_question_from_plan,
