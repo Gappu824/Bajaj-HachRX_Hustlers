@@ -174,10 +174,14 @@ class OptimizedVectorStore:
             # Keep exact search for small collections
             distances, indices = self.index.search(query_embedding, min(k * 2, len(self.chunks)))
         
-        # CHANGED: Parallel keyword search
-        keyword_task = asyncio.create_task(
-            asyncio.to_thread(self.enhanced_retriever.retrieve, query, k * 2)
-        ) if asyncio.get_event_loop().is_running() else None
+        # CHANGED: Run keyword search in a background thread while we process semantic results
+        keyword_results = []
+        try:
+            import concurrent.futures
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(self.enhanced_retriever.retrieve, query, k * 2)
+        except Exception:
+            future = None
         
         # Process semantic results while keyword search runs
         combined_scores = defaultdict(float)
@@ -188,14 +192,25 @@ class OptimizedVectorStore:
                 similarity = 1.0 / (1.0 + dist)
                 combined_scores[idx] += similarity * 0.6
         
-        # Get keyword results
-        if keyword_task:
+        # Get keyword results (wait briefly, then fall back to direct call)
+        if future is not None:
             try:
-                keyword_results = asyncio.get_event_loop().run_until_complete(keyword_task)
-            except:
-                keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
+                keyword_results = future.result(timeout=0.75)
+            except Exception:
+                try:
+                    keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
+                except Exception:
+                    keyword_results = []
+            finally:
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
         else:
-            keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
+            try:
+                keyword_results = self.enhanced_retriever.retrieve(query, k * 2)
+            except Exception:
+                keyword_results = []
         
         # Add keyword scores
         if keyword_results:
@@ -1203,8 +1218,10 @@ class HybridRAGPipeline:
         
         # CHANGED: Use a thread pool for CPU-bound encoding work
         import concurrent.futures
+        import os
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        max_workers = min(8, (os.cpu_count() or 4))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i:i + batch_size]
