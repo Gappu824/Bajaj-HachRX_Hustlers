@@ -337,24 +337,24 @@ class AdvancedQueryAgent:
             return cached_answer
         
         try:
-            # Try dynamic response based on document intelligence
-            dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-            if dynamic_answer:
-                # Cache the dynamic answer
-                await cache.set(cache_key, dynamic_answer, ttl=3600)
-                return dynamic_answer
-            
-            # OPTIMIZED: Smart processing with reduced complexity
-            answer = await self._process_smart_question_optimized(question, doc_intelligence)
-            
-            # Enhance response completeness
-            answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-            
-            # Cache the final answer
-            await cache.set(cache_key, answer, ttl=3600)
-            
-            return answer
-            
+                # Try dynamic response based on document intelligence
+                dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+                if dynamic_answer:
+                    # Cache the dynamic answer
+                    await cache.set(cache_key, dynamic_answer, ttl=3600)
+                    return dynamic_answer
+                
+                # OPTIMIZED: Smart processing with reduced complexity
+                answer = await self._process_smart_question_optimized(question, doc_intelligence)
+                
+                # Enhance response completeness
+                answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+                
+                # Cache the final answer
+                await cache.set(cache_key, answer, ttl=3600)
+                
+                return answer
+                
         except Exception as e:
             logger.error(f"Error processing question '{question[:50]}': {e}")
             fallback = await self._fallback_answer(question)
@@ -772,7 +772,7 @@ class AdvancedQueryAgent:
     #     # Enhanced lookup for other questions
         # return await self._handle_enhanced_lookup(question_clean, doc_intelligence)
     async def _process_smart_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """OPTIMIZED: Smart processing with reduced LLM calls and context size"""
+        """ENHANCED: Smart processing with improved accuracy and Malayalam support"""
         
         # Clean the question first with enhanced Unicode handling
         question_clean = self._clean_text(question)
@@ -788,21 +788,40 @@ class AdvancedQueryAgent:
         else:
             search_question = question_clean
         
-        # OPTIMIZATION: Reduce search results for faster processing
-        search_results = self.vector_store.search(search_question, k=12)  # Reduced from 25
+        # ENHANCED: Try multiple search strategies for better coverage
+        search_results = self.vector_store.search(search_question, k=15)  # Increased for better coverage
         
+        # If no results with enhanced query, try original question
+        if not search_results and detected_language == "malayalam":
+            search_results = self.vector_store.search(question_clean, k=15)
+        
+        # If still no results, try broader search
         if not search_results:
+            # Try with just keywords
             if detected_language == "malayalam":
-                return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ടായിരിക്കില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-            else:
-                return "I'm sorry, but I don't have enough information about this in the document. Could you please rephrase your question?"
+                keywords = self._extract_malayalam_keywords(question_clean)
+                if keywords:
+                    keyword_query = " ".join(keywords)
+                    search_results = self.vector_store.search(keyword_query, k=10)
+            
+            # If still no results, return appropriate fallback
+            if not search_results:
+                if detected_language == "malayalam":
+                    return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ടായിരിക്കില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+                else:
+                    return "I'm sorry, but I don't have enough information about this in the document. Could you please rephrase your question?"
         
-        # OPTIMIZATION: Use smaller context window
-        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=8)  # Reduced from 15-18
+        # ENHANCED: Use adaptive context size based on question complexity
+        max_chunks = 12 if detected_language == "malayalam" else 10  # More context for Malayalam
+        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=max_chunks)
         context = "\n\n".join(chunks)
         
-        # OPTIMIZATION: Single LLM call with optimized prompt
-        return await self._generate_single_optimized_answer(question, context, detected_language)
+        # ENHANCED: Use pattern-specific prompts for Malayalam
+        if detected_language == "malayalam":
+            pattern = self._detect_malayalam_question_pattern(question_clean)
+            return await self._generate_malayalam_optimized_answer(question, context, pattern)
+        else:
+            return await self._generate_single_optimized_answer(question, context, detected_language)
 
     async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
         """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
@@ -859,6 +878,41 @@ ANSWER:"""
             logger.error(f"Answer generation failed: {e}")
             return "I apologize, but I encountered an error while processing your question. Please try again."
 
+    async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
+        """ENHANCED: Generate Malayalam answers with pattern-specific prompts"""
+        
+        # Get pattern-specific prompt
+        prompt_template = self._get_malayalam_specific_prompt(question, pattern)
+        prompt = prompt_template.format(context=context, question=question)
+        
+        try:
+            # Use the same optimized model settings
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.3,  # Slightly higher for more natural Malayalam
+                        'max_output_tokens': 500,  # More tokens for detailed Malayalam responses
+                        'top_p': 0.9,
+                        'top_k': 30
+                    }
+                ), timeout=18  # Slightly longer timeout for Malayalam
+            )
+            
+            answer = response.text.strip()
+            
+            # Validate that the answer is in Malayalam
+            if answer and self._detect_language(answer) == "malayalam":
+                return answer
+            else:
+                # If LLM didn't respond in Malayalam, provide a Malayalam fallback
+                return f"ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+                
+        except Exception as e:
+            logger.error(f"Malayalam answer generation failed: {e}")
+            return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+
     def _select_optimal_context_optimized(self, question: str, search_results: List[Tuple[str, float, Dict]], max_chunks: int = 8) -> List[str]:
         """OPTIMIZED: Select optimal context chunks with reduced processing"""
         if not search_results:
@@ -878,11 +932,17 @@ ANSWER:"""
             overlap = len(question_words.intersection(chunk_words))
             relevance_score = score + (overlap * 0.1)
             
-            # Language bonus
+            # ENHANCED: Language bonus with higher weight for Malayalam
             if detected_language == "malayalam":
                 malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', chunk_clean)
                 if malayalam_chars:
-                    relevance_score += 0.1
+                    relevance_score += 0.3  # Increased from 0.1 to 0.3
+                
+                # Additional bonus for Malayalam question words in context
+                malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
+                for word in malayalam_question_words:
+                    if word in chunk_clean:
+                        relevance_score += 0.1
             
             scored_chunks.append((chunk_clean, relevance_score, metadata))
         
@@ -1336,7 +1396,7 @@ ANSWER:"""
         return text
 
     def _detect_language(self, text: str) -> str:
-        """Detect if text contains Malayalam or other Indian languages"""
+        """ENHANCED: Detect if text contains Malayalam or other Indian languages with improved accuracy"""
         if not text:
             return "unknown"
         
@@ -1352,14 +1412,19 @@ ANSWER:"""
         tamil_chars = re.findall(r'[\u0b80-\u0bff]', text)
         tamil_ratio = len(tamil_chars) / len(text) if text else 0
         
-        # Threshold for language detection (5% of characters)
-        threshold = 0.05
+        # ENHANCED: Lower threshold for Malayalam detection (3% instead of 5%)
+        malayalam_threshold = 0.03
+        other_threshold = 0.05
         
-        if malayalam_ratio > threshold:
+        # ENHANCED: Check for Malayalam question words even with low character count
+        malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
+        has_malayalam_question_word = any(word in text for word in malayalam_question_words)
+        
+        if malayalam_ratio > malayalam_threshold or has_malayalam_question_word:
             return "malayalam"
-        elif hindi_ratio > threshold:
+        elif hindi_ratio > other_threshold:
             return "hindi"
-        elif tamil_ratio > threshold:
+        elif tamil_ratio > other_threshold:
             return "tamil"
         else:
             return "english"
@@ -1372,7 +1437,7 @@ ANSWER:"""
         # Common Malayalam question words and important terms
         malayalam_keywords = [
             # Question words
-            'എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്',
+            'എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര',
             # Policy/Insurance terms
             'പോളിസി', 'ബീമ', 'കവർ', 'ക്ലെയിം', 'പ്രീമിയം', 'കാത്തിരിക്കൽ', 'ഗ്രേസ്',
             # Financial terms
@@ -1382,7 +1447,11 @@ ANSWER:"""
             # Medical terms
             'ചികിത്സ', 'ആശുപത്രി', 'ഡോക്ടർ', 'രോഗം', 'ശസ്ത്രക്രിയ',
             # Process terms
-            'പ്രക്രിയ', 'ഘട്ടം', 'ക്രമം', 'രീതി', 'വഴി'
+            'പ്രക്രിയ', 'ഘട്ടം', 'ക്രമം', 'രീതി', 'വഴി',
+            # ENHANCED: Additional terms from user's questions
+            'ശുൽകം', 'ഇറക്കുമതി', 'ഉത്പന്നങ്ങൾ', 'കമ്പനി', 'നിക്ഷേപം', 'ലക്ഷ്യം',
+            'ഉപഭോക്താക്കൾ', 'ആഗോള', 'വിപണി', 'തന്ത്രം', 'ആശ്രിതത്വം', 'പ്രത്യാഘാതം',
+            'ഒഴിവാക്കൽ', 'ഉൾപ്പെടുത്തൽ', 'ബാധകം', 'പ്രഖ്യാപനം', 'ആശ്രിതത്വം'
         ]
         
         found_keywords = []
@@ -1429,7 +1498,24 @@ ANSWER:"""
             'ഘട്ടം': 'step',
             'ക്രമം': 'procedure',
             'രീതി': 'method',
-            'വഴി': 'way'
+            'വഴി': 'way',
+            # ENHANCED: Additional mappings for user's question terms
+            'ശുൽകം': 'tariff',
+            'ഇറക്കുമതി': 'import',
+            'ഉത്പന്നങ്ങൾ': 'products',
+            'കമ്പനി': 'company',
+            'നിക്ഷേപം': 'investment',
+            'ലക്ഷ്യം': 'objective',
+            'ഉപഭോക്താക്കൾ': 'consumers',
+            'ആഗോള': 'global',
+            'വിപണി': 'market',
+            'തന്ത്രം': 'strategy',
+            'ആശ്രിതത്വം': 'dependency',
+            'പ്രത്യാഘാതം': 'impact',
+            'ഒഴിവാക്കൽ': 'exemption',
+            'ഉൾപ്പെടുത്തൽ': 'inclusion',
+            'ബാധകം': 'applicable',
+            'പ്രഖ്യാപനം': 'announcement'
         }
         
         # Add English equivalents to the query
@@ -1488,7 +1574,15 @@ ANSWER:"""
             r'കാത്തിരിക്കൽ.*കാലയളവ്': 'waiting_period',
             r'ഗ്രേസ്.*കാലയളവ്': 'grace_period',
             r'പ്രീമിയം.*തുക': 'premium_amount',
-            r'ക്ലെയിം.*ചെയ്യാൻ': 'claim_process'
+            r'ക്ലെയിം.*ചെയ്യാൻ': 'claim_process',
+            # ENHANCED: Additional patterns from user's questions
+            r'ഏത്.*ദിവസമാണ്.*പ്രഖ്യാപിച്ചത്': 'announcement_date',
+            r'ഏത്.*ഉത്പന്നങ്ങൾക്ക്.*ബാധകമാണ്': 'applicable_products',
+            r'ഏത്.*സാഹചര്യത്തിൽ.*ഒഴികെയാക്കും': 'exemption_conditions',
+            r'എന്താണ്.*നിക്ഷേപം.*ലക്ഷ്യം': 'investment_objective',
+            r'എന്താണ്.*പ്രത്യാഘാതം.*ഉപഭോക്താക്കൾ': 'consumer_impact',
+            r'എന്താണ്.*തന്ത്രം.*ആശ്രിതത്വം': 'dependency_strategy',
+            r'എന്തൊക്കെ.*പ്രത്യാഘാതങ്ങൾ': 'policy_implications'
         }
         
         for pattern, pattern_type in patterns.items():
@@ -1533,6 +1627,34 @@ INSTRUCTIONS:"""
             'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
 2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
 3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
+            
+            'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
+2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
+3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
+            
+            'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
+3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
+            
+            'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
+3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
+            
+            'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
+3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
+            
+            'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
+2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
+            
+            'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+            'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
+2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
+3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
             
             'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
@@ -1801,8 +1923,8 @@ INSTRUCTIONS:"""
                     # Include chunk if it has good semantic similarity OR word overlap
                     if word_overlap > 0 or score > threshold * 1.1:
                         chunks.append(chunk_text)
-                    if len(chunks) >= 15:  # Increased chunk limit for better accuracy
-                        break
+                        if len(chunks) >= 15:  # Increased chunk limit for better accuracy
+                            break
         else:
             chunks = [result[0] for result in search_results[:10]]
         
