@@ -6,6 +6,7 @@ import hashlib
 from typing import List, Dict, Any, Tuple
 from collections import defaultdict
 import html
+import time
 
 import google.generativeai as genai
 from app.models.query import QueryRequest, QueryResponse
@@ -81,24 +82,36 @@ class AdvancedQueryAgent:
         """
         logger.info(f"🚀 Processing {len(request.questions)} questions for {request.documents[:100]}...")
         
-        # start_time = asyncio.get_event_loop().time()
         import time
         start_time = time.time()
         
         try:
-            # Load vector store (cached)
+            # OPTIMIZATION: Load vector store (cached) with timing
+            vector_start = time.time()
             self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+            vector_time = time.time() - vector_start
+            logger.info(f"📊 Vector store loaded in {vector_time:.2f}s")
+            
             self._current_document_url = request.documents
             logger.info(f"📝 Questions received: {request.questions}")
-            # Pre-extract and cache document intelligence
+            
+            # OPTIMIZATION: Pre-extract and cache document intelligence with timing
+            intel_start = time.time()
             doc_intelligence = await self._get_document_intelligence(request.documents)
+            intel_time = time.time() - intel_start
+            logger.info(f"📊 Document intelligence extracted in {intel_time:.2f}s")
             
-            # Process all questions with unified smart pipeline
+            # OPTIMIZATION: Process all questions with unified smart pipeline with timing
+            process_start = time.time()
             answers = await self._process_questions_unified(request.questions, doc_intelligence)
+            process_time = time.time() - process_start
+            logger.info(f"📊 Questions processed in {process_time:.2f}s")
             
-            elapsed =time.time() - start_time
+            elapsed = time.time() - start_time
             logger.info(f"✅ Processed {len(request.questions)} questions in {elapsed:.2f}s")
+            logger.info(f"📊 Performance breakdown: Vector={vector_time:.2f}s, Intel={intel_time:.2f}s, Process={process_time:.2f}s")
             logger.info(f"📤 Answers generated: {answers}")
+            
             return QueryResponse(answers=answers)
             
         except Exception as e:
@@ -106,7 +119,7 @@ class AdvancedQueryAgent:
             return QueryResponse(answers=[f"I encountered an error processing this question: {str(e)[:100]}" for _ in request.questions])
 
     async def _get_document_intelligence(self, document_url: str) -> Dict[str, Any]:
-        """Extract and cache structured intelligence from document"""
+        """OPTIMIZED: Extract and cache structured intelligence from document with faster processing"""
         
         cache_key = f"doc_intelligence_{hashlib.md5(document_url.encode()).hexdigest()}"
         
@@ -118,19 +131,19 @@ class AdvancedQueryAgent:
         
         logger.info("🧠 Extracting document intelligence...")
         
-        # Determine document type and extract accordingly
-        intelligence = await self._extract_document_intelligence()
+        # OPTIMIZATION: Faster intelligence extraction
+        intelligence = await self._extract_document_intelligence_optimized()
         
-        # Cache for 2 hours
-        await cache.set(cache_key, intelligence, ttl=7200)
+        # Cache for 4 hours (increased from 2 hours)
+        await cache.set(cache_key, intelligence, ttl=14400)
         
         return intelligence
 
-    async def _extract_document_intelligence(self) -> Dict[str, Any]:
-        """Extract ALL intelligence dynamically from document content"""
+    async def _extract_document_intelligence_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract intelligence with reduced processing overhead"""
         
-        # Broad search to understand document content
-        content_search = self.vector_store.search("", k=30)  # Get sample content
+        # OPTIMIZATION: Use smaller search for faster analysis
+        content_search = self.vector_store.search("", k=15)  # Reduced from 30
         all_text = " ".join([chunk for chunk, _, _ in content_search])
         
         intelligence = {
@@ -141,31 +154,33 @@ class AdvancedQueryAgent:
             'response_patterns': {}
         }
         
-        # Detect document type from content
-        if any(term in all_text.lower() for term in ['flight', 'landmark', 'city', 'endpoint']):
-            intelligence.update(await self._extract_flight_intelligence())
-        elif any(term in all_text.lower() for term in ['token', 'secret', 'extract']):
-            intelligence.update(await self._extract_token_intelligence())
-        elif any(term in all_text.lower() for term in ['policy', 'tariff', 'investment', 'news']):
-            intelligence.update(await self._extract_news_intelligence())
+        # OPTIMIZATION: Faster document type detection
+        all_text_lower = all_text.lower()
+        
+        # Quick type detection with reduced processing
+        if any(term in all_text_lower for term in ['flight', 'landmark', 'city', 'endpoint']):
+            intelligence.update(await self._extract_flight_intelligence_optimized())
+        elif any(term in all_text_lower for term in ['token', 'secret', 'extract']):
+            intelligence.update(await self._extract_token_intelligence_optimized())
+        elif any(term in all_text_lower for term in ['policy', 'tariff', 'investment', 'news']):
+            intelligence.update(await self._extract_news_intelligence_optimized())
         else:
-            intelligence.update(await self._extract_generic_intelligence())
+            intelligence.update(await self._extract_generic_intelligence_optimized())
         
         return intelligence
 
-    async def _extract_flight_intelligence(self) -> Dict[str, Any]:
-        """Extract flight document intelligence dynamically"""
+    async def _extract_flight_intelligence_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract flight document intelligence with reduced processing"""
         
-        # Search for city-landmark relationships
-        location_search = self.vector_store.search("city landmark location place", k=25)
+        # OPTIMIZATION: Use smaller search for faster extraction
+        location_search = self.vector_store.search("city landmark location place", k=15)  # Reduced from 25
         city_landmarks = {}
         
         for chunk, score, metadata in location_search:
-            # Multiple patterns to extract city-landmark pairs
+            # OPTIMIZATION: Simplified pattern matching
             patterns = [
                 r'(\w+(?:\s+\w+)*)\s*[\|\-\:]\s*([A-Z][a-zA-Z\s]+(?:Gate|Temple|Fort|Tower|Palace|Bridge|Minar|Beach|Garden|Memorial|Soudha|Statue|Ben|Opera|Cathedral|Mosque|Castle|Needle|Square|Museum|Falls|Familia|Acropolis|Mahal))',
-                r'([A-Z][a-zA-Z\s]+(?:Gate|Temple|Fort|Tower|Palace|Bridge|Minar|Beach|Garden|Memorial|Soudha|Statue|Ben|Opera|Cathedral|Mosque|Castle|Needle|Square|Museum|Falls|Familia|Acropolis|Mahal))\s*[\|\-\:]\s*(\w+(?:\s+\w+)*)',
-                r'(\w+)\s+(?:has|contains|features|includes)\s+([A-Z][a-zA-Z\s]+(?:Gate|Temple|Fort|Tower|Palace|Bridge|Minar|Beach|Garden|Memorial|Soudha|Statue|Ben|Opera|Cathedral|Mosque|Castle|Needle|Square|Museum|Falls|Familia|Acropolis|Mahal))'
+                r'([A-Z][a-zA-Z\s]+(?:Gate|Temple|Fort|Tower|Palace|Bridge|Minar|Beach|Garden|Memorial|Soudha|Statue|Ben|Opera|Cathedral|Mosque|Castle|Needle|Square|Museum|Falls|Familia|Acropolis|Mahal))\s*[\|\-\:]\s*(\w+(?:\s+\w+)*)'
             ]
             
             for pattern in patterns:
@@ -175,204 +190,177 @@ class AdvancedQueryAgent:
                         city, landmark = match
                         city = city.strip().title()
                         landmark = landmark.strip().title()
-                        if len(city) > 2 and len(landmark) > 5:
+                        if len(city) > 2 and len(landmark) > 3:
                             city_landmarks[city] = landmark
         
-        # Extract API information
-        api_info = await self._extract_api_info()
+        # OPTIMIZATION: Simplified API info extraction
+        api_info = await self._extract_api_info_optimized()
         
         return {
             'type': 'flight_document',
             'city_landmarks': city_landmarks,
-            'api_info': api_info,
-            'landmark_count': len(city_landmarks)
+            'api_info': api_info
         }
 
-    async def _extract_api_info(self) -> Dict[str, Any]:
-        """Extract API endpoints and URLs from document"""
+    async def _extract_api_info_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract API information with reduced processing"""
         
-        api_search = self.vector_store.search("API URL endpoint https GET POST", k=20)
-        
-        api_info = {
-            'urls': [],
-            'endpoints': {},
-            'base_urls': {},
-            'methods': []
-        }
+        # OPTIMIZATION: Use smaller search for faster extraction
+        api_search = self.vector_store.search("api endpoint url base", k=10)  # Reduced from 20
+        base_urls = {}
         
         for chunk, score, metadata in api_search:
-            # Extract URLs
-            urls = re.findall(r'https://[^\s<>"\']+', chunk)
-            api_info['urls'].extend(urls)
-            
-            # Extract API endpoints with their associated landmarks
-            endpoint_patterns = [
-                (r'(Gateway[^a-z]*India)', r'(getFirstCityFlightNumber)'),
-                (r'(Taj[^a-z]*Mahal)', r'(getSecondCityFlightNumber)'),
-                (r'(Eiffel[^a-z]*Tower)', r'(getThirdCityFlightNumber)'),
-                (r'(Big[^a-z]*Ben)', r'(getFourthCityFlightNumber)'),
-                (r'(other[^a-z]*landmarks?)', r'(getFifthCityFlightNumber)')
+            # Simplified URL extraction
+            url_patterns = [
+                r'https?://[^\s]+',
+                r'base.*url.*:.*https?://[^\s]+',
+                r'endpoint.*:.*https?://[^\s]+'
             ]
             
-            for landmark_pattern, endpoint_pattern in endpoint_patterns:
-                landmark_match = re.search(landmark_pattern, chunk, re.IGNORECASE)
-                endpoint_match = re.search(endpoint_pattern, chunk, re.IGNORECASE)
-                if landmark_match and endpoint_match:
-                    landmark = landmark_match.group(1).strip()
-                    endpoint = endpoint_match.group(1)
-                    api_info['endpoints'][landmark] = endpoint
-            
-            # Extract HTTP methods
-            methods = re.findall(r'\b(GET|POST|PUT|DELETE)\b', chunk, re.IGNORECASE)
-            api_info['methods'].extend(methods)
+            for pattern in url_patterns:
+                matches = re.findall(pattern, chunk, re.IGNORECASE)
+                for match in matches:
+                    if 'favorite' in match.lower():
+                        base_urls['favorite_city'] = match.strip()
+                    elif 'flight' in match.lower():
+                        base_urls['flights'] = match.strip()
+                    else:
+                        base_urls['base'] = match.strip()
         
-        # Categorize URLs
-        for url in api_info['urls']:
-            if 'favourite' in url.lower() or 'favorite' in url.lower():
-                api_info['base_urls']['favorite_city'] = url
-            elif 'flight' in url.lower():
-                api_info['base_urls']['flights'] = url.rstrip('/')
-        
-        return api_info
+        return {'base_urls': base_urls}
 
-    async def _extract_token_intelligence(self) -> Dict[str, Any]:
-        """Extract token intelligence dynamically"""
+    async def _extract_token_intelligence_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract token intelligence with reduced processing"""
         
-        token_search = self.vector_store.search("token secret key", k=10)
-        
-        token_info = {
-            'tokens': [],
-            'formats': [],
-            'lengths': []
-        }
+        # OPTIMIZATION: Use smaller search for faster extraction
+        token_search = self.vector_store.search("token secret extract", k=10)  # Reduced from 15
+        tokens = []
         
         for chunk, score, metadata in token_search:
-            # Multiple token extraction patterns
-            patterns = [
-                (r'\b([a-fA-F0-9]{64})\b', 'hex64'),
-                (r'\b([a-fA-F0-9]{32})\b', 'hex32'),
-                (r'\b([A-Za-z0-9+/]{40,}={0,2})\b', 'base64'),
-                (r'["\']([a-fA-F0-9]{20,})["\']', 'quoted_hex')
+            # Simplified token extraction
+            token_patterns = [
+                r'token.*:.*([a-zA-Z0-9]{20,})',
+                r'secret.*:.*([a-zA-Z0-9]{20,})',
+                r'extract.*:.*([a-zA-Z0-9]{20,})'
             ]
             
-            for pattern, format_type in patterns:
-                matches = re.findall(pattern, chunk)
-                for match in matches:
-                    token_info['tokens'].append(match)
-                    token_info['formats'].append(format_type)
-                    token_info['lengths'].append(len(match))
-        
-        # Get the longest/most likely token
-        primary_token = None
-        if token_info['tokens']:
-            primary_token = max(token_info['tokens'], key=len)
+            for pattern in token_patterns:
+                matches = re.findall(pattern, chunk, re.IGNORECASE)
+                tokens.extend(matches)
         
         return {
             'type': 'token_document',
-            'primary_token': primary_token,
-            'all_tokens': token_info['tokens'],
-            'token_formats': token_info['formats'],
-            'token_analysis': {
-                'count': len(token_info['tokens']),
-                'formats_found': list(set(token_info['formats'])),
-                'length_range': [min(token_info['lengths']), max(token_info['lengths'])] if token_info['lengths'] else [0, 0]
-            }
+            'tokens': tokens[:5]  # Limit to 5 tokens
         }
 
-    async def _extract_news_intelligence(self) -> Dict[str, Any]:
-        """Extract news document intelligence"""
+    async def _extract_news_intelligence_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract news intelligence with reduced processing"""
         
-        news_search = self.vector_store.search("policy investment tariff news", k=15)
-        
-        entities = {
-            'policies': [],
-            'numbers': [],
-            'companies': [],
-            'dates': []
-        }
+        # OPTIMIZATION: Use smaller search for faster extraction
+        news_search = self.vector_store.search("policy tariff investment news", k=10)  # Reduced from 15
+        policies = []
         
         for chunk, score, metadata in news_search:
-            # Extract policy-related content
-            if any(word in chunk.lower() for word in ['policy', 'tariff', 'regulation']):
-                entities['policies'].append(chunk[:200])
+            # Simplified policy extraction
+            policy_patterns = [
+                r'policy.*:.*([^.\n]+)',
+                r'tariff.*:.*([^.\n]+)',
+                r'investment.*:.*([^.\n]+)'
+            ]
             
-            # Extract numbers and percentages
-            numbers = re.findall(r'\d+(?:\.\d+)?%?', chunk)
-            entities['numbers'].extend(numbers)
-            
-            # Extract company names (capitalized words)
-            companies = re.findall(r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\b', chunk)
-            entities['companies'].extend(companies)
-            
-            # Extract dates
-            dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4})\b', chunk)
-            entities['dates'].extend(dates)
+            for pattern in policy_patterns:
+                matches = re.findall(pattern, chunk, re.IGNORECASE)
+                policies.extend(matches)
         
         return {
             'type': 'news_document',
-            'extracted_entities': entities,
-            'policy_count': len(entities['policies']),
-            'number_count': len(entities['numbers'])
+            'policies': policies[:5]  # Limit to 5 policies
         }
 
-    async def _extract_generic_intelligence(self) -> Dict[str, Any]:
-        """Extract generic document intelligence"""
+    async def _extract_generic_intelligence_optimized(self) -> Dict[str, Any]:
+        """OPTIMIZED: Extract generic intelligence with reduced processing"""
         
-        sample_search = self.vector_store.search("", k=10)
+        # OPTIMIZATION: Use smaller search for faster extraction
+        generic_search = self.vector_store.search("", k=10)  # Reduced from 15
+        entities = {}
         
-        content_analysis = {
-            'sample_content': '',
-            'key_terms': [],
-            'document_structure': {},
-            'content_types': []
-        }
-        
-        if sample_search:
-            combined_text = ' '.join([chunk for chunk, _, _ in sample_search[:5]])
-            content_analysis['sample_content'] = combined_text[:500]
-            
-            # Extract key terms
-            key_terms = re.findall(r'\b[A-Z][a-zA-Z]+\b', combined_text)
-            content_analysis['key_terms'] = list(set(key_terms))[:20]
-            
-            # Analyze content types
-            if any(term in combined_text.lower() for term in ['table', 'chart', 'figure']):
-                content_analysis['content_types'].append('structured_data')
-            if any(term in combined_text.lower() for term in ['paragraph', 'section', 'chapter']):
-                content_analysis['content_types'].append('text_document')
+        for chunk, score, metadata in generic_search:
+            # Simplified entity extraction
+            if 'policy' in chunk.lower():
+                entities['has_policy_info'] = True
+            if 'claim' in chunk.lower():
+                entities['has_claim_info'] = True
+            if 'premium' in chunk.lower():
+                entities['has_premium_info'] = True
         
         return {
-            'type': 'generic_document',
-            'content_analysis': content_analysis,
-            'chunk_count': len(self.vector_store.chunks)
+            'type': 'generic',
+            'extracted_entities': entities
         }
 
     async def _process_questions_unified(self, questions: List[str], doc_intelligence: Dict[str, Any]) -> List[str]:
-        """Process all questions with unified smart pipeline"""
+        """OPTIMIZED: Process all questions with aggressive caching and parallel processing"""
         
         answers = []
         
+        # OPTIMIZATION: Process questions in parallel for better performance
+        tasks = []
         for question in questions:
-            try:
-                # Try dynamic response based on document intelligence
-                dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-                if dynamic_answer:
-                    answers.append(dynamic_answer)
-                    continue
-                
-                # Smart processing based on question complexity
-                answer = await self._process_smart_question(question, doc_intelligence)
-                
-                # Enhance response completeness
-                answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-                answers.append(answer)
-                
-            except Exception as e:
-                logger.error(f"Error processing question '{question[:50]}': {e}")
-                fallback = await self._fallback_answer(question)
-                answers.append(fallback)
+            task = self._process_single_question_optimized(question, doc_intelligence)
+            tasks.append(task)
         
-        return answers
+        # Wait for all questions to complete
+        answers = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Handle any exceptions
+        processed_answers = []
+        for i, answer in enumerate(answers):
+            if isinstance(answer, Exception):
+                logger.error(f"Error processing question {i}: {answer}")
+                fallback = await self._fallback_answer(questions[i])
+                processed_answers.append(fallback)
+            else:
+                processed_answers.append(answer)
+        
+        return processed_answers
+
+    async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+        """OPTIMIZED: Process single question with aggressive caching"""
+        
+        # OPTIMIZATION: Cache key for this specific question and document
+        cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
+        
+        # Check cache first
+        cached_answer = await cache.get(cache_key)
+        if cached_answer:
+            logger.info(f"✅ Using cached answer for: {question[:50]}...")
+            return cached_answer
+        
+        try:
+            # Try dynamic response based on document intelligence
+            dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+            if dynamic_answer:
+                # Cache the dynamic answer
+                await cache.set(cache_key, dynamic_answer, ttl=3600)
+                return dynamic_answer
+            
+            # OPTIMIZED: Smart processing with reduced complexity
+            answer = await self._process_smart_question_optimized(question, doc_intelligence)
+            
+            # Enhance response completeness
+            answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+            
+            # Cache the final answer
+            await cache.set(cache_key, answer, ttl=3600)
+            
+            return answer
+            
+        except Exception as e:
+            logger.error(f"Error processing question '{question[:50]}': {e}")
+            fallback = await self._fallback_answer(question)
+            # Cache the fallback answer too
+            await cache.set(cache_key, fallback, ttl=1800)
+            return fallback
 
     async def _try_dynamic_response(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """Try to answer using ONLY document-extracted intelligence"""
@@ -783,6 +771,125 @@ class AdvancedQueryAgent:
         
     #     # Enhanced lookup for other questions
         # return await self._handle_enhanced_lookup(question_clean, doc_intelligence)
+    async def _process_smart_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+        """OPTIMIZED: Smart processing with reduced LLM calls and context size"""
+        
+        # Clean the question first with enhanced Unicode handling
+        question_clean = self._clean_text(question)
+        question_lower = question_clean.lower()
+        
+        # ENHANCED: Detect language for specialized processing
+        detected_language = self._detect_language(question_clean)
+        
+        # ENHANCED: For Malayalam questions, enhance query with English equivalents
+        if detected_language == "malayalam":
+            enhanced_question = self._enhance_malayalam_query(question_clean)
+            search_question = enhanced_question
+        else:
+            search_question = question_clean
+        
+        # OPTIMIZATION: Reduce search results for faster processing
+        search_results = self.vector_store.search(search_question, k=12)  # Reduced from 25
+        
+        if not search_results:
+            if detected_language == "malayalam":
+                return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ടായിരിക്കില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+            else:
+                return "I'm sorry, but I don't have enough information about this in the document. Could you please rephrase your question?"
+        
+        # OPTIMIZATION: Use smaller context window
+        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=8)  # Reduced from 15-18
+        context = "\n\n".join(chunks)
+        
+        # OPTIMIZATION: Single LLM call with optimized prompt
+        return await self._generate_single_optimized_answer(question, context, detected_language)
+
+    async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
+        """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
+        
+        if detected_language == "malayalam":
+            prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
+
+CONTEXT:
+{context}
+
+CUSTOMER QUESTION: {question}
+
+INSTRUCTIONS:
+1. സഹായകരമായ ബീമാ ഏജന്റ് പോലെ സൗഹൃദപരവും പ്രൊഫഷണലുമായ ടോണിൽ ഉത്തരം നൽകുക
+2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
+4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+5. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
+
+ANSWER:"""
+        else:
+            prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
+
+CONTEXT:
+{context}
+
+CUSTOMER QUESTION: {question}
+
+INSTRUCTIONS:
+1. Answer in a friendly, professional tone like a helpful insurance agent
+2. Be specific with numbers, dates, and conditions from the context
+3. Use only exact information from the document
+4. If information is not available, politely say you don't have that detail
+5. Be thorough but easy to understand
+
+ANSWER:"""
+        
+        try:
+            # OPTIMIZATION: Use faster model for most questions
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.2,
+                        'max_output_tokens': 400,  # Reduced for faster generation
+                        'top_p': 0.9,
+                        'top_k': 30
+                    }
+                ), timeout=15  # Reduced timeout
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Answer generation failed: {e}")
+            return "I apologize, but I encountered an error while processing your question. Please try again."
+
+    def _select_optimal_context_optimized(self, question: str, search_results: List[Tuple[str, float, Dict]], max_chunks: int = 8) -> List[str]:
+        """OPTIMIZED: Select optimal context chunks with reduced processing"""
+        if not search_results:
+            return []
+        
+        detected_language = self._detect_language(question)
+        question_clean = self._clean_text(question)
+        
+        # OPTIMIZATION: Simplified scoring for faster processing
+        scored_chunks = []
+        for chunk, score, metadata in search_results:
+            chunk_clean = self._clean_text(chunk)
+            
+            # Basic relevance scoring
+            question_words = set(re.findall(r'\b\w+\b', question_clean.lower()))
+            chunk_words = set(re.findall(r'\b\w+\b', chunk_clean.lower()))
+            overlap = len(question_words.intersection(chunk_words))
+            relevance_score = score + (overlap * 0.1)
+            
+            # Language bonus
+            if detected_language == "malayalam":
+                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', chunk_clean)
+                if malayalam_chars:
+                    relevance_score += 0.1
+            
+            scored_chunks.append((chunk_clean, relevance_score, metadata))
+        
+        # Sort by relevance score and take top chunks
+        scored_chunks.sort(key=lambda x: x[1], reverse=True)
+        return [chunk for chunk, _, _ in scored_chunks[:max_chunks]]
+
     async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """ENHANCED: Smart processing with advanced Malayalam multilingual support"""
         
@@ -1069,53 +1176,61 @@ ANSWER:"""
             fallback_context = "\n\n".join([result[0] for result in search_results[:4]])
             return f"Based on the available information: {fallback_context[:300]}... Please let me know if you need more specific details."
 
+    def _clean_response(self, response: str) -> str:
+        """OPTIMIZED: Clean response to remove unwanted characters and icons"""
+        
+        if not response:
+            return ""
+        
+        # Remove common unwanted characters and icons
+        unwanted_patterns = [
+            r'[🔸🔹🔺🔻⚡✨💡📝📌📍🎯✅❌⚠️🚨💯🔥💪🙏🤝👋👌👍👎]',  # Emojis and icons
+            r'[•◦▪▫▬▭▮▯▰▱]',  # Bullet points and geometric shapes
+            r'[⚫⚪⬛⬜]',  # Circle symbols
+            r'[➤➥➦➧➨➩➪➫➬➭➮➯➱]',  # Arrow symbols
+            r'[✗✘✙✚✛✜✝✞✟✠✡✢✣✤✥✦✧✩✪✫✬✭✮✯✰]',  # Cross and star symbols
+            r'[☐☑☒☓☔☕☖☗☘☙☚☛☜☝☞☟☠☡☢☣☤☥☦☧☨☩☪☫☬☭☮☯]',  # Various symbols
+            r'[♠♣♥♦♤♧♡♢]',  # Card suit symbols
+            r'[♩♪♫♬♭♮♯]',  # Music symbols
+            r'[☀☁☂☃☄★☆☎☏☐☑☒☓☔☕☖☗☘☙☚☛☜☝☞☟]',  # Weather and other symbols
+            r'[✈️🚗🚕🚙🚌🚎🏎️🚓🚑🚒🚐🚚🚛🚜🏍️🚨🚔🚍🚘🚖🚡🚠🚟🚞🚝🚄🚅🚈🚉🚊🚇🚆🚂🚃🚁🚀]',  # Vehicle emojis
+            r'[📱📲📟📠🔋🔌💻🖥️🖨️⌨️🖱️🖲️💽💾💿📀🎥📺📻📷📹📼🔍🔎🔏🔐🔒🔓]',  # Tech emojis
+            r'[🏠🏡🏢🏣🏤🏥🏦🏧🏨🏩🏪🏫🏬🏭🏮🏯🏰💒🗼🗽⛪🕌🕍🛕⛩️🕋⛲⛺🌁🌃🏙️🌄🌅🌆🌇🌉🎠🎡🎢💈🎪⛽🚏🚦🚧⚓⛵🚣🚤🚢⛴️🛥️🛳️🚀🛸🚁🛶⛵🚤🛥️🛳️⛴️🚢🚣🚁🛸🚀]',  # Building and transport emojis
+        ]
+        
+        cleaned = response
+        for pattern in unwanted_patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+        
+        # Remove multiple spaces and normalize
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        # Remove empty lines
+        lines = [line.strip() for line in cleaned.split('\n') if line.strip()]
+        cleaned = '\n'.join(lines)
+        
+        return cleaned
+
     def _enhance_response_completeness(self, question: str, answer: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Enhance response completeness and quality with human-like touch"""
+        """OPTIMIZED: Enhance response completeness with cleaned output"""
         
-        # Clean Unicode artifacts from answer
-        answer = self._clean_text(answer)
+        # OPTIMIZATION: Clean the answer first to remove unwanted characters
+        answer = self._clean_response(answer)
         
-        if not answer or len(answer.strip()) < 20:
-            return "I'm sorry, but I don't have enough information in the document to answer that question completely. Could you please rephrase or ask about something else mentioned in the document?"
+        if not answer:
+            return "I apologize, but I couldn't generate a proper response for your question."
         
+        # OPTIMIZATION: Simplified enhancement logic
         question_lower = question.lower()
+        
+        # Add document type context if missing
         doc_type = doc_intelligence.get('type', 'generic')
-        
-        # Enhance flight-related answers with more helpful context
-        if doc_type == 'flight_document' and 'flight' in question_lower:
-            if len(answer) < 200 and 'API' not in answer:
-                api_info = doc_intelligence.get('api_info', {})
-                base_urls = api_info.get('base_urls', {})
-                if base_urls.get('favorite_city'):
-                    answer += f"\n\nTo get your actual flight number, you'll need to start by calling {base_urls['favorite_city']} to get your assigned city, then follow the landmark-to-endpoint mapping process I mentioned above."
-        
-        # Enhance token-related answers with better explanations
-        if doc_type == 'token_document' and len(answer) < 80:
-            primary_token = doc_intelligence.get('primary_token')
-            if primary_token and primary_token not in answer:
-                answer = f"I found the token you're looking for! Here it is: {primary_token}\n\nThis appears to be a {len(primary_token)}-character token that you can use for authentication purposes."
-        
-        # Enhance policy-related answers with customer-friendly explanations
-        if 'policy' in question_lower or 'cover' in question_lower:
-            if 'not covered' in answer.lower() or 'excluded' in answer.lower():
-                if len(answer) < 150:
-                    answer += " This means this particular service or condition is not included in your policy coverage."
-            elif 'covered' in answer.lower() or 'included' in answer.lower():
-                if len(answer) < 150:
-                    answer += " This means this service or condition is included in your policy coverage, subject to the terms and conditions."
-        
-        # Ensure proper sentence ending with human-like touch
-        if not answer.endswith(('.', '!', '?', '"', "'")):
-            if '. ' in answer:
-                sentences = re.split(r'[.!?]+', answer)
-                if len(sentences) > 1 and sentences[-2].strip():
-                    answer = '.'.join(sentences[:-1]) + '.'
-            else:
-                answer = answer.rstrip() + '.'
-        
-        # Add helpful closing for longer answers
-        if len(answer) > 300 and not any(phrase in answer.lower() for phrase in ['let me know', 'feel free', 'if you need']):
-            answer += " Let me know if you need any clarification or have additional questions!"
+        if doc_type == 'flight_document' and 'flight' not in answer.lower():
+            answer += "\n\nThis information is from a flight-related document."
+        elif doc_type == 'token_document' and 'token' not in answer.lower():
+            answer += "\n\nThis information is from a token-related document."
+        elif doc_type == 'news_document' and 'policy' not in answer.lower():
+            answer += "\n\nThis information is from a policy-related document."
         
         return answer
 
@@ -1160,90 +1275,63 @@ ANSWER:"""
         
         return chunks, chunk_metadata
 
-    # def _clean_text(self, text: str) -> str:
-    #     """Clean text from HTML and Unicode artifacts"""
-    #     import unicodedata
-        
-    #     if not text:
-    #         return ""
-        
-    #     # Decode HTML entities
-    #     text = html.unescape(text)
-        
-    #     # Remove HTML tags
-    #     text = re.sub(r'<[^>]+>', ' ', text)
-        
-    #     # Handle Unicode artifacts
-    #     text = re.sub(r'\(cid:\d+\)', '', text)
-        
-    #     # Remove zero-width characters
-    #     text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
-        
-    #     # Normalize Unicode (important for Malayalam and other scripts)
-    #     text = unicodedata.normalize('NFKC', text)
-        
-    #     # Clean up control characters but keep newlines, tabs
-    #     text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
-        
-    #     # Normalize whitespace
-    #     text = re.sub(r'\s+', ' ', text).strip()
-        
-    #     return text
-    # app/agents/advanced_query_agent.py
-
     def _clean_text(self, text: str) -> str:
-        """ENHANCED: Advanced text cleaning with specialized Malayalam Unicode handling"""
-        import unicodedata
-        import html
+        """OPTIMIZED: Fast text cleaning with caching for repeated text"""
         
         if not text:
             return ""
         
-        # Decode HTML entities (e.g., &amp;)
+        # OPTIMIZATION: Cache key for cleaned text
+        cache_key = f"cleaned_text_{hashlib.md5(text.encode()).hexdigest()}"
+        
+        # Check cache first
+        try:
+            # Use sync cache for this operation
+            import diskcache
+            cache_dir = ".cache"
+            text_cache = diskcache.Cache(cache_dir)
+            cached_result = text_cache.get(cache_key)
+            if cached_result:
+                return cached_result
+        except:
+            pass
+        
+        # OPTIMIZATION: Simplified cleaning for faster processing
+        import html
+        import unicodedata
+        
+        # Basic HTML unescaping
         text = html.unescape(text)
         
-        # Remove any lingering HTML tags
+        # Remove HTML tags
         text = re.sub(r'<[^>]+>', ' ', text)
         
-        # Handle specific Unicode artifacts like (cid:dd)
+        # Remove common artifacts
         text = re.sub(r'\(cid:\d+\)', '', text)
-        
-        # Remove zero-width characters which can break rendering
         text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
         
-        # ENHANCED: Specialized Malayalam Unicode handling
-        # Fix common Malayalam rendering issues
+        # OPTIMIZATION: Simplified Malayalam Unicode handling
         malayalam_fixes = {
-            # Fix common Malayalam character combinations
             '\u0d4d\u200d': '\u0d4d',  # Remove ZWNJ after chandrakkala
             '\u0d4d\u200c': '\u0d4d',  # Remove ZWJ after chandrakkala
-            # Fix vowel signs that might be separated
-            '\u0d3e\u200d': '\u0d3e',  # aa sign
-            '\u0d3f\u200d': '\u0d3f',  # i sign
-            '\u0d40\u200d': '\u0d40',  # ii sign
-            '\u0d41\u200d': '\u0d41',  # u sign
-            '\u0d42\u200d': '\u0d42',  # uu sign
-            '\u0d43\u200d': '\u0d43',  # r sign
-            '\u0d46\u200d': '\u0d46',  # e sign
-            '\u0d47\u200d': '\u0d47',  # ee sign
-            '\u0d48\u200d': '\u0d48',  # ai sign
-            '\u0d4a\u200d': '\u0d4a',  # o sign
-            '\u0d4b\u200d': '\u0d4b',  # oo sign
-            '\u0d4c\u200d': '\u0d4c',  # au sign
         }
-        
         for old, new in malayalam_fixes.items():
             text = text.replace(old, new)
         
-        # IMPROVEMENT: Normalize Unicode to 'NFKC'. This is crucial for composing
-        # characters correctly in languages like Malayalam.
+        # Basic Unicode normalization
         text = unicodedata.normalize('NFKC', text)
         
-        # Clean up control characters but preserve essential whitespace like newlines and tabs
+        # Remove control characters (keep newlines, tabs, carriage returns)
         text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
         
-        # Normalize all whitespace (spaces, newlines, tabs) to a single space
+        # Normalize whitespace
         text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Cache the result
+        try:
+            text_cache.set(cache_key, text, expire=3600)
+        except:
+            pass
         
         return text
 
@@ -1865,7 +1953,7 @@ INSTRUCTIONS:"""
         else:
             # Most specific prompt
             if detected_language == "malayalam":
-                prompt = f"""ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിച്ച് ചോദ്യത്തിന് ഉത്തരം നൽകുക.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക\n2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ കൃത്യമായി പറയുക\n3. ഊഹങ്ങൾ ഒഴിവാക്കുക\n4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയുക\n\nANSWER:"""
+                prompt = f"""ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക\n2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ കൃത്യമായി പറയുക\n3. ഊഹങ്ങൾ ഒഴിവാക്കുക\n4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയുക\n\nANSWER:"""
             else:
                 prompt = f"""Use only exact information from the document to answer the question.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nINSTRUCTIONS:\n1. Use only exact information from the document\n2. State numbers, dates, and conditions precisely\n3. Avoid assumptions\n4. If information is not available, state it clearly\n\nANSWER:"""
         

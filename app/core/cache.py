@@ -17,10 +17,10 @@ import msgpack
 logger = logging.getLogger(__name__)
 
 class HybridCache:
-    """Enhanced hybrid cache using memory for small items and disk for large items"""
+    """OPTIMIZED: Enhanced hybrid cache with better performance settings"""
     
-    def __init__(self, cache_dir: str = ".cache", memory_size_mb: int = 500, disk_size_mb: int = 2000):
-        # Memory cache for small, frequently accessed items
+    def __init__(self, cache_dir: str = ".cache", memory_size_mb: int = 1000, disk_size_mb: int = 5000):
+        # OPTIMIZATION: Increased memory cache for better performance
         self.memory_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.memory_size_bytes = memory_size_mb * 1024 * 1024
         self.current_memory_size = 0
@@ -29,17 +29,21 @@ class HybridCache:
         # Create cache directory if it doesn't exist
         os.makedirs(cache_dir, exist_ok=True)
         
-        # Enhanced disk cache configuration
+        # OPTIMIZATION: Enhanced disk cache configuration with better performance
         self.disk_cache = diskcache.Cache(
             cache_dir,
             size_limit=disk_size_mb * 1024 * 1024,
             eviction_policy='least-recently-used',
-            cull_limit=0,  # Manual management for better control
-            statistics=True  # Enable statistics tracking
+            cull_limit=10,  # More aggressive cleanup
+            statistics=True,  # Enable statistics tracking
+            # OPTIMIZATION: Better performance settings
+            timeout=1,  # Faster timeout
+            disk_min_file_size=1024,  # Only cache files > 1KB on disk
+            disk_pickle_protocol=4  # Use faster pickle protocol
         )
         
-        # Thread pool for async disk operations
-        self._thread_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cache_worker")
+        # OPTIMIZATION: Increased thread pool for better concurrency
+        self._thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="cache_worker")
         
         # Enhanced statistics
         self.hits = 0
@@ -55,7 +59,7 @@ class HybridCache:
         self.read_count = 0
         self.write_count = 0
         
-        logger.info(f"✅ Initialized Enhanced Hybrid Cache (Memory: {memory_size_mb}MB, Disk: {disk_size_mb}MB)")
+        logger.info(f"✅ Initialized OPTIMIZED Hybrid Cache (Memory: {memory_size_mb}MB, Disk: {disk_size_mb}MB)")
     
     def _get_item_size(self, value: Any) -> int:
         """Get approximate size of an item with better estimation"""
