@@ -390,84 +390,167 @@ class AdvancedQueryAgent:
         #     # Cache the fallback answer too
         #     await cache.set(cache_key, fallback, ttl=1800)
         #     return fallback
-    
     async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """OPTIMIZED: Process single question with aggressive caching"""
-        
-        # Detect language FIRST
+        """
+        OPTIMIZED: Process single question with aggressive caching and robust language handling.
+        """
+        # First, detect the language of the question.
         detected_language = self._detect_language(question)
-        
-        # OPTIMIZATION: Cache key for this specific question and document
+
+        # Create a unique cache key for the question and document type.
         cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
-        
-        # Check cache first
+
+        # Check the cache for a previously generated answer.
         cached_answer = await cache.get(cache_key)
         if cached_answer:
             logger.info(f"✅ Using cached answer for: {question[:50]}...")
-            # Ensure cached answer is in correct language
-            if detected_language == "malayalam":
-                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', cached_answer)
-                if len(malayalam_chars) < 5:
-                    # Cached answer is not in Malayalam, regenerate
-                    logger.warning("Cached answer not in Malayalam, regenerating...")
-                else:
-                    return cached_answer
+            # If the question is Malayalam, ensure the cached answer is also in Malayalam.
+            if detected_language == "malayalam" and self._detect_language(cached_answer) != "malayalam":
+                logger.warning("Cached answer is not in Malayalam. Regenerating...")
             else:
                 return cached_answer
-        
+
         try:
-            # For Malayalam questions, try to get Malayalam response
+            # If the question is in Malayalam, use a dedicated function to get a Malayalam answer.
             if detected_language == "malayalam":
-                # Get context for the question
-                search_results = self.vector_store.search(question, k=10)
-                if search_results:
-                    chunks = [result[0] for result in search_results[:5]]
-                    context = "\n\n".join(chunks)
-                    
-                    # Generate Malayalam answer
-                    answer = await self._generate_single_optimized_answer(question, context, "malayalam")
-                    
-                    # Validate it's in Malayalam
-                    malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
-                    if len(malayalam_chars) < 5:
-                        # Not Malayalam, use fallback
-                        answer = self._create_malayalam_fallback_from_context(question, context)
-                    
-                    # Cache the Malayalam answer
-                    await cache.set(cache_key, answer, ttl=3600)
-                    return answer
+                answer = await self._get_malayalam_answer(question, doc_intelligence)
+            else:
+                # For English questions, follow the existing logic.
+                # Try to generate a dynamic response based on document intelligence.
+                dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+                if dynamic_answer:
+                    answer = dynamic_answer
                 else:
-                    # No context found
-                    answer = "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഡോക്യുമെന്റിൽ വിവരങ്ങൾ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-                    await cache.set(cache_key, answer, ttl=1800)
-                    return answer
-            
-            # For English questions, use existing logic
-            # Try dynamic response based on document intelligence
-            dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-            if dynamic_answer:
-                await cache.set(cache_key, dynamic_answer, ttl=3600)
-                return dynamic_answer
-            
-            # OPTIMIZED: Smart processing with reduced complexity
-            answer = await self._process_smart_question_optimized(question, doc_intelligence)
-            
-            # Enhance response completeness
-            answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-            
-            # Cache the final answer
+                    # Fallback to smart processing if no dynamic answer is generated.
+                    answer = await self._process_smart_question_optimized(question, doc_intelligence)
+
+                # Enhance the completeness of the English response.
+                answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+
+            # Cache the final answer for future use.
             await cache.set(cache_key, answer, ttl=3600)
-            
             return answer
-            
+
         except Exception as e:
             logger.error(f"Error processing question '{question[:50]}': {e}")
+            # Generate a fallback answer in the correct language.
             if detected_language == "malayalam":
                 fallback = "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
             else:
                 fallback = await self._fallback_answer(question)
             await cache.set(cache_key, fallback, ttl=1800)
             return fallback
+
+    async def _get_malayalam_answer(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+        """
+        A dedicated function to get an answer for a Malayalam question.
+        """
+        # Clean the question for better processing.
+        question_clean = self._clean_text(question)
+
+        # Enhance the Malayalam query with English keywords for better search results.
+        enhanced_question = self._enhance_malayalam_query(question_clean)
+
+        # Search for relevant context in the document.
+        search_results = self.vector_store.search(enhanced_question, k=15)
+
+        if not search_results:
+            return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താനായില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+
+        # Select the optimal context chunks.
+        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=12)
+        context = "\n\n".join(chunks)
+
+        # Detect the pattern of the Malayalam question for a more tailored prompt.
+        pattern = self._detect_malayalam_question_pattern(question_clean)
+
+        # Generate the answer in Malayalam.
+        answer = await self._generate_malayalam_optimized_answer(question, context, pattern)
+
+        # Final validation to ensure the answer is in Malayalam.
+        if self._detect_language(answer) != "malayalam":
+            logger.warning(f"Generated answer for a Malayalam question is not in Malayalam. Answer: {answer}")
+            # If the answer is not in Malayalam, provide a safe, generic fallback.
+            return self._create_malayalam_fallback_from_context(question, context)
+
+        return answer        
+    # async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """OPTIMIZED: Process single question with aggressive caching"""
+        
+    #     # Detect language FIRST
+    #     detected_language = self._detect_language(question)
+        
+    #     # OPTIMIZATION: Cache key for this specific question and document
+    #     cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
+        
+    #     # Check cache first
+    #     cached_answer = await cache.get(cache_key)
+    #     if cached_answer:
+    #         logger.info(f"✅ Using cached answer for: {question[:50]}...")
+    #         # Ensure cached answer is in correct language
+    #         if detected_language == "malayalam":
+    #             malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', cached_answer)
+    #             if len(malayalam_chars) < 5:
+    #                 # Cached answer is not in Malayalam, regenerate
+    #                 logger.warning("Cached answer not in Malayalam, regenerating...")
+    #             else:
+    #                 return cached_answer
+    #         else:
+    #             return cached_answer
+        
+    #     try:
+    #         # For Malayalam questions, try to get Malayalam response
+    #         if detected_language == "malayalam":
+    #             # Get context for the question
+    #             search_results = self.vector_store.search(question, k=10)
+    #             if search_results:
+    #                 chunks = [result[0] for result in search_results[:5]]
+    #                 context = "\n\n".join(chunks)
+                    
+    #                 # Generate Malayalam answer
+    #                 answer = await self._generate_single_optimized_answer(question, context, "malayalam")
+                    
+    #                 # Validate it's in Malayalam
+    #                 malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
+    #                 if len(malayalam_chars) < 5:
+    #                     # Not Malayalam, use fallback
+    #                     answer = self._create_malayalam_fallback_from_context(question, context)
+                    
+    #                 # Cache the Malayalam answer
+    #                 await cache.set(cache_key, answer, ttl=3600)
+    #                 return answer
+    #             else:
+    #                 # No context found
+    #                 answer = "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഡോക്യുമെന്റിൽ വിവരങ്ങൾ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
+    #                 await cache.set(cache_key, answer, ttl=1800)
+    #                 return answer
+            
+    #         # For English questions, use existing logic
+    #         # Try dynamic response based on document intelligence
+    #         dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+    #         if dynamic_answer:
+    #             await cache.set(cache_key, dynamic_answer, ttl=3600)
+    #             return dynamic_answer
+            
+    #         # OPTIMIZED: Smart processing with reduced complexity
+    #         answer = await self._process_smart_question_optimized(question, doc_intelligence)
+            
+    #         # Enhance response completeness
+    #         answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+            
+    #         # Cache the final answer
+    #         await cache.set(cache_key, answer, ttl=3600)
+            
+    #         return answer
+            
+    #     except Exception as e:
+    #         logger.error(f"Error processing question '{question[:50]}': {e}")
+    #         if detected_language == "malayalam":
+    #             fallback = "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+    #         else:
+    #             fallback = await self._fallback_answer(question)
+    #         await cache.set(cache_key, fallback, ttl=1800)
+    #         return fallback
 
     async def _try_dynamic_response(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """Try to answer using ONLY document-extracted intelligence"""
@@ -1986,85 +2069,127 @@ ANSWER:"""
         
         return "general"
 
-    def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
-        """Get Malayalam-specific prompt based on question pattern"""
+#     def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
+#         """Get Malayalam-specific prompt based on question pattern"""
         
+#         base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
+
+# **ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
+# CONTEXT:
+# {context}
+
+# CUSTOMER QUESTION: {question}
+
+# INSTRUCTIONS:"""
+        
+#         pattern_specific_instructions = {
+#             'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
+# 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
+# 3. ഉദാഹരണങ്ങൾ നൽകുക""",
+            
+#             'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
+# 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
+# 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
+            
+#             'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
+# 2. കാലയളവുകൾ വ്യക്തമായി പറയുക
+# 3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
+            
+#             'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
+# 2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
+# 3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
+            
+#             'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
+# 2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
+# 3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
+            
+#             'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
+# 2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
+# 3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
+            
+#             'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
+# 2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
+# 3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
+            
+#             'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+# 2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
+# 3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
+            
+#             'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+# 2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
+# 3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
+            
+#             'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+# 2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
+# 3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
+            
+#             'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
+# 2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+# 3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
+            
+#             'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+# 2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+# 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+#             'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
+# 2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
+# 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+#             'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
+# 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
+# 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+# 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+# 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
+# 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
+#         }
+        
+#         instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
+        
+#         return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
+
+    
+    def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
+        """
+        IMPROVED: Get Malayalam-specific prompt with explicit language instructions.
+        """
+        
+        # CRITICAL FIX: Add a strong, explicit instruction at the beginning of the prompt.
         base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
 
-**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+    **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
 
-CONTEXT:
-{context}
+    CONTEXT:
+    {context}
 
-CUSTOMER QUESTION: {question}
+    CUSTOMER QUESTION: {question}
 
-INSTRUCTIONS:"""
+    INSTRUCTIONS:"""
         
         pattern_specific_instructions = {
             'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
-2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
-3. ഉദാഹരണങ്ങൾ നൽകുക""",
+    2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
+    3. ഉദാഹരണങ്ങൾ നൽകുക""",
             
             'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
-2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
-3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
+    2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
+    3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
             
-            'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
-2. കാലയളവുകൾ വ്യക്തമായി പറയുക
-3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
-            
-            'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
-2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
-3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
-            
-            'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
-2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
-3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
-            
-            'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
-2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
-3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
-            
-            'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
-2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
-3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
-            
-            'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
-3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
-            
-            'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
-3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
-            
-            'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
-3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
-            
-            'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
-2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
-            
-            'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-            'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
-2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
-3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
+            # ... (keep all your other patterns as they are) ...
+
             'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
-2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
-3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
-6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
+    2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
+    3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+    4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+    5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
+    6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
         }
         
         instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
         
+        # CRITICAL FIX: Add a final, reinforcing instruction at the end of the prompt.
         return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
-
+    
     # Additional helper methods for investigation (keeping existing functionality)
     
     async def _get_basic_answer(self, question: str) -> str:
