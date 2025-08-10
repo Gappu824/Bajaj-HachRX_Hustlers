@@ -63,7 +63,7 @@ class AdvancedQueryAgent:
         try:
             # Load vector store (cached)
             self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
-            
+            logger.info(f"📝 Questions received: {request.questions}")
             # Pre-extract and cache document intelligence
             doc_intelligence = await self._get_document_intelligence(request.documents)
             
@@ -72,7 +72,7 @@ class AdvancedQueryAgent:
             
             elapsed =time.time() - start_time
             logger.info(f"✅ Processed {len(request.questions)} questions in {elapsed:.2f}s")
-            
+            logger.info(f"📤 Answers generated: {answers}")
             return QueryResponse(answers=answers)
             
         except Exception as e:

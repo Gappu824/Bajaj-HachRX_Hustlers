@@ -268,7 +268,8 @@ class HybridRAGPipeline:
         
         content = await self._download_document(url)
         # text, metadata = DocumentParser.parse_document(content, '.pdf')
-        text, metadata = self._safe_parse_document(content, file_extension)
+        # text, metadata = self._safe_parse_document(content, file_extension)
+        text, metadata = self._safe_parse_document(content, '.pdf')
         if not text or len(text.strip()) < 1:
             text = "Flight document processing failed."
             metadata = [{'source': url, 'type': 'error'}]
