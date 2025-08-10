@@ -598,16 +598,21 @@ class AdvancedQueryAgent:
     #         return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
         
     #     return None
+    # app/agents/advanced_query_agent.py
+
     async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Generate human-like token responses with actual URL fetching"""
+        """
+        IMPROVED: Generate human-like token responses with robust, non-cached URL fetching.
+        """
         
-        # If question asks to go to link, ALWAYS fetch fresh from URL
+        # If question asks to go to the link, ALWAYS fetch a fresh copy from the URL
         if any(phrase in question_lower for phrase in ['go to the link', 'get the secret token', 'extract token']):
             document_url = getattr(self, '_current_document_url', None)
             
             if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
                 try:
                     import aiohttp
+                    # IMPROVEMENT: Add headers to prevent caching
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -615,38 +620,40 @@ class AdvancedQueryAgent:
                         'Pragma': 'no-cache'
                     }
                     
-                    # Create new session for each request to avoid caching
+                    # IMPROVEMENT: Create a new session for each request to avoid client-side caching
                     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
                         async with session.get(document_url, headers=headers, ssl=False) as response:
                             if response.status == 200:
                                 content = await response.text()
                                 
-                                # Direct extraction from visible content
-                                import re
-                                # Look for the token in the visible page content
-                                # The token appears after "Your Secret Token" text
+                                # IMPROVEMENT: More robust extraction based on screenshot
+                                # First, look for the token specifically after the "Your Secret Token" text.
                                 token_pattern = r'Your Secret Token[^a-fA-F0-9]*([a-fA-F0-9]{64})'
                                 match = re.search(token_pattern, content, re.IGNORECASE | re.DOTALL)
                                 
-                                if not match:
-                                    # Alternative: Look for any 64-char hex string
-                                    matches = re.findall(r'\b([a-fA-F0-9]{64})\b', content)
-                                    # Filter out any that might be in scripts/styles
-                                    for potential_token in matches:
-                                        # Check if it's in visible content (not in script/style tags)
-                                        if not re.search(f'<script[^>]*>.*{potential_token}.*</script>', content, re.DOTALL):
-                                            return f"I went to the link and found the secret token! Here it is:\n\n**{potential_token}**\n\nThis is a 64-character hexadecimal token - perfect for authentication! 🔐"
-                                else:
+                                actual_token = None
+                                if match:
                                     actual_token = match.group(1)
+                                else:
+                                    # Fallback: Find any 64-char hex string in the visible content
+                                    matches = re.findall(r'\b([a-fA-F0-9]{64})\b', content)
+                                    if matches:
+                                        # Use the first one found that is not inside a script tag
+                                        for potential_token in matches:
+                                             if not re.search(f'<script[^>]*>.*{potential_token}.*</script>', content, re.DOTALL):
+                                                actual_token = potential_token
+                                                break
+
+                                if actual_token:
                                     return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a 64-character hexadecimal token - perfect for authentication! 🔐"
-                                            
+
                 except Exception as e:
                     logger.warning(f"Failed to fetch token from URL: {e}")
                 
-                # If direct fetch fails, return clear message
+                # If direct fetch fails, return a clear message
                 return "I tried to fetch the latest token from the link, but encountered an issue. Please check the URL directly or try again."
         
-        # For other token questions, use the primary token from document intelligence
+        # Fallback to existing logic for other token-related questions
         primary_token = doc_intelligence.get('primary_token')
         if not primary_token:
             return None
@@ -689,20 +696,23 @@ class AdvancedQueryAgent:
     #         return f"Companies mentioned: {', '.join(companies)}"
         
     #     return None
+    # app/agents/advanced_query_agent.py
+
     async def _dynamic_news_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Generate news responses from extracted document data with proper Unicode handling"""
+        """IMPROVED: Generate news responses with proper Unicode handling for all languages."""
         
         entities = doc_intelligence.get('extracted_entities', {})
         
-        # Clean the question for better matching
+        # IMPROVEMENT: Clean the question for better matching, especially for Unicode.
         question_clean = self._clean_text(question)
         question_lower_clean = question_clean.lower()
         
-        # For Malayalam questions, try to extract key English terms
+        # IMPROVEMENT: For multilingual questions, extract key English terms to aid matching.
         english_terms = re.findall(r'[a-zA-Z]+', question_lower_clean)
         
         if 'policy' in question_lower_clean or 'നയം' in question or any('polic' in term for term in english_terms):
             if entities.get('policies'):
+                # Clean the policy text before returning it
                 policies = [self._clean_text(p) for p in entities['policies'][:2]]
                 return f"Key policies mentioned: {' | '.join(policies)}"
         
@@ -713,22 +723,22 @@ class AdvancedQueryAgent:
         
         if 'company' in question_lower_clean or 'കമ്പനി' in question or any('compan' in term for term in english_terms):
             if entities.get('companies'):
+                # Clean company names before returning
                 companies = list(set([self._clean_text(c) for c in entities['companies']]))[:5]
                 return f"Companies mentioned: {', '.join(companies)}"
-        
-        # For date-related Malayalam queries
-        if 'ദിവസം' in question or 'date' in question_lower_clean or 'when' in question_lower_clean:
+                
+        # Add more specific multilingual keyword checks
+        if 'ദിവസം' in question or 'date' in question_lower_clean:
             dates = entities.get('dates', [])
             if dates:
                 return f"Dates mentioned: {', '.join(dates[:3])}"
-        
-        # For percentage/tariff related queries
+
         if 'ശുൽക്കം' in question or 'tariff' in question_lower_clean or '%' in question:
             numbers = entities.get('numbers', [])
             percentages = [n for n in numbers if '%' in n]
             if percentages:
                 return f"Tariff/percentage figures: {', '.join(percentages[:3])}"
-        
+                
         return None
     # async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
     #     """Smart processing based on question complexity"""
@@ -1053,32 +1063,65 @@ Answer:"""
         
         return chunks, chunk_metadata
 
+    # def _clean_text(self, text: str) -> str:
+    #     """Clean text from HTML and Unicode artifacts"""
+    #     import unicodedata
+        
+    #     if not text:
+    #         return ""
+        
+    #     # Decode HTML entities
+    #     text = html.unescape(text)
+        
+    #     # Remove HTML tags
+    #     text = re.sub(r'<[^>]+>', ' ', text)
+        
+    #     # Handle Unicode artifacts
+    #     text = re.sub(r'\(cid:\d+\)', '', text)
+        
+    #     # Remove zero-width characters
+    #     text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
+        
+    #     # Normalize Unicode (important for Malayalam and other scripts)
+    #     text = unicodedata.normalize('NFKC', text)
+        
+    #     # Clean up control characters but keep newlines, tabs
+    #     text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
+        
+    #     # Normalize whitespace
+    #     text = re.sub(r'\s+', ' ', text).strip()
+        
+    #     return text
+    # app/agents/advanced_query_agent.py
+
     def _clean_text(self, text: str) -> str:
-        """Clean text from HTML and Unicode artifacts"""
+        """IMPROVEMENT: Clean text from HTML and Unicode artifacts robustly."""
         import unicodedata
+        import html
         
         if not text:
             return ""
         
-        # Decode HTML entities
+        # Decode HTML entities (e.g., &amp;)
         text = html.unescape(text)
         
-        # Remove HTML tags
+        # Remove any lingering HTML tags
         text = re.sub(r'<[^>]+>', ' ', text)
         
-        # Handle Unicode artifacts
+        # Handle specific Unicode artifacts like (cid:dd)
         text = re.sub(r'\(cid:\d+\)', '', text)
         
-        # Remove zero-width characters
+        # Remove zero-width characters which can break rendering
         text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
         
-        # Normalize Unicode (important for Malayalam and other scripts)
+        # IMPROVEMENT: Normalize Unicode to 'NFKC'. This is crucial for composing
+        # characters correctly in languages like Malayalam.
         text = unicodedata.normalize('NFKC', text)
         
-        # Clean up control characters but keep newlines, tabs
+        # Clean up control characters but preserve essential whitespace like newlines and tabs
         text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
         
-        # Normalize whitespace
+        # Normalize all whitespace (spaces, newlines, tabs) to a single space
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
