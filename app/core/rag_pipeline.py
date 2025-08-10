@@ -26,7 +26,7 @@ from app.core.cache import cache
 from app.core.document_parser import DocumentParser
 from app.core.smart_chunker import SmartChunker
 from app.core.enhanced_retrieval import EnhancedRetriever
-import genai.types
+# import genai.types
 import google.generativeai.types as genai_types
 
 logger = logging.getLogger(__name__)
