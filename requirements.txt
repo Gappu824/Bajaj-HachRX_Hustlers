@@ -8,7 +8,6 @@ pydantic-settings
 chardet
 html5lib
 
-
 # Google AI and LLM
 google-generativeai
 
@@ -22,17 +21,17 @@ tika
 python-magic
 easyocr
 tabula-py
-camelot-py
+camelot-py[cv]
 
 # Enhanced retrieval
 rank-bm25
 nltk
 
 # HTTP requests and async
-requests
-tenacity
+httpx
 aiohttp
 aiofiles
+tenacity
 
 # Document processing
 pdfplumber
@@ -51,8 +50,8 @@ xlrd
 Pillow
 pytesseract
 
-# Cloud storage
-google-cloud-storage
+# Cloud storage (optional - only if using GCS)
+# google-cloud-storage
 
 # Environment and utilities
 python-dotenv
@@ -67,3 +66,7 @@ diskcache
 numpy
 scipy
 scikit-learn
+
+# Additional dependencies for your RAG pipeline
+zipfile36
+asyncio-throttle
