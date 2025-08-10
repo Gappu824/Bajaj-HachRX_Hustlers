@@ -24,6 +24,31 @@ class AdvancedQueryAgent:
         self.rag_pipeline = rag_pipeline
         self.vector_store: OptimizedVectorStore = None
         self.investigation_cache = {}
+
+    # def _clean_unicode_text(self, text: str) -> str:
+    #     """Clean Unicode text and remove artifacts"""
+    #     import unicodedata
+        
+    #     if not text:
+    #         return ""
+        
+    #     # Remove Unicode control characters and artifacts
+    #     text = re.sub(r'\(cid:\d+\)', '', text)
+        
+    #     # Normalize Unicode
+    #     text = unicodedata.normalize('NFKC', text)
+        
+    #     # Remove zero-width characters
+    #     text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
+        
+    #     # Fix common Malayalam rendering issues
+    #     # Replace multiple spaces with single space
+    #     text = re.sub(r'\s+', ' ', text)
+        
+    #     # Clean up any remaining artifacts
+    #     text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
+        
+    #     return text.strip()    
     def _format_city_landmark_mapping(self, city_landmarks: Dict[str, str]) -> str:
         """Format city-landmark mappings for display"""
         if not city_landmarks:
@@ -576,9 +601,8 @@ class AdvancedQueryAgent:
     async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
         """Generate human-like token responses with actual URL fetching"""
         
-        # If question asks to go to link, fetch from the actual URL
+        # If question asks to go to link, ALWAYS fetch fresh from URL
         if any(phrase in question_lower for phrase in ['go to the link', 'get the secret token', 'extract token']):
-            # ALWAYS fetch fresh from the URL, don't use cached content
             document_url = getattr(self, '_current_document_url', None)
             
             if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
@@ -587,40 +611,40 @@ class AdvancedQueryAgent:
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                        'Cache-Control': 'no-cache',  # Ensure fresh content
+                        'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache'
                     }
                     
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(document_url, headers=headers) as response:
+                    # Create new session for each request to avoid caching
+                    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
+                        async with session.get(document_url, headers=headers, ssl=False) as response:
                             if response.status == 200:
                                 content = await response.text()
-                                logger.info(f"Fetched fresh content from {document_url}")
                                 
-                                # Extract token from the response content
+                                # Direct extraction from visible content
                                 import re
-                                token_patterns = [
-                                    r'\b([a-fA-F0-9]{64})\b',  # 64-char hex
-                                    r'\b([a-fA-F0-9]{32})\b',  # 32-char hex
-                                    r'token["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?',
-                                    r'hackTeam["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?'  # Look for hackTeam assignment
-                                ]
+                                # Look for the token in the visible page content
+                                # The token appears after "Your Secret Token" text
+                                token_pattern = r'Your Secret Token[^a-fA-F0-9]*([a-fA-F0-9]{64})'
+                                match = re.search(token_pattern, content, re.IGNORECASE | re.DOTALL)
                                 
-                                for pattern in token_patterns:
-                                    token_match = re.search(pattern, content, re.IGNORECASE)
-                                    if token_match:
-                                        actual_token = token_match.group(1)
-                                        logger.info(f"Successfully extracted token: {actual_token[:10]}...")
-                                        return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a {len(actual_token)}-character hexadecimal token - perfect for authentication! 🔐"
-                            else:
-                                logger.warning(f"HTTP {response.status} when fetching {document_url}")
-                                        
+                                if not match:
+                                    # Alternative: Look for any 64-char hex string
+                                    matches = re.findall(r'\b([a-fA-F0-9]{64})\b', content)
+                                    # Filter out any that might be in scripts/styles
+                                    for potential_token in matches:
+                                        # Check if it's in visible content (not in script/style tags)
+                                        if not re.search(f'<script[^>]*>.*{potential_token}.*</script>', content, re.DOTALL):
+                                            return f"I went to the link and found the secret token! Here it is:\n\n**{potential_token}**\n\nThis is a 64-character hexadecimal token - perfect for authentication! 🔐"
+                                else:
+                                    actual_token = match.group(1)
+                                    return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a 64-character hexadecimal token - perfect for authentication! 🔐"
+                                            
                 except Exception as e:
                     logger.warning(f"Failed to fetch token from URL: {e}")
-                    
-            # REMOVE the fallback to vector store search as it might return stale data
-            # Instead, return a clear message that fresh fetch failed
-            return "I tried to fetch the latest token from the link, but encountered an issue. Please check the URL directly or try again."
+                
+                # If direct fetch fails, return clear message
+                return "I tried to fetch the latest token from the link, but encountered an issue. Please check the URL directly or try again."
         
         # For other token questions, use the primary token from document intelligence
         primary_token = doc_intelligence.get('primary_token')
@@ -647,41 +671,136 @@ class AdvancedQueryAgent:
             return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
         
         return None
-
+    # async def _dynamic_news_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """Generate news responses from extracted document data"""
+        
+    #     entities = doc_intelligence.get('extracted_entities', {})
+        
+    #     if 'policy' in question_lower and entities.get('policies'):
+    #         policies = entities['policies'][:2]
+    #         return f"Key policies mentioned: {' | '.join(policies)}"
+        
+    #     if 'investment' in question_lower and entities.get('numbers'):
+    #         numbers = [n for n in entities['numbers'] if any(c.isdigit() for c in n)][:5]
+    #         return f"Investment figures mentioned: {', '.join(numbers)}"
+        
+    #     if 'company' in question_lower and entities.get('companies'):
+    #         companies = list(set(entities['companies']))[:5]
+    #         return f"Companies mentioned: {', '.join(companies)}"
+        
+    #     return None
     async def _dynamic_news_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Generate news responses from extracted document data"""
+        """Generate news responses from extracted document data with proper Unicode handling"""
         
         entities = doc_intelligence.get('extracted_entities', {})
         
-        if 'policy' in question_lower and entities.get('policies'):
-            policies = entities['policies'][:2]
-            return f"Key policies mentioned: {' | '.join(policies)}"
+        # Clean the question for better matching
+        question_clean = self._clean_text(question)
+        question_lower_clean = question_clean.lower()
         
-        if 'investment' in question_lower and entities.get('numbers'):
-            numbers = [n for n in entities['numbers'] if any(c.isdigit() for c in n)][:5]
-            return f"Investment figures mentioned: {', '.join(numbers)}"
+        # For Malayalam questions, try to extract key English terms
+        english_terms = re.findall(r'[a-zA-Z]+', question_lower_clean)
         
-        if 'company' in question_lower and entities.get('companies'):
-            companies = list(set(entities['companies']))[:5]
-            return f"Companies mentioned: {', '.join(companies)}"
+        if 'policy' in question_lower_clean or 'നയം' in question or any('polic' in term for term in english_terms):
+            if entities.get('policies'):
+                policies = [self._clean_text(p) for p in entities['policies'][:2]]
+                return f"Key policies mentioned: {' | '.join(policies)}"
+        
+        if 'investment' in question_lower_clean or 'നിക്ഷേപ' in question or any('invest' in term for term in english_terms):
+            if entities.get('numbers'):
+                numbers = [n for n in entities['numbers'] if any(c.isdigit() for c in n)][:5]
+                return f"Investment figures mentioned: {', '.join(numbers)}"
+        
+        if 'company' in question_lower_clean or 'കമ്പനി' in question or any('compan' in term for term in english_terms):
+            if entities.get('companies'):
+                companies = list(set([self._clean_text(c) for c in entities['companies']]))[:5]
+                return f"Companies mentioned: {', '.join(companies)}"
+        
+        # For date-related Malayalam queries
+        if 'ദിവസം' in question or 'date' in question_lower_clean or 'when' in question_lower_clean:
+            dates = entities.get('dates', [])
+            if dates:
+                return f"Dates mentioned: {', '.join(dates[:3])}"
+        
+        # For percentage/tariff related queries
+        if 'ശുൽക്കം' in question or 'tariff' in question_lower_clean or '%' in question:
+            numbers = entities.get('numbers', [])
+            percentages = [n for n in numbers if '%' in n]
+            if percentages:
+                return f"Tariff/percentage figures: {', '.join(percentages[:3])}"
         
         return None
-
-    async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Smart processing based on question complexity"""
+    # async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """Smart processing based on question complexity"""
         
-        question_lower = question.lower()
+    #     question_lower = question.lower()
+        
+    #     # Computational questions
+    #     if any(indicator in question_lower for indicator in ['calculate', 'compute', 'probability']):
+    #         return await self._handle_computational_question(question, doc_intelligence)
+        
+    #     # Comprehensive analysis questions
+    #     if any(indicator in question_lower for indicator in ['analyze', 'compare', 'find all', 'list all']):
+    #         return await self._handle_comprehensive_question(question, doc_intelligence)
+        
+    #     # Enhanced lookup for other questions
+    #     return await self._handle_enhanced_lookup(question, doc_intelligence)
+    # async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """Smart processing based on question complexity with Unicode support"""
+        
+    #     # Clean the question first
+    #     question_clean = self._clean_unicode_text(question)
+    #     question_lower = question_clean.lower()
+        
+    #     # For Malayalam questions, also check for English keywords
+    #     english_terms = re.findall(r'[a-zA-Z]+', question_lower)
+        
+    #     # Computational questions
+    #     if any(indicator in question_lower for indicator in ['calculate', 'compute', 'probability']):
+    #         return await self._handle_computational_question(question_clean, doc_intelligence)
+        
+    #     # Check for Malayalam computational terms
+    #     if 'കണക്കാക്കുക' in question or 'ഗണിതം' in question:
+    #         return await self._handle_computational_question(question_clean, doc_intelligence)
+        
+    #     # Comprehensive analysis questions
+    #     if any(indicator in question_lower for indicator in ['analyze', 'compare', 'find all', 'list all']):
+    #         return await self._handle_comprehensive_question(question_clean, doc_intelligence)
+        
+    #     # Check for Malayalam analysis terms
+    #     if 'വിശകലനം' in question or 'താരതമ്യം' in question:
+    #         return await self._handle_comprehensive_question(question_clean, doc_intelligence)
+        
+    #     # Enhanced lookup for other questions
+        # return await self._handle_enhanced_lookup(question_clean, doc_intelligence)
+    async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
+        """Smart processing based on question complexity with Unicode support"""
+        
+        # Clean the question first
+        question_clean = self._clean_text(question)
+        question_lower = question_clean.lower()
+        
+        # For Malayalam questions, also check for English keywords
+        english_terms = re.findall(r'[a-zA-Z]+', question_lower)
         
         # Computational questions
         if any(indicator in question_lower for indicator in ['calculate', 'compute', 'probability']):
-            return await self._handle_computational_question(question, doc_intelligence)
+            return await self._handle_computational_question(question_clean, doc_intelligence)
+        
+        # Check for Malayalam computational terms
+        if 'കണക്കാക്കുക' in question or 'ഗണിതം' in question:
+            return await self._handle_computational_question(question_clean, doc_intelligence)
         
         # Comprehensive analysis questions
         if any(indicator in question_lower for indicator in ['analyze', 'compare', 'find all', 'list all']):
-            return await self._handle_comprehensive_question(question, doc_intelligence)
+            return await self._handle_comprehensive_question(question_clean, doc_intelligence)
+        
+        # Check for Malayalam analysis terms
+        if 'വിശകലനം' in question or 'താരതമ്യം' in question:
+            return await self._handle_comprehensive_question(question_clean, doc_intelligence)
         
         # Enhanced lookup for other questions
-        return await self._handle_enhanced_lookup(question, doc_intelligence)
+        return await self._handle_enhanced_lookup(question_clean, doc_intelligence)
 
     async def _handle_computational_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """Handle computational questions"""
@@ -837,8 +956,44 @@ Answer:"""
             logger.error(f"Enhanced lookup failed: {e}")
             return f"Based on available information: {context[:300]}..."
 
+    # def _enhance_response_completeness(self, question: str, answer: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """Enhance response completeness and quality"""
+        
+    #     if not answer or len(answer.strip()) < 20:
+    #         return "I couldn't find sufficient information to answer this question completely."
+        
+    #     question_lower = question.lower()
+    #     doc_type = doc_intelligence.get('type', 'generic')
+        
+    #     # Enhance flight-related answers
+    #     if doc_type == 'flight_document' and 'flight' in question_lower:
+    #         if len(answer) < 150 and 'API' not in answer:
+    #             api_info = doc_intelligence.get('api_info', {})
+    #             base_urls = api_info.get('base_urls', {})
+    #             if base_urls.get('favorite_city'):
+    #                 answer += f"\n\nTo get the actual flight number, start by calling {base_urls['favorite_city']} to get your city, then follow the landmark-to-endpoint mapping process."
+        
+    #     # Enhance token-related answers
+    #     if doc_type == 'token_document' and len(answer) < 50:
+    #         primary_token = doc_intelligence.get('primary_token')
+    #         if primary_token and primary_token not in answer:
+    #             answer = f"The extracted token is: {primary_token}"
+        
+    #     # Ensure proper sentence ending
+    #     if not answer.endswith(('.', '!', '?', '"', "'")):
+    #         if '. ' in answer:
+    #             sentences = re.split(r'[.!?]+', answer)
+    #             if len(sentences) > 1 and sentences[-2].strip():
+    #                 answer = '.'.join(sentences[:-1]) + '.'
+    #         else:
+    #             answer = answer.rstrip() + '.'
+        
+    #     return answer
     def _enhance_response_completeness(self, question: str, answer: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Enhance response completeness and quality"""
+        """Enhance response completeness and quality with Unicode support"""
+        
+        # Clean Unicode artifacts from answer
+        answer = self._clean_text(answer)
         
         if not answer or len(answer.strip()) < 20:
             return "I couldn't find sufficient information to answer this question completely."
@@ -899,7 +1054,9 @@ Answer:"""
         return chunks, chunk_metadata
 
     def _clean_text(self, text: str) -> str:
-        """Clean text from HTML and artifacts"""
+        """Clean text from HTML and Unicode artifacts"""
+        import unicodedata
+        
         if not text:
             return ""
         
@@ -911,7 +1068,15 @@ Answer:"""
         
         # Handle Unicode artifacts
         text = re.sub(r'\(cid:\d+\)', '', text)
-        text = text.encode('ascii', 'ignore').decode('utf-8', 'ignore')
+        
+        # Remove zero-width characters
+        text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
+        
+        # Normalize Unicode (important for Malayalam and other scripts)
+        text = unicodedata.normalize('NFKC', text)
+        
+        # Clean up control characters but keep newlines, tabs
+        text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
         
         # Normalize whitespace
         text = re.sub(r'\s+', ' ', text).strip()
@@ -1185,7 +1350,7 @@ Answer:"""
             return True
             
         return False
-
+    
     async def _generate_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
         """Generate answer with enterprise-grade prompting"""
         
@@ -1239,13 +1404,13 @@ Answer:"""
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.1,
-                        max_output_tokens=max_tokens,
-                        top_p=0.95,
-                        top_k=40,
-                        candidate_count=1
-                    )
+                    generation_config={
+                        'temperature': 0.1,
+                        'max_output_tokens': max_tokens,
+                        'top_p': 0.95,
+                        'top_k': 40,
+                        'candidate_count': 1
+                    }
                 ),
                 timeout=30
             )
@@ -1263,3 +1428,81 @@ Answer:"""
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
             return "An error occurred while generating the answer. Please try rephrasing your question."
+
+    # async def _generate_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
+    #     """Generate answer with enterprise-grade prompting"""
+        
+    #     context = "\n\n---SECTION---\n\n".join(chunks)
+        
+    #     if is_complex:
+    #         prompt = f"""You are an expert analyst. Provide a comprehensive, accurate answer based on the context.
+
+    # CONTEXT:
+    # {context}
+
+    # QUESTION: {question}
+
+    # INSTRUCTIONS:
+    # 1. Analyze all relevant information in the context carefully
+    # 2. For questions asking for multiple items, find ALL instances
+    # 3. For calculations or counts, be precise and show your work
+    # 4. For processes or procedures, explain step-by-step
+    # 5. Include specific details, numbers, and examples from the context
+    # 6. Explain your reasoning and how you reached your conclusion
+    # 7. If information seems incomplete, state what additional details would be helpful
+    # 8. Use clear, professional language
+
+    # ANSWER:"""
+            
+    #         model_name = settings.LLM_MODEL_NAME_PRECISE
+    #         max_tokens = 1000
+    #     else:
+    #         prompt = f"""Answer the question accurately and completely based on the context.
+
+    # CONTEXT:
+    # {context}
+
+    # QUESTION: {question}
+
+    # INSTRUCTIONS:
+    # - Be specific and accurate
+    # - Include relevant details from the context
+    # - If the question asks for a list, provide all items you can find
+    # - Use natural, clear language
+    # - Show brief reasoning for your answer
+
+    # ANSWER:"""
+            
+    #         model_name = settings.LLM_MODEL_NAME
+    #         max_tokens = 600
+        
+    #     try:
+    #         model = genai.GenerativeModel(model_name)
+            
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config=genai.types.GenerationConfig(
+    #                     temperature=0.1,
+    #                     max_output_tokens=max_tokens,
+    #                     top_p=0.95,
+    #                     top_k=40,
+    #                     candidate_count=1
+    #                 )
+    #             ),
+    #             timeout=30
+    #         )
+            
+    #         answer = response.text.strip()
+            
+    #         if not answer or len(answer) < 10:
+    #             return "Unable to generate a valid answer from the available context."
+            
+    #         return answer
+            
+    #     except asyncio.TimeoutError:
+    #         logger.error(f"Answer generation timeout for question: {question[:50]}...")
+    #         return "Processing timeout. The question may be too complex for quick analysis."
+    #     except Exception as e:
+    #         logger.error(f"Answer generation failed: {e}")
+    #         return "An error occurred while generating the answer. Please try rephrasing your question."
