@@ -829,6 +829,8 @@ class AdvancedQueryAgent:
         if detected_language == "malayalam":
             prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
 
+**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
 CONTEXT:
 {context}
 
@@ -840,6 +842,7 @@ INSTRUCTIONS:
 3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
 4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
 5. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
+6. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
 
 ANSWER:"""
         else:
@@ -907,6 +910,9 @@ ANSWER:"""
                 return answer
             else:
                 # If LLM didn't respond in Malayalam, provide a Malayalam fallback
+                # Also log this issue for debugging
+                logger.warning(f"LLM responded in English for Malayalam question: {question[:50]}...")
+                logger.warning(f"Response was: {answer[:100]}...")
                 return f"ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
                 
         except Exception as e:
@@ -1020,6 +1026,8 @@ ANSWER:"""
         if detected_language == "malayalam":
             prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ പോളിസി അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ പോളിസി ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
 
+**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
 CONTEXT:
 {context}
 
@@ -1035,6 +1043,7 @@ INSTRUCTIONS:
 7. ഈ വിവരങ്ങൾ ഉപഭോക്താവിന് എന്താണ് അർത്ഥമാക്കുന്നത് എന്ന് വിശദീകരിക്കുക
 8. പോളിസിയിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
 9. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
+10. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
 
 ANSWER:"""
         else:
@@ -1596,6 +1605,8 @@ ANSWER:"""
         
         base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
 
+**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
 CONTEXT:
 {context}
 
@@ -1666,7 +1677,7 @@ INSTRUCTIONS:"""
         
         instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
         
-        return f"{base_prompt}\n{instructions}\n\nANSWER:"
+        return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
 
     # Additional helper methods for investigation (keeping existing functionality)
     
@@ -2064,6 +2075,8 @@ INSTRUCTIONS:"""
                 pattern = self._detect_malayalam_question_pattern(question)
                 prompt_template = self._get_malayalam_specific_prompt(question, pattern)
                 prompt = prompt_template.format(context=context, question=question)
+                # Add extra emphasis for Malayalam responses
+                prompt += "\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**"
             else:
                 prompt = f"""You are a helpful enterprise chatbot. Answer accurately and completely.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nANSWER:"""
         elif attempt == 2:
@@ -2075,7 +2088,7 @@ INSTRUCTIONS:"""
         else:
             # Most specific prompt
             if detected_language == "malayalam":
-                prompt = f"""ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക\n2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ കൃത്യമായി പറയുക\n3. ഊഹങ്ങൾ ഒഴിവാക്കുക\n4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയുക\n\nANSWER:"""
+                prompt = f"""ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക.\n\n**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക\n2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ കൃത്യമായി പറയുക\n3. ഊഹങ്ങൾ ഒഴിവാക്കുക\n4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയുക\n5. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**\n\nANSWER:"""
             else:
                 prompt = f"""Use only exact information from the document to answer the question.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nINSTRUCTIONS:\n1. Use only exact information from the document\n2. State numbers, dates, and conditions precisely\n3. Avoid assumptions\n4. If information is not available, state it clearly\n\nANSWER:"""
         
