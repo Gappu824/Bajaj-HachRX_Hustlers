@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     MAX_DOCUMENT_SIZE_MB: int = 100  # Reduced for better performance
     CHUNK_SIZE_CHARS: int = 800  # Optimal chunk size for balance
     CHUNK_OVERLAP_CHARS: int = 150  # Good overlap
+
+    ENABLE_UTF8_SUPPORT: bool = True
+    DEFAULT_ENCODING: str = "utf-8"
     
     # New performance settings
     MAX_QUESTION_LENGTH: int = 500  # Limit question length

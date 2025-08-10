@@ -87,6 +87,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def fix_encoding(request: Request, call_next):
+    # Fix UTF-8 encoding for request body
+    if request.headers.get("content-type") == "application/json":
+        body = await request.body()
+        if body:
+            try:
+                # Ensure proper UTF-8 decoding
+                decoded = body.decode('utf-8')
+                # Re-encode to fix any encoding issues
+                request._body = decoded.encode('utf-8')
+            except:
+                pass
+    
+    response = await call_next(request)
+    return response
+
 # Middleware for request logging and error handling
 @app.middleware("http")
 async def log_requests(request: Request, call_next):

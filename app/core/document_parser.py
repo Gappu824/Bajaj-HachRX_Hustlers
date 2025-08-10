@@ -500,12 +500,46 @@ class DocumentParser:
             logger.error(f"ODT parsing failed: {e}")
             return f"Error parsing ODT: {str(e)}", [{'type': 'error'}]
     
+    # @staticmethod
+    # def parse_text(content: bytes) -> Tuple[str, List[Dict]]:
+    #     """Fallback text extraction with encoding detection"""
+    #     try:
+    #         # Try multiple encodings
+    #         for encoding in ['utf-8', 'latin-1', 'cp1252', 'ascii']:
+    #             try:
+    #                 text = content.decode(encoding, errors='ignore')
+    #                 if text and text.strip():
+    #                     return text, [{'type': 'text', 'encoding': encoding}]
+    #             except:
+    #                 continue
+            
+    #         return "Unable to decode text content", [{'type': 'error'}]
+            
+    #     except Exception as e:
+    #         logger.error(f"Text parsing failed: {e}")
+    #         return "Unable to extract text from file", [{'type': 'error'}]
     @staticmethod
     def parse_text(content: bytes) -> Tuple[str, List[Dict]]:
-        """Fallback text extraction with encoding detection"""
+        """Enhanced text extraction with better UTF-8 support"""
         try:
-            # Try multiple encodings
-            for encoding in ['utf-8', 'latin-1', 'cp1252', 'ascii']:
+            # Try UTF-8 first with strict error handling
+            try:
+                text = content.decode('utf-8')
+                if text and text.strip():
+                    return text, [{'type': 'text', 'encoding': 'utf-8'}]
+            except UnicodeDecodeError:
+                pass
+            
+            # Try UTF-8 with error replacement
+            try:
+                text = content.decode('utf-8', errors='replace')
+                if text and text.strip():
+                    return text, [{'type': 'text', 'encoding': 'utf-8-replaced'}]
+            except:
+                pass
+            
+            # Try other encodings
+            for encoding in ['latin-1', 'cp1252', 'ascii']:
                 try:
                     text = content.decode(encoding, errors='ignore')
                     if text and text.strip():
