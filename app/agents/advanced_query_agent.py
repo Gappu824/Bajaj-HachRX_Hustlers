@@ -335,32 +335,61 @@ class AdvancedQueryAgent:
         if cached_answer:
             logger.info(f"✅ Using cached answer for: {question[:50]}...")
             return cached_answer
-        
         try:
-                # Try dynamic response based on document intelligence
-                dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-                if dynamic_answer:
-                    # Cache the dynamic answer
-                    await cache.set(cache_key, dynamic_answer, ttl=3600)
-                    return dynamic_answer
-                
-                # OPTIMIZED: Smart processing with reduced complexity
-                answer = await self._process_smart_question_optimized(question, doc_intelligence)
-                
-                # Enhance response completeness
-                answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-                
-                # Cache the final answer
-                await cache.set(cache_key, answer, ttl=3600)
-                
-                return answer
-                
+        # Try dynamic response based on document intelligence
+            dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+            if dynamic_answer:
+                # ENHANCED: Ensure Malayalam response for Malayalam questions
+                dynamic_answer = self._ensure_malayalam_response(question, dynamic_answer)
+                await cache.set(cache_key, dynamic_answer, ttl=3600)
+                return dynamic_answer
+            
+            # OPTIMIZED: Smart processing with reduced complexity
+            answer = await self._process_smart_question_optimized(question, doc_intelligence)
+            
+            # Enhance response completeness
+            answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+            
+            # ENHANCED: Ensure Malayalam response for Malayalam questions
+            answer = self._ensure_malayalam_response(question, answer)
+            
+            # Cache the final answer
+            await cache.set(cache_key, answer, ttl=3600)
+            
+            return answer
+            
         except Exception as e:
             logger.error(f"Error processing question '{question[:50]}': {e}")
             fallback = await self._fallback_answer(question)
-            # Cache the fallback answer too
+            # ENHANCED: Ensure Malayalam response for fallback
+            fallback = self._ensure_malayalam_response(question, fallback)
             await cache.set(cache_key, fallback, ttl=1800)
             return fallback
+        # try:
+        #         # Try dynamic response based on document intelligence
+        #         dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
+        #         if dynamic_answer:
+        #             # Cache the dynamic answer
+        #             await cache.set(cache_key, dynamic_answer, ttl=3600)
+        #             return dynamic_answer
+                
+        #         # OPTIMIZED: Smart processing with reduced complexity
+        #         answer = await self._process_smart_question_optimized(question, doc_intelligence)
+                
+        #         # Enhance response completeness
+        #         answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+                
+        #         # Cache the final answer
+        #         await cache.set(cache_key, answer, ttl=3600)
+                
+        #         return answer
+                
+        # except Exception as e:
+        #     logger.error(f"Error processing question '{question[:50]}': {e}")
+        #     fallback = await self._fallback_answer(question)
+        #     # Cache the fallback answer too
+        #     await cache.set(cache_key, fallback, ttl=1800)
+        #     return fallback
 
     async def _try_dynamic_response(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """Try to answer using ONLY document-extracted intelligence"""
@@ -823,64 +852,202 @@ class AdvancedQueryAgent:
         else:
             return await self._generate_single_optimized_answer(question, context, detected_language)
 
+#     async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
+#         """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
+        
+#         if detected_language == "malayalam":
+#             prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
+
+# **ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
+# CONTEXT:
+# {context}
+
+# CUSTOMER QUESTION: {question}
+
+# INSTRUCTIONS:
+# 1. സഹായകരമായ ബീമാ ഏജന്റ് പോലെ സൗഹൃദപരവും പ്രൊഫഷണലുമായ ടോണിൽ ഉത്തരം നൽകുക
+# 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+# 3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
+# 4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+# 5. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
+# 6. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
+
+# ANSWER:"""
+#         else:
+#             prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
+
+# CONTEXT:
+# {context}
+
+# CUSTOMER QUESTION: {question}
+
+# INSTRUCTIONS:
+# 1. Answer in a friendly, professional tone like a helpful insurance agent
+# 2. Be specific with numbers, dates, and conditions from the context
+# 3. Use only exact information from the document
+# 4. If information is not available, politely say you don't have that detail
+# 5. Be thorough but easy to understand
+
+# ANSWER:"""
+        
+#         try:
+#             # OPTIMIZATION: Use faster model for most questions
+#             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+#             response = await asyncio.wait_for(
+#                 model.generate_content_async(
+#                     prompt,
+#                     generation_config={
+#                         'temperature': 0.2,
+#                         'max_output_tokens': 400,  # Reduced for faster generation
+#                         'top_p': 0.9,
+#                         'top_k': 30
+#                     }
+#                 ), timeout=15  # Reduced timeout
+#             )
+#             return response.text.strip()
+#         except Exception as e:
+#             logger.error(f"Answer generation failed: {e}")
+#             return "I apologize, but I encountered an error while processing your question. Please try again."
     async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
         """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
         
         if detected_language == "malayalam":
+            # ENHANCED: Stronger Malayalam enforcement
             prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
 
-**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+    **CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM LANGUAGE. DO NOT USE ENGLISH IN YOUR RESPONSE.**
+    **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷ് ഉപയോഗിക്കരുത്.**
 
-CONTEXT:
-{context}
+    CONTEXT:
+    {context}
 
-CUSTOMER QUESTION: {question}
+    CUSTOMER QUESTION (മലയാളം): {question}
 
-INSTRUCTIONS:
-1. സഹായകരമായ ബീമാ ഏജന്റ് പോലെ സൗഹൃദപരവും പ്രൊഫഷണലുമായ ടോണിൽ ഉത്തരം നൽകുക
-2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
-4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-5. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
-6. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
+    INSTRUCTIONS (നിർദ്ദേശങ്ങൾ):
+    1. മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക - MALAYALAM ONLY
+    2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+    3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
+    4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് മലയാളത്തിൽ പറയുക
+    5. DO NOT TRANSLATE TO ENGLISH - ഇംഗ്ലീഷിലേക്ക് വിവർത്തനം ചെയ്യരുത്
 
-ANSWER:"""
+    ANSWER IN MALAYALAM (മലയാളത്തിൽ ഉത്തരം):"""
         else:
             prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
 
-CONTEXT:
-{context}
+    CONTEXT:
+    {context}
 
-CUSTOMER QUESTION: {question}
+    CUSTOMER QUESTION: {question}
 
-INSTRUCTIONS:
-1. Answer in a friendly, professional tone like a helpful insurance agent
-2. Be specific with numbers, dates, and conditions from the context
-3. Use only exact information from the document
-4. If information is not available, politely say you don't have that detail
-5. Be thorough but easy to understand
+    INSTRUCTIONS:
+    1. Answer in a friendly, professional tone like a helpful insurance agent
+    2. Be specific with numbers, dates, and conditions from the context
+    3. Use only exact information from the document
+    4. If information is not available, politely say you don't have that detail
+    5. Be thorough but easy to understand
 
-ANSWER:"""
+    ANSWER:"""
         
         try:
             # OPTIMIZATION: Use faster model for most questions
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            
+            # ENHANCED: Stronger generation config for Malayalam
+            if detected_language == "malayalam":
+                generation_config = {
+                    'temperature': 0.1,  # Lower temperature for more consistent Malayalam
+                    'max_output_tokens': 500,
+                    'top_p': 0.8,  # More focused generation
+                    'top_k': 20,  # Reduced for better language consistency
+                }
+            else:
+                generation_config = {
+                    'temperature': 0.2,
+                    'max_output_tokens': 400,
+                    'top_p': 0.9,
+                    'top_k': 30
+                }
+            
             response = await asyncio.wait_for(
                 model.generate_content_async(
                     prompt,
-                    generation_config={
-                        'temperature': 0.2,
-                        'max_output_tokens': 400,  # Reduced for faster generation
-                        'top_p': 0.9,
-                        'top_k': 30
-                    }
-                ), timeout=15  # Reduced timeout
+                    generation_config=generation_config
+                ), timeout=15
             )
-            return response.text.strip()
+            
+            answer = response.text.strip()
+            
+            # ENHANCED: Validate Malayalam response
+            if detected_language == "malayalam":
+                # Check if the answer contains Malayalam characters
+                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
+                if not malayalam_chars or len(malayalam_chars) < 5:
+                    # LLM failed to respond in Malayalam, provide a fallback
+                    logger.warning(f"LLM responded in English for Malayalam question. Retrying...")
+                    
+                    # Try again with even stronger prompt
+                    stronger_prompt = f"""മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. MALAYALAM ONLY.
+
+    Context: {context[:500]}
+    ചോദ്യം: {question}
+
+    മലയാളത്തിൽ ഉത്തരം:"""
+                    
+                    retry_response = await asyncio.wait_for(
+                        model.generate_content_async(
+                            stronger_prompt,
+                            generation_config={
+                                'temperature': 0.0,
+                                'max_output_tokens': 300,
+                                'top_p': 0.5,
+                                'top_k': 10
+                            }
+                        ), timeout=10
+                    )
+                    
+                    retry_answer = retry_response.text.strip()
+                    malayalam_chars_retry = re.findall(r'[\u0d00-\u0d7f]', retry_answer)
+                    
+                    if malayalam_chars_retry and len(malayalam_chars_retry) >= 5:
+                        return retry_answer
+                    else:
+                        # Final fallback
+                        return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മലയാളത്തിൽ ഉത്തരം നൽകാൻ കഴിയുന്നില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+                
+                return answer
+            else:
+                return answer
+                
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
-            return "I apologize, but I encountered an error while processing your question. Please try again."
-
+            if detected_language == "malayalam":
+                return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+            else:
+                return "I apologize, but I encountered an error while processing your question. Please try again."
+    def _ensure_malayalam_response(self, question: str, answer: str) -> str:
+        """Ensure Malayalam questions get Malayalam answers"""
+        detected_language = self._detect_language(question)
+        
+        if detected_language == "malayalam":
+            # Check if answer is in Malayalam
+            malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
+            
+            if not malayalam_chars or len(malayalam_chars) < 5:
+                # Answer is not in Malayalam, return a Malayalam fallback
+                logger.warning(f"Non-Malayalam answer detected for Malayalam question")
+                
+                # Try to provide a contextual Malayalam response
+                if "error" in answer.lower() or "fail" in answer.lower():
+                    return "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+                elif "not found" in answer.lower() or "no information" in answer.lower():
+                    return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
+                else:
+                    return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മലയാളത്തിൽ ഉത്തരം നൽകാൻ കഴിയുന്നില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+        
+        return answer
+    
+    
     async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
         """ENHANCED: Generate Malayalam answers with pattern-specific prompts"""
         
