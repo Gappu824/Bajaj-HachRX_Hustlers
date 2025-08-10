@@ -19,6 +19,18 @@ async def run_submission(
     that can decompose complex problems.
     """
     from urllib.parse import urlparse
+
+    # Before processing the request
+    if hasattr(request, 'json'):
+        # Ensure proper UTF-8 decoding of JSON request
+        try:
+            body = await request.body()
+            import json
+            json_data = json.loads(body.decode('utf-8'))
+            # Re-create request object with properly decoded data
+            request._json = json_data
+        except Exception as e:
+            logger.warning(f"JSON UTF-8 fix failed: {e}")
     
     try:
         parsed = urlparse(request_body.documents.strip())

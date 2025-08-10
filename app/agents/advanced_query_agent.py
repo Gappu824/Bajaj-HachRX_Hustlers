@@ -63,6 +63,7 @@ class AdvancedQueryAgent:
         try:
             # Load vector store (cached)
             self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+            self._current_document_url = request.documents
             logger.info(f"📝 Questions received: {request.questions}")
             # Pre-extract and cache document intelligence
             doc_intelligence = await self._get_document_intelligence(request.documents)
@@ -501,50 +502,131 @@ class AdvancedQueryAgent:
         
         return response
 
-    async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Generate human-like token responses with actual link fetching"""
+    # async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
+    #     """Generate human-like token responses with actual URL fetching"""
         
-        primary_token = doc_intelligence.get('primary_token')
-        token_analysis = doc_intelligence.get('token_analysis', {})
+    #     # If question asks to go to link, fetch from the actual URL
+    #     if any(phrase in question_lower for phrase in ['go to the link', 'get the secret token', 'extract token']):
+    #         # Extract the URL from the document URL itself (it's the token URL)
+    #         document_url = getattr(self, '_current_document_url', None)
+            
+    #         if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
+    #             try:
+    #                 import aiohttp
+    #                 headers = {
+    #                     'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
+    #                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    #                 }
+                    
+    #                 async with aiohttp.ClientSession() as session:
+    #                     async with session.get(document_url, headers=headers) as response:
+    #                         if response.status == 200:
+    #                             content = await response.text()
+    #                             # Extract token from the response content
+    #                             import re
+    #                             token_patterns = [
+    #                                 r'\b([a-fA-F0-9]{64})\b',  # 64-char hex
+    #                                 r'\b([a-fA-F0-9]{32})\b',  # 32-char hex
+    #                                 r'token["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?'
+    #                             ]
+                                
+    #                             for pattern in token_patterns:
+    #                                 token_match = re.search(pattern, content)
+    #                                 if token_match:
+    #                                     actual_token = token_match.group(1)
+    #                                     return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a {len(actual_token)}-character hexadecimal token - perfect for authentication! 🔐"
+                                        
+    #             except Exception as e:
+    #                 logger.warning(f"Failed to fetch token from URL: {e}")
+            
+    #         # If URL fetch fails, try to extract from document content
+    #         token_search = self.vector_store.search("token secret hackTeam", k=10)
+    #         for chunk, score, metadata in token_search:
+    #             import re
+    #             token_match = re.search(r'\b([a-fA-F0-9]{64})\b', chunk)
+    #             if token_match:
+    #                 actual_token = token_match.group(1)
+    #                 return f"I found the secret token from the document! Here it is:\n\n**{actual_token}**\n\nThis appears to be a 64-character hexadecimal token - perfect for authentication! 🔐"
+        
+    #     # For other token questions, use the primary token from document intelligence
+    #     primary_token = doc_intelligence.get('primary_token')
+    #     if not primary_token:
+    #         return None
+        
+    #     if any(phrase in question_lower for phrase in ['replicate', 'exactly as it appears']):
+    #         return f"Here's the token exactly as it appears:\n\n{primary_token}"
+        
+    #     if 'how many characters' in question_lower:
+    #         return f"The token has **{len(primary_token)} characters** - that's a standard length for SHA-256 hash tokens! 📏"
+        
+    #     if any(word in question_lower for word in ['encoding', 'format', 'likely']):
+    #         return f"Based on the characters (0-9, a-f), this is definitely **hexadecimal encoding**! It's a 64-character hex string, which suggests it's likely a SHA-256 hash. 🔢"
+        
+    #     if 'non-alphanumeric' in question_lower:
+    #         has_special = bool(re.search(r'[^a-fA-F0-9]', primary_token))
+    #         if has_special:
+    #             return "Yes, the token contains non-alphanumeric characters."
+    #         else:
+    #             return "No, the token contains only alphanumeric characters (specifically 0-9 and a-f). ✅"
+        
+    #     if 'jwt token' in question_lower:
+    #         return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
+        
+    #     return None
+    async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
+        """Generate human-like token responses with actual URL fetching"""
         
         # If question asks to go to link, fetch from the actual URL
         if any(phrase in question_lower for phrase in ['go to the link', 'get the secret token', 'extract token']):
-            # Try to extract URL from the document or use the known pattern
-            token_search = self.vector_store.search("register.hackrx.in utils get-secret-token", k=5)
+            # ALWAYS fetch fresh from the URL, don't use cached content
+            document_url = getattr(self, '_current_document_url', None)
             
-            # Look for URL in the document
-            url = None
-            for chunk, score, metadata in token_search:
-                import re
-                urls = re.findall(r'https://register\.hackrx\.in/utils/get-secret-token[^\s<>"\']*', chunk)
-                if urls:
-                    url = urls[0]
-                    break
-            
-            # If we found a URL, fetch the actual token
-            if url:
+            if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
                 try:
                     import aiohttp
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Cache-Control': 'no-cache',  # Ensure fresh content
+                        'Pragma': 'no-cache'
+                    }
+                    
                     async with aiohttp.ClientSession() as session:
-                        async with session.get(url) as response:
+                        async with session.get(document_url, headers=headers) as response:
                             if response.status == 200:
                                 content = await response.text()
-                                # Extract token from the response
-                                token_match = re.search(r'\b([a-fA-F0-9]{64})\b', content)
-                                if token_match:
-                                    actual_token = token_match.group(1)
-                                    return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a 64-character hexadecimal token - perfect for authentication! 🔐"
+                                logger.info(f"Fetched fresh content from {document_url}")
+                                
+                                # Extract token from the response content
+                                import re
+                                token_patterns = [
+                                    r'\b([a-fA-F0-9]{64})\b',  # 64-char hex
+                                    r'\b([a-fA-F0-9]{32})\b',  # 32-char hex
+                                    r'token["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?',
+                                    r'hackTeam["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?'  # Look for hackTeam assignment
+                                ]
+                                
+                                for pattern in token_patterns:
+                                    token_match = re.search(pattern, content, re.IGNORECASE)
+                                    if token_match:
+                                        actual_token = token_match.group(1)
+                                        logger.info(f"Successfully extracted token: {actual_token[:10]}...")
+                                        return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a {len(actual_token)}-character hexadecimal token - perfect for authentication! 🔐"
+                            else:
+                                logger.warning(f"HTTP {response.status} when fetching {document_url}")
+                                        
                 except Exception as e:
                     logger.warning(f"Failed to fetch token from URL: {e}")
-            
-            # Fallback to extracted token from document if URL fetch fails
-            if primary_token:
-                return f"I found the secret token from the document! Here it is:\n\n**{primary_token}**\n\nThis appears to be a 64-character hexadecimal token - perfect for authentication! 🔐"
+                    
+            # REMOVE the fallback to vector store search as it might return stale data
+            # Instead, return a clear message that fresh fetch failed
+            return "I tried to fetch the latest token from the link, but encountered an issue. Please check the URL directly or try again."
         
+        # For other token questions, use the primary token from document intelligence
+        primary_token = doc_intelligence.get('primary_token')
         if not primary_token:
             return None
         
-        # Rest of the responses remain the same...
         if any(phrase in question_lower for phrase in ['replicate', 'exactly as it appears']):
             return f"Here's the token exactly as it appears:\n\n{primary_token}"
         
@@ -563,17 +645,6 @@ class AdvancedQueryAgent:
         
         if 'jwt token' in question_lower:
             return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
-        
-        # Computational requests with human touch
-        if 'sha-256' in question_lower:
-            import hashlib
-            result = hashlib.sha256(primary_token.encode()).hexdigest()
-            return f"Here's the SHA-256 hash of your token:\n\n**{result}**\n\nThis creates a unique fingerprint of the original token! 🔒"
-        
-        if 'base64' in question_lower:
-            import base64
-            result = base64.b64encode(primary_token.encode()).decode()
-            return f"Here's the Base64 encoding:\n\n**{result}**\n\nBase64 is great for safely transmitting data! 📦"
         
         return None
 

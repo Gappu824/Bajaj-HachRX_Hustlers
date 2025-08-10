@@ -77,6 +77,23 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+@app.middleware("http")
+async def fix_utf8_encoding(request: Request, call_next):
+    """Fix UTF-8 encoding for Malayalam and other Unicode characters"""
+    if request.method == "POST" and request.headers.get("content-type") == "application/json":
+        try:
+            body = await request.body()
+            if body:
+                # Decode and re-encode to fix encoding issues
+                decoded = body.decode('utf-8', errors='replace')
+                # Fix common encoding issues
+                decoded = decoded.encode('utf-8').decode('utf-8')
+                request._body = decoded.encode('utf-8')
+        except Exception as e:
+            logger.warning(f"Encoding fix failed: {e}")
+    
+    response = await call_next(request)
+    return response
 
 # Add CORS middleware
 app.add_middleware(
