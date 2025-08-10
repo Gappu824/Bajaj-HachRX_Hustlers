@@ -1443,74 +1443,186 @@ class HybridRAGPipeline:
     #     wait=wait_exponential(multiplier=1, min=2, max=5)
     # )
 
+    # def _is_complex_question(self, question: str) -> bool:
+    #     """Detect if question requires complex reasoning, now with pattern recognition."""
+    #     question_lower = question.lower()
+        
+    #     # --- CHANGED: Added pattern matching for implicitly complex queries ---
+    #     # Keywords that signal a need for detailed, multi-step answers
+    #     complex_indicators = [
+    #         'calculate', 'compare', 'analyze', 'explain', 'list all', 
+    #         'how many', 'what is the total', 'summarize', 'what are the differences',
+    #         'evaluate', 'assess', 'trace the process', 'logic flow'
+    #     ]
+    #     if any(indicator in question_lower for indicator in complex_indicators):
+    #         return True
+
+    #     # --- CHANGED: Added regex for questions that imply a process ---
+    #     # Catches questions like "What is my flight number?" which require a procedure
+    #     process_patterns = [
+    #         r'what is my \w+',
+    #         r'how do i find \w+',
+    #         r'what are the steps to \w+'
+    #     ]
+    #     if any(re.search(pattern, question_lower) for pattern in process_patterns):
+    #         return True
+        
+    #     return False
+
     def _is_complex_question(self, question: str) -> bool:
-        """Detect if question requires complex reasoning, now with pattern recognition."""
+        """Enhanced complexity detection for better answer routing"""
         question_lower = question.lower()
         
-        # --- CHANGED: Added pattern matching for implicitly complex queries ---
-        # Keywords that signal a need for detailed, multi-step answers
+        # Explicit complexity indicators
         complex_indicators = [
             'calculate', 'compare', 'analyze', 'explain', 'list all', 
-            'how many', 'what is the total', 'summarize', 'what are the differences',
-            'evaluate', 'assess', 'trace the process', 'logic flow'
+            'how many', 'what is the total', 'summarize', 'differences',
+            'evaluate', 'assess', 'trace', 'logic', 'process', 'workflow',
+            'find all', 'identify all', 'inconsistencies', 'contradictions'
         ]
+        
         if any(indicator in question_lower for indicator in complex_indicators):
             return True
 
-        # --- CHANGED: Added regex for questions that imply a process ---
-        # Catches questions like "What is my flight number?" which require a procedure
-        process_patterns = [
-            r'what is my \w+',
-            r'how do i find \w+',
-            r'what are the steps to \w+'
+        # Pattern-based detection
+        complexity_patterns = [
+            r'what is my \w+',           # Personal lookup questions
+            r'how do i \w+',             # Process questions  
+            r'what are the steps',       # Procedural questions
+            r'find.+all.+',             # Comprehensive search
+            r'list.+every.+',           # Complete enumeration
+            r'\b\d+.*\b.*\d+',          # Questions with multiple numbers
         ]
-        if any(re.search(pattern, question_lower) for pattern in process_patterns):
+        
+        if any(re.search(pattern, question_lower) for pattern in complexity_patterns):
             return True
         
+        # Length-based heuristic (longer questions often more complex)
+        if len(question.split()) > 10:
+            return True
+            
         return False
+#     async def _generate_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
+#         """Generate answer using Gemini"""
+        
+#         # Combine chunks
+#         context = "\n\n---\n\n".join(chunks)
+        
+#         # Create prompt
+#         if is_complex:
+#             prompt = f"""You are analyzing a document to answer a complex question. 
+# Provide a comprehensive and accurate answer based on the context.
+
+# CONTEXT:
+# {context}
+
+# QUESTION: {question}
+
+# INSTRUCTIONS:
+# 1. Analyze all relevant information in the context
+# 2. For calculations or counts, be precise and show your work
+# 3. For comparisons, clearly state the differences
+# 4. Include specific details, numbers, and examples from the context
+# 5. If information is incomplete, state what is missing
+# 6. Structure your answer clearly
+
+# ANSWER:"""
+            
+#             model_name = settings.LLM_MODEL_NAME_PRECISE
+#             max_tokens = 800
+#         else:
+#             prompt = f"""Answer the question based on the context provided.
+# Be specific and accurate.
+
+# CONTEXT:
+# {context}
+
+# QUESTION: {question}
+
+# ANSWER:"""
+            
+#             model_name = settings.LLM_MODEL_NAME
+#             max_tokens = 400
+        
+#         # Generate answer
+#         try:
+#             model = genai.GenerativeModel(model_name)
+            
+#             response = await asyncio.wait_for(
+#                 model.generate_content_async(
+#                     prompt,
+#                     generation_config=genai.types.GenerationConfig(
+#                         temperature=0.1,
+#                         max_output_tokens=max_tokens,
+#                         top_p=0.95,
+#                         candidate_count=1
+#                     )
+#                 ),
+#                 timeout=settings.ANSWER_TIMEOUT_SECONDS
+#             )
+            
+#             answer = response.text.strip()
+            
+#             # Validate answer
+#             if not answer or len(answer) < 10:
+#                 return "Unable to generate a valid answer."
+            
+#             return answer
+            
+#         except asyncio.TimeoutError:
+#             logger.error(f"Answer generation timeout for question: {question[:50]}...")
+#             return "Processing timeout. Please try again."
+#         except Exception as e:
+#             logger.error(f"Answer generation failed: {e}")
+#             return "An error occurred while generating the answer."
     async def _generate_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
-        """Generate answer using Gemini"""
+        """Generate answer with enterprise-grade prompting"""
         
-        # Combine chunks
-        context = "\n\n---\n\n".join(chunks)
+        # Combine chunks with better formatting
+        context = "\n\n---SECTION---\n\n".join(chunks)
         
-        # Create prompt
         if is_complex:
-            prompt = f"""You are analyzing a document to answer a complex question. 
-Provide a comprehensive and accurate answer based on the context.
+            prompt = f"""You are an expert analyst. Provide a comprehensive, accurate answer based on the context.
 
-CONTEXT:
-{context}
+    CONTEXT:
+    {context}
 
-QUESTION: {question}
+    QUESTION: {question}
 
-INSTRUCTIONS:
-1. Analyze all relevant information in the context
-2. For calculations or counts, be precise and show your work
-3. For comparisons, clearly state the differences
-4. Include specific details, numbers, and examples from the context
-5. If information is incomplete, state what is missing
-6. Structure your answer clearly
+    INSTRUCTIONS:
+    1. Analyze all relevant information in the context carefully
+    2. For questions asking for multiple items, find ALL instances
+    3. For calculations or counts, be precise and show your work
+    4. For processes or procedures, explain step-by-step
+    5. Include specific details, numbers, and examples from the context
+    6. Explain your reasoning and how you reached your conclusion
+    7. If information seems incomplete, state what additional details would be helpful
+    8. Use clear, professional language
 
-ANSWER:"""
+    ANSWER:"""
             
             model_name = settings.LLM_MODEL_NAME_PRECISE
-            max_tokens = 800
+            max_tokens = 1000  # Increased
         else:
-            prompt = f"""Answer the question based on the context provided.
-Be specific and accurate.
+            prompt = f"""Answer the question accurately and completely based on the context.
 
-CONTEXT:
-{context}
+    CONTEXT:
+    {context}
 
-QUESTION: {question}
+    QUESTION: {question}
 
-ANSWER:"""
+    INSTRUCTIONS:
+    - Be specific and accurate
+    - Include relevant details from the context
+    - If the question asks for a list, provide all items you can find
+    - Use natural, clear language
+    - Show brief reasoning for your answer
+
+    ANSWER:"""
             
             model_name = settings.LLM_MODEL_NAME
-            max_tokens = 400
+            max_tokens = 600  # Increased
         
-        # Generate answer
         try:
             model = genai.GenerativeModel(model_name)
             
@@ -1521,27 +1633,26 @@ ANSWER:"""
                         temperature=0.1,
                         max_output_tokens=max_tokens,
                         top_p=0.95,
+                        top_k=40,
                         candidate_count=1
                     )
                 ),
-                timeout=settings.ANSWER_TIMEOUT_SECONDS
+                timeout=30  # Increased timeout
             )
             
             answer = response.text.strip()
             
-            # Validate answer
             if not answer or len(answer) < 10:
-                return "Unable to generate a valid answer."
+                return "Unable to generate a valid answer from the available context."
             
             return answer
             
         except asyncio.TimeoutError:
             logger.error(f"Answer generation timeout for question: {question[:50]}...")
-            return "Processing timeout. Please try again."
+            return "Processing timeout. The question may be too complex for quick analysis."
         except Exception as e:
             logger.error(f"Answer generation failed: {e}")
-            return "An error occurred while generating the answer."
-    
+            return "An error occurred while generating the answer. Please try rephrasing your question."
     # async def process_query(self, document_url: str, questions: List[str]) -> List[str]:
     #     """Process multiple questions efficiently"""
         

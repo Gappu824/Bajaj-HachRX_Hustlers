@@ -1178,18 +1178,60 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"Failed to answer from plan: {e}")
     #         return await self.rag_pipeline.answer_question(question, self.vector_store)
-    async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
-        """
-        OPTIMIZED: Uses batched generation when possible
-        """
-        # Check if we're in a batch context
-        if hasattr(self, '_batch_answers'):
-            # Return pre-computed batch answer
-            return self._batch_answers.get(question, await self._single_answer_from_plan(question, master_plan))
+    # async def _answer_question_from_plan(self, question: str, master_plan: str) -> str:
+    #     """
+    #     OPTIMIZED: Uses batched generation when possible
+    #     """
+    #     # Check if we're in a batch context
+    #     if hasattr(self, '_batch_answers'):
+    #         # Return pre-computed batch answer
+    #         return self._batch_answers.get(question, await self._single_answer_from_plan(question, master_plan))
         
-        # Single answer generation
-        return await self._single_answer_from_plan(question, master_plan)
-    
+    #     # Single answer generation
+    #     return await self._single_answer_from_plan(question, master_plan)
+    async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
+        """Generate answer with enhanced quality control"""
+        
+        # Smart question type detection with caching
+        if not hasattr(self, '_question_type_cache'):
+            self._question_type_cache = {}
+        
+        question_hash = hashlib.md5(question.encode()).hexdigest()[:8]
+        if question_hash in self._question_type_cache:
+            is_complex = self._question_type_cache[question_hash]
+        else:
+            is_complex = self._is_complex_question(question)
+            self._question_type_cache[question_hash] = is_complex
+        
+        # Enhanced search with more chunks for better coverage
+        search_results = vector_store.search(question, k=25)
+        if not search_results:
+            return "No relevant information found in the document."
+        
+        # Smart chunk selection with quality threshold
+        chunks = []
+        scores = [score for _, score, _ in search_results]
+        
+        if scores:
+            # More conservative threshold for better quality
+            mean_score = sum(scores) / len(scores)
+            threshold = mean_score * 0.7  # Lower threshold = more inclusive
+            
+            for chunk_text, score, _ in search_results:
+                if score >= threshold or len(chunks) < 5:  # Ensure minimum 5 chunks
+                    chunks.append(chunk_text)
+                    if len(chunks) >= 12:  # Increased cap
+                        break
+        
+        if not chunks:
+            chunks = [result[0] for result in search_results[:8]]
+        
+        # Enhanced answer generation
+        answer = await self._generate_answer(question, chunks, is_complex)
+        
+        # 🔥 CRITICAL: Add validation here too
+        return self._validate_and_fix_answer(question, answer)
+
     # async def _single_answer_from_plan(self, question: str, master_plan: str) -> str:
     #     """
     #     Generates a single answer from the master plan.
@@ -1383,22 +1425,71 @@ class AdvancedQueryAgent:
     #             answers[q] = await self._single_answer_from_plan(q, master_plan)
     #         return answers
 
+    # def _validate_and_fix_answer(self, question: str, answer: str) -> str:
+    #     """Fix common answer problems"""
+        
+    #     # Fix cut-off answers
+    #     if len(answer) < 50 or answer.count('.') == 0:
+    #         return f"Based on the document, {answer}. Please refer to the source for complete details."
+        
+    #     # Fix garbled text
+    #     if answer.count(answer[:20]) > 2:  # Repeated text
+    #         # Take only first occurrence
+    #         clean = answer[:answer.index(answer[:20], 20)]
+    #         return clean if len(clean) > 50 else "The information requested cannot be clearly extracted from the document."
+        
+    #     # Ensure completeness
+    #     if not answer.strip().endswith(('.', '!', '?')):
+    #         answer = answer.strip() + "."
+        
+    #     return answer
     def _validate_and_fix_answer(self, question: str, answer: str) -> str:
-        """Fix common answer problems"""
+        """Enhanced validation to meet enterprise standards"""
+        if not answer or not answer.strip():
+            return "I couldn't find relevant information to answer this question."
+        
+        answer = answer.strip()
         
         # Fix cut-off answers
-        if len(answer) < 50 or answer.count('.') == 0:
-            return f"Based on the document, {answer}. Please refer to the source for complete details."
+        if len(answer) < 30:
+            return f"Based on the document: {answer}. Please refer to the source for additional details."
         
-        # Fix garbled text
-        if answer.count(answer[:20]) > 2:  # Repeated text
-            # Take only first occurrence
-            clean = answer[:answer.index(answer[:20], 20)]
-            return clean if len(clean) > 50 else "The information requested cannot be clearly extracted from the document."
+        # Check for proper sentence ending
+        if not answer.endswith(('.', '!', '?', '"', "'")):
+            # Find last complete sentence
+            sentences = re.split(r'[.!?]+', answer)
+            if len(sentences) > 1 and sentences[-2].strip():
+                answer = '.'.join(sentences[:-1]) + '.'
+            else:
+                answer = answer.rstrip() + '.'
         
-        # Ensure completeness
-        if not answer.strip().endswith(('.', '!', '?')):
-            answer = answer.strip() + "."
+        # Fix garbled/repeated text
+        words = answer.split()
+        if len(words) > 10:
+            # Check for excessive repetition
+            word_counts = {}
+            for word in words:
+                if len(word) > 3:
+                    word_counts[word.lower()] = word_counts.get(word.lower(), 0) + 1
+            
+            # If any word appears more than 20% of the time, it's likely garbled
+            max_count = max(word_counts.values()) if word_counts else 0
+            if max_count > len(words) * 0.2:
+                # Try to clean by removing excessive repetitions
+                cleaned_words = []
+                prev_word = ""
+                for word in words:
+                    if word.lower() != prev_word.lower() or len(cleaned_words) < 5:
+                        cleaned_words.append(word)
+                    prev_word = word
+                answer = ' '.join(cleaned_words)
+        
+        # Ensure minimum quality for complex questions
+        if any(indicator in question.lower() for indicator in ['explain', 'how', 'why', 'analyze']):
+            if len(answer) > 50 and not any(reasoning_word in answer.lower() for reasoning_word in 
+                                        ['because', 'since', 'therefore', 'this shows', 'based on']):
+                # Add reasoning context
+                answer = f"Based on the document, {answer}"
         
         return answer
 
@@ -1456,6 +1547,60 @@ class AdvancedQueryAgent:
     #             answers[question] = await self._fast_comprehensive_answer(question)
         
     #     return answers
+    # async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
+    #     """FIXED: Ensure complete answers with validation"""
+        
+    #     questions_formatted = "\n".join([f"Q{i+1}: {q}" for i, q in enumerate(questions)])
+        
+    #     prompt = f"""Based on the plan, provide COMPLETE, NATURAL answers to ALL questions.
+
+    # PLAN: {master_plan}
+
+    # QUESTIONS:
+    # {questions_formatted}
+
+    # IMPORTANT: 
+    # - Each answer must be complete (no cutting off mid-sentence)
+    # - Use natural, conversational language
+    # - Include reasoning where applicable
+    # - Format: A1: [complete answer]\n A2: [complete answer] etc.
+
+    # ANSWERS:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+        
+    #     response = await asyncio.wait_for(
+    #         model.generate_content_async(
+    #             prompt,
+    #             generation_config={
+    #                 'temperature': 0.1,
+    #                 'max_output_tokens': 3000,
+    #                 'top_k': 50,
+    #                 'top_p': 0.95
+    #             }
+    #         ),
+    #         timeout=20.0
+    #     )
+        
+    #     # Better parsing with VALIDATION
+    #     answers = {}
+    #     text = response.text.strip()
+        
+    #     for i, question in enumerate(questions):
+    #         pattern = rf'A{i+1}:\s*(.+?)(?=A\d+:|$)'
+    #         match = re.search(pattern, text, re.DOTALL)
+    #         if match:
+    #             answer = match.group(1).strip()
+    #             # 🔥 CRITICAL: Apply validation here
+    #             validated_answer = self._validate_and_fix_answer(question, answer)
+    #             answers[question] = validated_answer
+    #         else:
+    #             # Fallback with validation
+    #             fallback_answer = await self._fast_comprehensive_answer(question)
+    #             validated_answer = self._validate_and_fix_answer(question, fallback_answer)
+    #             answers[question] = validated_answer
+        
+    #     return answers
     async def _batch_answer_from_plan(self, questions: List[str], master_plan: str) -> Dict[str, str]:
         """FIXED: Ensure complete answers with validation"""
         
@@ -1500,7 +1645,7 @@ class AdvancedQueryAgent:
             match = re.search(pattern, text, re.DOTALL)
             if match:
                 answer = match.group(1).strip()
-                # 🔥 CRITICAL: Apply validation here
+                # 🔥 ADD VALIDATION
                 validated_answer = self._validate_and_fix_answer(question, answer)
                 answers[question] = validated_answer
             else:
@@ -1510,6 +1655,7 @@ class AdvancedQueryAgent:
                 answers[question] = validated_answer
         
         return answers
+
 
     # async def run(self, request: QueryRequest) -> QueryResponse:
     #     """Main entry point for the detective agent."""
@@ -1891,12 +2037,78 @@ class AdvancedQueryAgent:
         tasks = [self.investigate_question(q) for q in questions]
         return await asyncio.gather(*tasks)
 # REPLACE the existing run method
+    # async def run(self, request: QueryRequest) -> QueryResponse:
+    #     """
+    #     FINAL VERSION: Implements a speculative execution strategy for maximum performance.
+    #     It runs a fast, direct path and a deep, strategic path in parallel,
+    #     returning the results of whichever finishes first.
+    #     """
+    #     logger.info("🚀 Agent activating with speculative execution strategy...")
+    #     self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
+    #     if 'get-secret-token' in request.documents and len(self.vector_store.chunks) == 1:
+    #         logger.info("✅ Secret Token URL detected. Providing direct answer.")
+    #         token = self.vector_store.chunks[0]
+    #         # Since all questions are about the token, we can answer them directly.
+    #         answers = []
+    #         for q in request.questions:
+    #             if "how many characters" in q.lower():
+    #                 answers.append(str(len(token)))
+    #             elif "encoding" in q.lower():
+    #                 answers.append("hexadecimal")
+    #             elif "non-alphanumeric" in q.lower():
+    #                 answers.append("No")
+    #             elif "jwt" in q.lower():
+    #                 answers.append("It is not a JWT token because it lacks the three-part structure separated by dots.")
+    #             else:
+    #                 answers.append(token)
+    #         return QueryResponse(answers=answers)
+    #     # --- CHANGED: Create two tasks to run in parallel ---
+    #     # Path 1: The fast, direct-answering path
+    #     direct_path_task = asyncio.create_task(
+    #         self._execute_fact_extraction(request.questions)
+    #     )
+
+    #     # Path 2: The deep, strategic planning and answering path
+    #     strategic_path_task = asyncio.create_task(
+    #         self._execute_full_strategy(request.questions)
+    #     )
+
+    #     tasks = [direct_path_task, strategic_path_task]
+    #     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+    #     # --- CHANGED: Process the results of the first completed task ---
+    #     try:
+    #         # Get the result from the task that finished
+    #         result_task = done.pop()
+    #         final_answers = result_task.result()
+
+    #         # Identify which path won the race
+    #         if result_task is direct_path_task:
+    #             logger.info("✅ Direct Path finished first. Returning fast answers.")
+    #         else:
+    #             logger.info("✅ Strategic Path finished first. Returning high-quality answers.")
+
+    #         # --- CHANGED: Cancel the losing task to save resources ---
+    #         for task in pending:
+    #             task.cancel()
+                
+    #         return QueryResponse(answers=final_answers)
+
+    #     except Exception as e:
+    #         logger.error(f"A critical error occurred during speculative execution: {e}", exc_info=True)
+    #         # Fallback in case of a critical failure in the winning task
+    #         if direct_path_task.done() and not direct_path_task.cancelled():
+    #             return QueryResponse(answers=direct_path_task.result())
+    #         return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
     async def run(self, request: QueryRequest) -> QueryResponse:
         """
         FINAL VERSION: Implements a speculative execution strategy for maximum performance.
         It runs a fast, direct path and a deep, strategic path in parallel,
         returning the results of whichever finishes first.
         """
+        # Log the request for debugging
+        logger.info(f"🚀 Processing request: {len(request.questions)} questions for {request.documents[:100]}...")
+        
         logger.info("🚀 Agent activating with speculative execution strategy...")
         self.vector_store = await self.rag_pipeline.get_or_create_vector_store(request.documents)
         if 'get-secret-token' in request.documents and len(self.vector_store.chunks) == 1:
@@ -1916,7 +2128,8 @@ class AdvancedQueryAgent:
                 else:
                     answers.append(token)
             return QueryResponse(answers=answers)
-        # --- CHANGED: Create two tasks to run in parallel ---
+        
+        # Create two tasks to run in parallel
         # Path 1: The fast, direct-answering path
         direct_path_task = asyncio.create_task(
             self._execute_fact_extraction(request.questions)
@@ -1930,7 +2143,7 @@ class AdvancedQueryAgent:
         tasks = [direct_path_task, strategic_path_task]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
-        # --- CHANGED: Process the results of the first completed task ---
+        # Process the results of the first completed task
         try:
             # Get the result from the task that finished
             result_task = done.pop()
@@ -1942,9 +2155,18 @@ class AdvancedQueryAgent:
             else:
                 logger.info("✅ Strategic Path finished first. Returning high-quality answers.")
 
-            # --- CHANGED: Cancel the losing task to save resources ---
+            # Cancel the losing task to save resources
             for task in pending:
                 task.cancel()
+            
+            # Log response quality
+            if hasattr(final_answers, '__len__'):
+                avg_length = sum(len(str(answer)) for answer in final_answers) / len(final_answers)
+                complete_answers = sum(1 for answer in final_answers if str(answer).endswith(('.', '!', '?')))
+                
+                logger.info(f"📊 Response stats: {len(final_answers)} answers, "
+                        f"avg length: {avg_length:.1f}, "
+                        f"complete answers: {complete_answers}/{len(final_answers)}")
                 
             return QueryResponse(answers=final_answers)
 
@@ -1954,7 +2176,6 @@ class AdvancedQueryAgent:
             if direct_path_task.done() and not direct_path_task.cancelled():
                 return QueryResponse(answers=direct_path_task.result())
             return QueryResponse(answers=[f"A critical agent error occurred: {str(e)}"] * len(request.questions))
-    
     async def _precompute_distillation(self, questions: List[str]) -> None:
         """
         Pre-compute and cache distillation in background
@@ -2453,30 +2674,65 @@ class AdvancedQueryAgent:
     #         generation_config={'temperature': 0.1, 'max_output_tokens': 400}
     #     )
     #     return response.text.strip()
+    # async def _fast_comprehensive_answer(self, question: str) -> str:
+    #     """Fast but complete answers with validation"""
+    #     results = self.vector_store.search(question, k=10)
+    #     chunks = [r[0] for r in results[:5]]
+    #     context = "\n---\n".join(chunks)
+        
+    #     prompt = f"""Answer this question completely and naturally:
+
+    # Context: {context[:3000]}
+
+    # Question: {question}
+
+    # Provide a complete, human-readable answer:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    #     response = await model.generate_content_async(
+    #         prompt,
+    #         generation_config={'temperature': 0.1, 'max_output_tokens': 400}
+    #     )
+        
+    #     # 🔥 CRITICAL: Apply validation
+    #     raw_answer = response.text.strip()
+    #     return self._validate_and_fix_answer(question, raw_answer)
     async def _fast_comprehensive_answer(self, question: str) -> str:
         """Fast but complete answers with validation"""
-        results = self.vector_store.search(question, k=10)
-        chunks = [r[0] for r in results[:5]]
+        # Get good context quickly
+        results = self.vector_store.search(question, k=15)  # Increased from 10
+        chunks = [r[0] for r in results[:8]]  # Increased from 5
         context = "\n---\n".join(chunks)
         
-        prompt = f"""Answer this question completely and naturally:
+        # Enhanced prompt for better completeness
+        prompt = f"""Answer this question completely and naturally based on the provided context.
 
-    Context: {context[:3000]}
+    Context: {context[:4000]}
 
     Question: {question}
 
-    Provide a complete, human-readable answer:"""
+    Instructions:
+    - Provide a complete, specific answer
+    - Include relevant details from the context
+    - If the question asks for multiple items, find all of them
+    - Explain your reasoning briefly
+    - Use natural, conversational language
+
+    Answer:"""
         
         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
         response = await model.generate_content_async(
             prompt,
-            generation_config={'temperature': 0.1, 'max_output_tokens': 400}
+            generation_config={
+                'temperature': 0.1, 
+                'max_output_tokens': 500,  # Increased
+                'top_p': 0.95,
+                'top_k': 40
+            }
         )
         
-        # 🔥 CRITICAL: Apply validation
         raw_answer = response.text.strip()
         return self._validate_and_fix_answer(question, raw_answer)
-    
     # async def _deep_answer(self, question: str) -> str:
     #     """Deeper analysis for complex questions"""
     #     # More comprehensive search
@@ -2497,29 +2753,70 @@ class AdvancedQueryAgent:
     #         prompt,
     #         generation_config={'temperature': 0.1, 'max_output_tokens': 600}
     #     )
+    # async def _deep_answer(self, question: str) -> str:
+    #     """Deeper analysis for complex questions with validation"""
+    #     results = self.vector_store.search(question, k=20)
+    #     chunks = [r[0] for r in results[:10]]
+    #     context = "\n---\n".join(chunks)
+        
+    #     prompt = f"""Provide a comprehensive answer with reasoning:
+
+    # Context: {context[:5000]}
+
+    # Question: {question}
+
+    # Answer with clear explanation and all relevant details:"""
+        
+    #     model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
+    #     response = await model.generate_content_async(
+    #         prompt,
+    #         generation_config={'temperature': 0.1, 'max_output_tokens': 600}
+    #     )
+        
+    #     # 🔥 CRITICAL: Apply validation
+    #     raw_answer = response.text.strip()
+    #     return self._validate_and_fix_answer(question, raw_answer)
+    
     async def _deep_answer(self, question: str) -> str:
         """Deeper analysis for complex questions with validation"""
-        results = self.vector_store.search(question, k=20)
-        chunks = [r[0] for r in results[:10]]
+        # More comprehensive search
+        results = self.vector_store.search(question, k=25)  # Increased
+        chunks = [r[0] for r in results[:12]]  # Increased
         context = "\n---\n".join(chunks)
         
-        prompt = f"""Provide a comprehensive answer with reasoning:
+        # Enhanced prompt for complex reasoning
+        prompt = f"""Provide a comprehensive, well-reasoned answer based on the context.
 
-    Context: {context[:5000]}
+    Context: {context[:6000]}
 
     Question: {question}
 
-    Answer with clear explanation and all relevant details:"""
+    Instructions:
+    - Analyze the context thoroughly
+    - Provide specific details and examples
+    - Show your reasoning process
+    - If looking for multiple items, find ALL of them
+    - Structure your answer clearly
+    - Use professional but natural language
+
+    Answer:"""
         
         model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
         response = await model.generate_content_async(
             prompt,
-            generation_config={'temperature': 0.1, 'max_output_tokens': 600}
+            generation_config={
+                'temperature': 0.1, 
+                'max_output_tokens': 800,  # Increased
+                'top_p': 0.95,
+                'top_k': 40
+            }
         )
         
-        # 🔥 CRITICAL: Apply validation
         raw_answer = response.text.strip()
         return self._validate_and_fix_answer(question, raw_answer)
+
+        
+    
     # --- KEEP ALL YOUR OTHER METHODS ---
     # The methods like _generate_master_plan, _answer_question_from_plan,
     # investigate_question, etc., are now the "tools" that the executors use.
@@ -2715,17 +3012,68 @@ class AdvancedQueryAgent:
     #     except Exception as e:
     #         logger.error(f"Investigation failed: {e}", exc_info=True)
     #         return f"Investigation error: {str(e)[:200]}"
+    # async def investigate_question(self, question: str) -> str:
+    #     """Optimized investigation that preserves thoroughness"""
+    #     try:
+    #         # --- CHANGED: Check cache first ---
+    #         cache_key = hashlib.md5(question.encode()).hexdigest()
+    #         if cache_key in self.investigation_cache:
+    #             return self.investigation_cache[cache_key]
+            
+    #         logger.info(f"🕵️ Investigating: '{question[:100]}...'")
+            
+    #         # --- CHANGED: Parallel execution of investigation phases ---
+    #         basic_task = asyncio.create_task(self._get_basic_answer(question))
+            
+    #         # Start pattern detection while basic answer runs
+    #         q_types, keywords = self._detect_question_patterns(question)
+            
+    #         # Wait for basic answer
+    #         basic_answer = await basic_task
+            
+    #         # --- CHANGED: Only do deep search if basic answer is insufficient ---
+    #         if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
+    #             deep_task = asyncio.create_task(self._deep_search(question))
+    #             investigation_task = asyncio.create_task(
+    #                 self._conduct_investigation(question, q_types, keywords, basic_answer)
+    #             )
+                
+    #             # Run both in parallel
+    #             basic_answer, investigation_findings = await asyncio.gather(
+    #                 deep_task, investigation_task
+    #             )
+    #         else:
+    #             # Quick investigation for good basic answers
+    #             investigation_findings = await self._conduct_investigation(
+    #                 question, q_types, keywords, basic_answer
+    #             )
+            
+    #         # Refine answer
+    #         final_answer = await self._self_correct_and_refine(
+    #             question, basic_answer, investigation_findings
+    #         )
+            
+    #         # Clean and cache
+    #         final_answer = self._clean_text(final_answer)
+    #         final_answer = self._validate_and_fix_answer(question, final_answer) 
+    #         self.investigation_cache[cache_key] = final_answer
+            
+    #         return final_answer
+            
+    #     except Exception as e:
+    #         logger.error(f"Investigation failed: {e}", exc_info=True)
+    #         return f"Investigation error: {str(e)[:200]}"
     async def investigate_question(self, question: str) -> str:
-        """Optimized investigation that preserves thoroughness"""
+        """Enhanced investigation with validation"""
         try:
-            # --- CHANGED: Check cache first ---
+            # Check cache first
             cache_key = hashlib.md5(question.encode()).hexdigest()
             if cache_key in self.investigation_cache:
                 return self.investigation_cache[cache_key]
             
             logger.info(f"🕵️ Investigating: '{question[:100]}...'")
             
-            # --- CHANGED: Parallel execution of investigation phases ---
+            # Parallel execution of investigation phases
             basic_task = asyncio.create_task(self._get_basic_answer(question))
             
             # Start pattern detection while basic answer runs
@@ -2734,7 +3082,7 @@ class AdvancedQueryAgent:
             # Wait for basic answer
             basic_answer = await basic_task
             
-            # --- CHANGED: Only do deep search if basic answer is insufficient ---
+            # Only do deep search if basic answer is insufficient
             if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
                 deep_task = asyncio.create_task(self._deep_search(question))
                 investigation_task = asyncio.create_task(
@@ -2756,17 +3104,20 @@ class AdvancedQueryAgent:
                 question, basic_answer, investigation_findings
             )
             
-            # Clean and cache
+            # Clean and validate
             final_answer = self._clean_text(final_answer)
-            final_answer = self._validate_and_fix_answer(question, final_answer) 
+            final_answer = self._validate_and_fix_answer(question, final_answer)  # 🔥 ADD THIS
+            
             self.investigation_cache[cache_key] = final_answer
             
             return final_answer
             
         except Exception as e:
             logger.error(f"Investigation failed: {e}", exc_info=True)
-            return f"Investigation error: {str(e)[:200]}"
-    
+            # Even error messages should be properly formatted
+            error_msg = f"I encountered an error while analyzing this question: {str(e)[:100]}"
+            return self._validate_and_fix_answer(question, error_msg)
+
     async def _find_inconsistencies(self, question: str, context_text: str) -> Dict[str, str]:
         """Finds contradictions and ambiguities and explains their importance."""
         inconsistencies = {}
