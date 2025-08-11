@@ -1272,6 +1272,59 @@ class AdvancedQueryAgent:
                 logger.error(f"Answer generation failed: {e}")
                 return "I apologize, but I encountered an error while processing your question. Please try again."
     
+    # def _create_malayalam_fallback_from_context(self, question: str, context: str) -> str:
+    #     """Create a Malayalam response based on context analysis"""
+        
+    #     # Extract numbers, percentages, dates from context
+    #     numbers = re.findall(r'\d+(?:\.\d+)?%?', context)
+        
+    #     # Detect question type and provide appropriate Malayalam template
+    #     question_lower = question.lower()
+        
+    #     # Check for specific Malayalam question patterns
+    #     if 'എന്താണ്' in question or 'എന്ത്' in question:
+    #         # What is question
+    #         if numbers:
+    #             return f"ഡോക്യുമെന്റ് അനുസരിച്ച്, ഇത് {', '.join(numbers[:3])} ആണ്. കൂടുതൽ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
+    #         else:
+    #             return "ഡോക്യുമെന്റിൽ ഈ വിവരം ലഭ്യമാണ്. വിശദമായ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
+        
+    #     elif 'എത്ര' in question:
+    #         # How much/many question
+    #         if numbers:
+    #             return f"ഡോക്യുമെന്റ് പ്രകാരം: {', '.join(numbers[:3])}."
+    #         else:
+    #             return "കൃത്യമായ സംഖ്യ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
+        
+    #     elif 'എപ്പോൾ' in question:
+    #         # When question
+    #         dates = re.findall(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}', context)
+    #         if dates:
+    #             return f"തീയതി: {', '.join(dates[:2])}."
+    #         else:
+    #             return "തീയതി സംബന്ധിച്ച വിവരം ഡോക്യുമെന്റിൽ വ്യക്തമല്ല."
+        
+    #     elif 'എങ്ങനെ' in question:
+    #         # How question
+    #         return "പ്രക്രിയ: ഡോക്യുമെന്റിൽ വിശദമായി വിവരിച്ചിട്ടുണ്ട്. ഘട്ടം ഘട്ടമായുള്ള നിർദ്ദേശങ്ങൾ ഡോക്യുമെന്റിൽ നോക്കുക."
+        
+    #     elif 'എവിടെ' in question:
+    #         # Where question
+    #         return "സ്ഥലം സംബന്ധിച്ച വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്."
+        
+    #     elif 'ഏത്' in question:
+    #         # Which question
+    #         return "ഡോക്യുമെന്റിൽ ഇതിനെക്കുറിച്ചുള്ള വിവരങ്ങൾ നൽകിയിട്ടുണ്ട്."
+        
+    #     # Generic fallback
+    #     if context and len(context) > 50:
+    #         # Try to extract some info
+    #         if numbers:
+    #             return f"ഡോക്യുമെന്റിൽ നിന്ന്: {', '.join(numbers[:2])}. കൂടുതൽ വിവരങ്ങൾ ലഭ്യമാണ്."
+    #         else:
+    #             return "നിങ്ങളുടെ ചോദ്യത്തിനുള്ള വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്. വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
+    #     else:
+    #         return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
     def _create_malayalam_fallback_from_context(self, question: str, context: str) -> str:
         """Create a Malayalam response based on context analysis"""
         
@@ -1325,7 +1378,6 @@ class AdvancedQueryAgent:
                 return "നിങ്ങളുടെ ചോദ്യത്തിനുള്ള വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്. വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
         else:
             return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-
     
     def _ensure_malayalam_response(self, question: str, answer: str) -> str:
         """Ensure Malayalam questions get Malayalam answers"""
@@ -1350,43 +1402,43 @@ class AdvancedQueryAgent:
         return answer
     
     
-    async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
-        """ENHANCED: Generate Malayalam answers with pattern-specific prompts"""
+    # async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
+    #     """ENHANCED: Generate Malayalam answers with pattern-specific prompts"""
         
-        # Get pattern-specific prompt
-        prompt_template = self._get_malayalam_specific_prompt(question, pattern)
-        prompt = prompt_template.format(context=context, question=question)
+    #     # Get pattern-specific prompt
+    #     prompt_template = self._get_malayalam_specific_prompt(question, pattern)
+    #     prompt = prompt_template.format(context=context, question=question)
         
-        try:
-            # Use the same optimized model settings
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.3,  # Slightly higher for more natural Malayalam
-                        'max_output_tokens': 500,  # More tokens for detailed Malayalam responses
-                        'top_p': 0.9,
-                        'top_k': 30
-                    }
-                ), timeout=18  # Slightly longer timeout for Malayalam
-            )
+    #     try:
+    #         # Use the same optimized model settings
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.3,  # Slightly higher for more natural Malayalam
+    #                     'max_output_tokens': 500,  # More tokens for detailed Malayalam responses
+    #                     'top_p': 0.9,
+    #                     'top_k': 30
+    #                 }
+    #             ), timeout=18  # Slightly longer timeout for Malayalam
+    #         )
             
-            answer = response.text.strip()
+    #         answer = response.text.strip()
             
-            # Validate that the answer is in Malayalam
-            if answer and self._detect_language(answer) == "malayalam":
-                return answer
-            else:
-                # If LLM didn't respond in Malayalam, provide a Malayalam fallback
-                # Also log this issue for debugging
-                logger.warning(f"LLM responded in English for Malayalam question: {question[:50]}...")
-                logger.warning(f"Response was: {answer[:100]}...")
-                return f"ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+    #         # Validate that the answer is in Malayalam
+    #         if answer and self._detect_language(answer) == "malayalam":
+    #             return answer
+    #         else:
+    #             # If LLM didn't respond in Malayalam, provide a Malayalam fallback
+    #             # Also log this issue for debugging
+    #             logger.warning(f"LLM responded in English for Malayalam question: {question[:50]}...")
+    #             logger.warning(f"Response was: {answer[:100]}...")
+    #             return f"ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
                 
-        except Exception as e:
-            logger.error(f"Malayalam answer generation failed: {e}")
-            return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+    #     except Exception as e:
+    #         logger.error(f"Malayalam answer generation failed: {e}")
+    #         return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
 
     def _select_optimal_context_optimized(self, question: str, search_results: List[Tuple[str, float, Dict]], max_chunks: int = 8) -> List[str]:
         """OPTIMIZED: Select optimal context chunks with reduced processing"""
@@ -1873,6 +1925,39 @@ ANSWER:"""
         
         return text
 
+    # def _detect_language(self, text: str) -> str:
+    #     """ENHANCED: Detect if text contains Malayalam or other Indian languages with improved accuracy"""
+    #     if not text:
+    #         return "unknown"
+        
+    #     # Malayalam Unicode range: 0D00-0D7F
+    #     malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', text)
+    #     malayalam_ratio = len(malayalam_chars) / len(text) if text else 0
+        
+    #     # Hindi Unicode range: 0900-097F
+    #     hindi_chars = re.findall(r'[\u0900-\u097f]', text)
+    #     hindi_ratio = len(hindi_chars) / len(text) if text else 0
+        
+    #     # Tamil Unicode range: 0B80-0BFF
+    #     tamil_chars = re.findall(r'[\u0b80-\u0bff]', text)
+    #     tamil_ratio = len(tamil_chars) / len(text) if text else 0
+        
+    #     # ENHANCED: Lower threshold for Malayalam detection (3% instead of 5%)
+    #     malayalam_threshold = 0.03
+    #     other_threshold = 0.05
+        
+    #     # ENHANCED: Check for Malayalam question words even with low character count
+    #     malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
+    #     has_malayalam_question_word = any(word in text for word in malayalam_question_words)
+        
+    #     if malayalam_ratio > malayalam_threshold or has_malayalam_question_word:
+    #         return "malayalam"
+    #     elif hindi_ratio > other_threshold:
+    #         return "hindi"
+    #     elif tamil_ratio > other_threshold:
+    #         return "tamil"
+    #     else:
+    #         return "english"
     def _detect_language(self, text: str) -> str:
         """ENHANCED: Detect if text contains Malayalam or other Indian languages with improved accuracy"""
         if not text:
@@ -2271,7 +2356,243 @@ ANSWER:"""
         
         # CRITICAL FIX: Add a final, reinforcing instruction right before the model generates the answer.
         return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER (in Malayalam only):"
+    
+    # def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
+    #     """
+    #     IMPROVED: Get Malayalam-specific prompt with explicit and reinforced language instructions.
+    #     """
+        
+    #     # CRITICAL FIX: Add a strong, explicit instruction at the very beginning of the prompt.
+    #     base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
+
+    # **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്. (CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM. DO NOT USE ENGLISH.)**
+
+    # CONTEXT:
+    # {context}
+
+    # CUSTOMER QUESTION: {question}
+
+    # INSTRUCTIONS:"""
+        
+    #     pattern_specific_instructions = {
+    #         'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
+    # 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
+    # 3. ഉദാഹരണങ്ങൾ നൽകുക""",
+            
+    #         'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
+    # 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
+    # 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
+            
+    #         'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
+    # 2. കാലയളവുകൾ വ്യക്തമായി പറയുക
+    # 3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
+            
+    #         'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
+    # 2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
+    # 3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
+            
+    #         'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
+    # 2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
+    # 3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
+            
+    #         'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
+    # 2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
+    # 3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
+            
+    #         'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
+    # 2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
+    # 3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
+            
+    #         'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+    # 2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
+    # 3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
+            
+    #         'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+    # 2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
+    # 3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
+            
+    #         'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+    # 2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
+    # 3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
+            
+    #         'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
+    # 2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+    # 3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
+            
+    #         'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+    # 2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+    # 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+    #         'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
+    # 2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
+    # 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+    #         'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
+    # 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
+    # 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+    # 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+    # 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
+    # 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
+    #     }
+        
+    #     instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
+        
+    #     # CRITICAL FIX: Add a final, reinforcing instruction right before the model generates the answer.
+    #     return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER (in Malayalam only):"
     # Additional helper methods for investigation (keeping existing functionality)
+    # async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
+    #     """
+    #     DEFINITIVE FIX: Generate Malayalam answers with a retry mechanism for consistency.
+    #     """
+        
+    #     # First attempt with the detailed, pattern-specific prompt
+    #     prompt_template = self._get_malayalam_specific_prompt(question, pattern)
+    #     prompt = prompt_template.format(context=context, question=question)
+        
+    #     try:
+    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 prompt,
+    #                 generation_config={
+    #                     'temperature': 0.3,
+    #                     'max_output_tokens': 500,
+    #                     'top_p': 0.9,
+    #                     'top_k': 30
+    #                 }
+    #             ), timeout=18
+    #         )
+            
+    #         answer = response.text.strip()
+            
+    #         # If the first attempt is successful, return the answer
+    #         if answer and self._detect_language(answer) == "malayalam":
+    #             return answer
+    #         else:
+    #             logger.warning(f"First attempt failed to generate Malayalam. Retrying with a simpler prompt.")
+    #             logger.warning(f"Initial response: {answer[:100]}...")
+
+    #     except Exception as e:
+    #         logger.error(f"First attempt at Malayalam answer generation failed: {e}")
+    #         # Proceed to retry even if the first attempt fails with an exception
+
+    #     # Second attempt with a simpler, more direct prompt
+    #     try:
+    #         simpler_prompt = f"""
+    # CONTEXT:
+    # {context}
+
+    # QUESTION (in Malayalam):
+    # {question}
+
+    # CRITICAL INSTRUCTION: Your entire response MUST be in the Malayalam language. Do not use any English.
+
+    # ANSWER (in Malayalam):
+    # """
+    #         response = await asyncio.wait_for(
+    #             model.generate_content_async(
+    #                 simpler_prompt,
+    #                 generation_config={
+    #                     'temperature': 0.1,  # Lower temperature for more directness
+    #                     'max_output_tokens': 500,
+    #                     'top_p': 0.8,
+    #                     'top_k': 20
+    #                 }
+    #             ), timeout=18
+    #         )
+            
+    #         answer = response.text.strip()
+            
+    #         # Check if the second attempt was successful
+    #         if answer and self._detect_language(answer) == "malayalam":
+    #             logger.info("Second attempt successful.")
+    #             return answer
+    #         else:
+    #             logger.error("Second attempt also failed to generate Malayalam.")
+    #             logger.error(f"Second response: {answer[:100]}...")
+    #             # If both attempts fail, return a context-aware fallback
+    #             return self._create_malayalam_fallback_from_context(question, context)
+
+    #     except Exception as e:
+    #         logger.error(f"Second attempt at Malayalam answer generation also failed: {e}")
+    #         return self._create_malayalam_fallback_from_context(question, context)
+    
+    async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
+        """
+        DEFINITIVE FIX: Generate Malayalam answers with a retry mechanism for consistency.
+        """
+        
+        # First attempt with the detailed, pattern-specific prompt
+        prompt_template = self._get_malayalam_specific_prompt(question, pattern)
+        prompt = prompt_template.format(context=context, question=question)
+        
+        try:
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.3,
+                        'max_output_tokens': 500,
+                        'top_p': 0.9,
+                        'top_k': 30
+                    }
+                ), timeout=18
+            )
+            
+            answer = response.text.strip()
+            
+            # If the first attempt is successful, return the answer
+            if answer and self._detect_language(answer) == "malayalam":
+                return answer
+            else:
+                logger.warning(f"First attempt failed to generate Malayalam. Retrying with a simpler prompt.")
+                logger.warning(f"Initial response: {answer[:100]}...")
+
+        except Exception as e:
+            logger.error(f"First attempt at Malayalam answer generation failed: {e}")
+            # Proceed to retry even if the first attempt fails with an exception
+
+        # Second attempt with a simpler, more direct prompt
+        try:
+            simpler_prompt = f"""
+    CONTEXT:
+    {context}
+
+    QUESTION (in Malayalam):
+    {question}
+
+    CRITICAL INSTRUCTION: Your entire response MUST be in the Malayalam language. Do not use any English.
+
+    ANSWER (in Malayalam):
+    """
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    simpler_prompt,
+                    generation_config={
+                        'temperature': 0.1,  # Lower temperature for more directness
+                        'max_output_tokens': 500,
+                        'top_p': 0.8,
+                        'top_k': 20
+                    }
+                ), timeout=18
+            )
+            
+            answer = response.text.strip()
+            
+            # Check if the second attempt was successful
+            if answer and self._detect_language(answer) == "malayalam":
+                logger.info("Second attempt successful.")
+                return answer
+            else:
+                logger.error("Second attempt also failed to generate Malayalam.")
+                logger.error(f"Second response: {answer[:100]}...")
+                # If both attempts fail, return a context-aware fallback
+                return self._create_malayalam_fallback_from_context(question, context)
+
+        except Exception as e:
+            logger.error(f"Second attempt at Malayalam answer generation also failed: {e}")
+            return self._create_malayalam_fallback_from_context(question, context)
     
     async def _get_basic_answer(self, question: str) -> str:
         """Gets a straightforward answer using the RAG pipeline"""
