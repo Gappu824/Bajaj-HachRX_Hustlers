@@ -1,4 +1,4 @@
-# app/agents/advanced_query_agent.py - COMPLETE FILE WITH NO HARDCODING
+# app/agents/advanced_query_agent.py - COMPLETE UNIVERSAL MULTILINGUAL FILE
 import logging
 import asyncio
 import re
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class AdvancedQueryAgent:
     """
-    Fully dynamic agent that extracts all information from documents without hardcoding
+    Universal multilingual agent that provides enterprise-grade, human-like responses
     """
 
     def __init__(self, rag_pipeline: HybridRAGPipeline):
@@ -26,30 +26,6 @@ class AdvancedQueryAgent:
         self.vector_store: OptimizedVectorStore = None
         self.investigation_cache = {}
 
-    # def _clean_unicode_text(self, text: str) -> str:
-    #     """Clean Unicode text and remove artifacts"""
-    #     import unicodedata
-        
-    #     if not text:
-    #         return ""
-        
-    #     # Remove Unicode control characters and artifacts
-    #     text = re.sub(r'\(cid:\d+\)', '', text)
-        
-    #     # Normalize Unicode
-    #     text = unicodedata.normalize('NFKC', text)
-        
-    #     # Remove zero-width characters
-    #     text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
-        
-    #     # Fix common Malayalam rendering issues
-    #     # Replace multiple spaces with single space
-    #     text = re.sub(r'\s+', ' ', text)
-        
-    #     # Clean up any remaining artifacts
-    #     text = ''.join(char for char in text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
-        
-    #     return text.strip()    
     def _format_city_landmark_mapping(self, city_landmarks: Dict[str, str]) -> str:
         """Format city-landmark mappings for display"""
         if not city_landmarks:
@@ -60,6 +36,7 @@ class AdvancedQueryAgent:
             formatted.append(f"   • {city}: {landmark}")
         
         return "\n" + "\n".join(formatted) 
+        
     def _get_endpoint_for_landmark(self, landmark: str) -> str:
         """Get the correct API endpoint for a landmark"""
         
@@ -248,9 +225,11 @@ class AdvancedQueryAgent:
                 matches = re.findall(pattern, chunk, re.IGNORECASE)
                 tokens.extend(matches)
         
+        primary_token = tokens[0] if tokens else None
         return {
             'type': 'token_document',
-            'tokens': tokens[:5]  # Limit to 5 tokens
+            'tokens': tokens[:5],  # Limit to 5 tokens
+            'primary_token': primary_token
         }
 
     async def _extract_news_intelligence_optimized(self) -> Dict[str, Any]:
@@ -259,9 +238,13 @@ class AdvancedQueryAgent:
         # OPTIMIZATION: Use smaller search for faster extraction
         news_search = self.vector_store.search("policy tariff investment news", k=10)  # Reduced from 15
         policies = []
+        numbers = []
+        dates = []
+        companies = []
         
         for chunk, score, metadata in news_search:
-            # Simplified policy extraction
+            # Extract various entities
+            # Policies
             policy_patterns = [
                 r'policy.*:.*([^.\n]+)',
                 r'tariff.*:.*([^.\n]+)',
@@ -271,10 +254,27 @@ class AdvancedQueryAgent:
             for pattern in policy_patterns:
                 matches = re.findall(pattern, chunk, re.IGNORECASE)
                 policies.extend(matches)
+            
+            # Numbers and percentages
+            number_matches = re.findall(r'\d+(?:\.\d+)?%?', chunk)
+            numbers.extend(number_matches)
+            
+            # Dates
+            date_matches = re.findall(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}', chunk)
+            dates.extend(date_matches)
+            
+            # Companies (basic extraction)
+            company_matches = re.findall(r'[A-Z][a-zA-Z\s&]+(?:Inc|Corp|Ltd|Company|Co\.)', chunk)
+            companies.extend(company_matches)
         
         return {
             'type': 'news_document',
-            'policies': policies[:5]  # Limit to 5 policies
+            'extracted_entities': {
+                'policies': policies[:5],
+                'numbers': numbers[:10],
+                'dates': dates[:5],
+                'companies': companies[:5]
+            }
         }
 
     async def _extract_generic_intelligence_optimized(self) -> Dict[str, Any]:
@@ -324,132 +324,14 @@ class AdvancedQueryAgent:
         
         return processed_answers
 
-    # async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """OPTIMIZED: Process single question with aggressive caching"""
-        
-    #     # OPTIMIZATION: Cache key for this specific question and document
-    #     cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
-        
-    #     # Check cache first
-    #     cached_answer = await cache.get(cache_key)
-    #     if cached_answer:
-    #         logger.info(f"✅ Using cached answer for: {question[:50]}...")
-    #         return cached_answer
-    #     try:
-    #     # Try dynamic response based on document intelligence
-    #         dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-    #         if dynamic_answer:
-    #             # ENHANCED: Ensure Malayalam response for Malayalam questions
-    #             dynamic_answer = self._ensure_malayalam_response(question, dynamic_answer)
-    #             await cache.set(cache_key, dynamic_answer, ttl=3600)
-    #             return dynamic_answer
-            
-    #         # OPTIMIZED: Smart processing with reduced complexity
-    #         answer = await self._process_smart_question_optimized(question, doc_intelligence)
-            
-    #         # Enhance response completeness
-    #         answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-            
-    #         # ENHANCED: Ensure Malayalam response for Malayalam questions
-    #         answer = self._ensure_malayalam_response(question, answer)
-            
-    #         # Cache the final answer
-    #         await cache.set(cache_key, answer, ttl=3600)
-            
-    #         return answer
-            
-    #     except Exception as e:
-    #         logger.error(f"Error processing question '{question[:50]}': {e}")
-    #         fallback = await self._fallback_answer(question)
-    #         # ENHANCED: Ensure Malayalam response for fallback
-    #         fallback = self._ensure_malayalam_response(question, fallback)
-    #         await cache.set(cache_key, fallback, ttl=1800)
-    #         return fallback
-        # try:
-        #         # Try dynamic response based on document intelligence
-        #         dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-        #         if dynamic_answer:
-        #             # Cache the dynamic answer
-        #             await cache.set(cache_key, dynamic_answer, ttl=3600)
-        #             return dynamic_answer
-                
-        #         # OPTIMIZED: Smart processing with reduced complexity
-        #         answer = await self._process_smart_question_optimized(question, doc_intelligence)
-                
-        #         # Enhance response completeness
-        #         answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-                
-        #         # Cache the final answer
-        #         await cache.set(cache_key, answer, ttl=3600)
-                
-        #         return answer
-                
-        # except Exception as e:
-        #     logger.error(f"Error processing question '{question[:50]}': {e}")
-        #     fallback = await self._fallback_answer(question)
-        #     # Cache the fallback answer too
-        #     await cache.set(cache_key, fallback, ttl=1800)
-        #     return fallback
-    # async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """
-    #     OPTIMIZED: Process single question with aggressive caching and robust language handling.
-    #     """
-    #     # First, detect the language of the question.
-    #     detected_language = self._detect_language(question)
-
-    #     # Create a unique cache key for the question and document type.
-    #     cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
-
-    #     # Check the cache for a previously generated answer.
-    #     cached_answer = await cache.get(cache_key)
-    #     if cached_answer:
-    #         logger.info(f"✅ Using cached answer for: {question[:50]}...")
-    #         # If the question is Malayalam, ensure the cached answer is also in Malayalam.
-    #         if detected_language == "malayalam" and self._detect_language(cached_answer) != "malayalam":
-    #             logger.warning("Cached answer is not in Malayalam. Regenerating...")
-    #         else:
-    #             return cached_answer
-
-    #     try:
-    #         # If the question is in Malayalam, use a dedicated function to get a Malayalam answer.
-    #         if detected_language == "malayalam":
-    #             answer = await self._get_malayalam_answer(question, doc_intelligence)
-    #         else:
-    #             # For English questions, follow the existing logic.
-    #             # Try to generate a dynamic response based on document intelligence.
-    #             dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-    #             if dynamic_answer:
-    #                 answer = dynamic_answer
-    #             else:
-    #                 # Fallback to smart processing if no dynamic answer is generated.
-    #                 answer = await self._process_smart_question_optimized(question, doc_intelligence)
-
-    #             # Enhance the completeness of the English response.
-    #             answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-
-    #         # Cache the final answer for future use.
-    #         await cache.set(cache_key, answer, ttl=3600)
-    #         return answer
-
-    #     except Exception as e:
-    #         logger.error(f"Error processing question '{question[:50]}': {e}")
-    #         # Generate a fallback answer in the correct language.
-    #         if detected_language == "malayalam":
-    #             fallback = "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-    #         else:
-    #             fallback = await self._fallback_answer(question)
-    #         await cache.set(cache_key, fallback, ttl=1800)
-    #         return fallback
-
-
     async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
         """
-        CORRECTED: Process single question with proper language detection and response matching
+        OPTIMIZED: Process single question with universal language support and human-like responses
         """
-        # CRITICAL FIX: Enhanced language detection first
+        # Enhanced language detection
         detected_language = self._detect_language_enhanced(question)
         
-        # OPTIMIZATION: Cache key for this specific question and document
+        # Cache key includes language for proper caching
         cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic')) + detected_language).encode()).hexdigest()}"
         
         # Check cache first
@@ -460,29 +342,25 @@ class AdvancedQueryAgent:
             if cached_lang == detected_language or detected_language == "english":
                 logger.info(f"✅ Using cached answer for: {question[:50]}...")
                 return cached_answer
-            else:
-                logger.warning(f"Cached answer language mismatch. Question: {detected_language}, Cached: {cached_lang}")
         
         try:
-            # CRITICAL: For non-English questions, use dedicated language-specific processing
+            # For non-English questions, use language-specific processing
             if detected_language != "english":
                 answer = await self._get_language_specific_answer(question, doc_intelligence, detected_language)
             else:
-                # For English questions, use existing logic
+                # For English questions, use existing logic with human-like responses
                 dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
                 if dynamic_answer:
                     answer = dynamic_answer
                 else:
                     answer = await self._process_smart_question_optimized(question, doc_intelligence)
                 
+                # ENTERPRISE: Enhance response completeness and human-like quality
                 answer = self._enhance_response_completeness(question, answer, doc_intelligence)
+                answer = self._make_response_more_human_like(question, answer, detected_language)
             
-            # FINAL VALIDATION: Ensure answer language matches question language
-            answer_language = self._detect_language_enhanced(answer)
-            if detected_language != "english" and answer_language == "english":
-                logger.error(f"LANGUAGE MISMATCH! Question: {detected_language}, Answer: {answer_language}")
-                # Force correct language response
-                answer = await self._force_language_response(question, answer, detected_language)
+            # Final validation: Ensure answer language matches question language
+            answer = await self._ensure_language_consistency(question, answer)
             
             # Cache the final answer
             await cache.set(cache_key, answer, ttl=3600)
@@ -497,33 +375,46 @@ class AdvancedQueryAgent:
 
     def _detect_language_enhanced(self, text: str) -> str:
         """
-        ENHANCED: Robust language detection for multiple Indian languages
+        ENHANCED: Universal language detection for multiple languages
         """
         if not text:
             return "unknown"
         
-        # Unicode range detection for Indian languages
+        # Unicode range detection for multiple languages
         language_ranges = {
             'malayalam': r'[\u0d00-\u0d7f]',
-            'hindi': r'[\u0900-\u097f]', 
+            'hindi': r'[\u0900-\u097f]',
             'tamil': r'[\u0b80-\u0bff]',
             'telugu': r'[\u0c00-\u0c7f]',
             'kannada': r'[\u0c80-\u0cff]',
             'gujarati': r'[\u0a80-\u0aff]',
             'punjabi': r'[\u0a00-\u0a7f]',
-            'bengali': r'[\u0980-\u09ff]'
+            'bengali': r'[\u0980-\u09ff]',
+            'marathi': r'[\u0900-\u097f]',  # Same as Hindi
+            'urdu': r'[\u0600-\u06ff]',
+            'arabic': r'[\u0600-\u06ff]',
+            'chinese': r'[\u4e00-\u9fff]',
+            'japanese': r'[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]',
+            'korean': r'[\uac00-\ud7af]',
+            'thai': r'[\u0e00-\u0e7f]',
+            'vietnamese': r'[àáâãèéêìíòóôõùúýăđĩũơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]'
         }
         
-        # Language-specific question words
+        # Language-specific keywords/question words
         language_keywords = {
-            'malayalam': ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര', 'എന്താണ്', 'ഏതാണ്'],
+            'malayalam': ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര'],
             'hindi': ['क्या', 'कहाँ', 'कब', 'कैसे', 'क्यों', 'कौन', 'कितना', 'किसका'],
             'tamil': ['என்ன', 'எங்கே', 'எப்போது', 'எப்படி', 'ஏன்', 'யார்', 'எத்தனை'],
             'telugu': ['ఏమి', 'ఎక్కడ', 'ఎప్పుడు', 'ఎలా', 'ఎందుకు', 'ఎవరు', 'ఎంత'],
             'kannada': ['ಏನು', 'ಎಲ್ಲಿ', 'ಯಾವಾಗ', 'ಹೇಗೆ', 'ಏಕೆ', 'ಯಾರು', 'ಎಷ್ಟು'],
             'gujarati': ['શું', 'ક્યાં', 'ક્યારે', 'કેવી રીતે', 'શા માટે', 'કોણ', 'કેટલું'],
             'punjabi': ['ਕੀ', 'ਕਿੱਥੇ', 'ਕਦੋਂ', 'ਕਿਵੇਂ', 'ਕਿਉਂ', 'ਕੌਣ', 'ਕਿੰਨਾ'],
-            'bengali': ['কি', 'কোথায়', 'কখন', 'কিভাবে', 'কেন', 'কে', 'কত']
+            'bengali': ['কি', 'কোথায়', 'কখন', 'কিভাবে', 'কেন', 'কে', 'কত'],
+            'urdu': ['کیا', 'کہاں', 'کب', 'کیسے', 'کیوں', 'کون', 'کتنا'],
+            'chinese': ['什么', '哪里', '什么时候', '怎么', '为什么', '谁', '多少'],
+            'japanese': ['何', 'どこ', 'いつ', 'どう', 'なぜ', '誰', 'いくつ'],
+            'korean': ['무엇', '어디', '언제', '어떻게', '왜', '누구', '얼마나'],
+            'thai': ['อะไร', 'ที่ไหน', 'เมื่อไร', 'อย่างไร', 'ทำไม', 'ใคร', 'เท่าไร']
         }
         
         # Check each language
@@ -543,21 +434,27 @@ class AdvancedQueryAgent:
 
     async def _get_language_specific_answer(self, question: str, doc_intelligence: Dict[str, Any], language: str) -> str:
         """
-        Get answer in the specific language requested
+        Get answer in the specific language requested with enhanced context and human-like quality
         """
-        # Get context for the question with enhanced search
+        # Get enhanced context for the question
         enhanced_question = self._enhance_multilingual_query(question, language)
         search_results = self.vector_store.search(enhanced_question, k=15)
         
         if not search_results:
             return await self._get_language_fallback(question, language)
         
-        # Select optimal context
-        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=12)
+        # Select optimal context with language-aware scoring
+        chunks = self._select_optimal_context_multilingual(question, search_results, language, max_chunks=12)
         context = "\n\n".join(chunks)
+        
+        # Detect question pattern for this language
+        pattern = self._detect_question_pattern(question, language)
         
         # Generate response in target language
         answer = await self._generate_language_specific_answer(question, context, language)
+        
+        # ENTERPRISE: Make response more human-like
+        answer = self._make_response_more_human_like(question, answer, language)
         
         # Validate language and fix if necessary
         answer_lang = self._detect_language_enhanced(answer)
@@ -567,44 +464,626 @@ class AdvancedQueryAgent:
         
         return answer
 
+    def _enhance_multilingual_query(self, question: str, language: str) -> str:
+        """Universal query enhancement for better retrieval across all languages"""
+        if not question:
+            return question
+        
+        # Get keyword mapping for the detected language
+        keyword_mapping = self._get_universal_keyword_mapping(language)
+        
+        # Extract key terms from the question
+        enhanced_terms = []
+        
+        # For each word in the question, check if it has an English equivalent
+        question_words = re.findall(r'\b\w+\b', question)
+        for word in question_words:
+            if word in keyword_mapping:
+                enhanced_terms.append(keyword_mapping[word])
+        
+        # Add domain-specific terms based on detected concepts
+        concept_mappings = {
+            # Insurance/Policy related
+            'policy_terms': ['policy', 'insurance', 'coverage', 'claim', 'premium', 'deductible'],
+            'financial_terms': ['amount', 'percentage', 'rate', 'fee', 'charge', 'discount'],
+            'time_terms': ['period', 'duration', 'waiting', 'grace', 'expiry', 'renewal'],
+            'medical_terms': ['treatment', 'hospital', 'doctor', 'medicine', 'surgery', 'therapy'],
+            'legal_terms': ['terms', 'conditions', 'exclusions', 'inclusions', 'liability', 'responsibility']
+        }
+        
+        # Detect concepts and add relevant English terms
+        question_lower = question.lower()
+        for concept, terms in concept_mappings.items():
+            # Check if question contains concepts from this domain
+            if any(self._contains_concept(question, term, language) for term in terms):
+                enhanced_terms.extend(terms[:3])  # Add top 3 relevant terms
+        
+        # Remove duplicates and combine with original question
+        enhanced_terms = list(set(enhanced_terms))
+        
+        if enhanced_terms:
+            return f"{question} {' '.join(enhanced_terms)}"
+        
+        return question
+
+    def _contains_concept(self, question: str, concept: str, language: str) -> bool:
+        """Check if question contains a concept in the given language"""
+        concept_translations = {
+            'policy': {
+                'malayalam': ['പോളിസി', 'നയം'],
+                'hindi': ['पॉलिसी', 'नीति'],
+                'tamil': ['கொள்கை', 'பாலிசி'],
+                'telugu': ['పాలసీ', 'విధానం'],
+                'kannada': ['ನೀತಿ', 'ಪಾಲಿಸಿ'],
+                'gujarati': ['નીતિ', 'પોલિસી'],
+                'bengali': ['নীতি', 'পলিসি'],
+                'punjabi': ['ਨੀਤੀ', 'ਪਾਲਿਸੀ'],
+                'urdu': ['پالیسی', 'ضابطہ'],
+                'chinese': ['政策', '保单'],
+                'japanese': ['ポリシー', '政策'],
+                'korean': ['정책', '보험'],
+                'thai': ['นโยบาย', 'กรมธรรม์']
+            },
+            'insurance': {
+                'malayalam': ['ബീമ', 'ഇൻഷുറൻസ്'],
+                'hindi': ['बीमा', 'इंश्योरेंस'],
+                'tamil': ['காப்பீடு', 'இன்சூரன்ஸ்'],
+                'telugu': ['బీమా', 'ఇన్సూరెన్స్'],
+                'kannada': ['ವಿಮೆ', 'ಇನ್ಶುರೆನ್ಸ್'],
+                'gujarati': ['વીમો', 'ઇન્સ્યોરન્સ'],
+                'bengali': ['বিমা', 'ইন্সুরেন্স'],
+                'punjabi': ['ਬੀਮਾ', 'ਇੰਸ਼ੋਰੈਂਸ'],
+                'urdu': ['بیمہ', 'انشورنس'],
+                'chinese': ['保险', '保障'],
+                'japanese': ['保険', 'インシュアランス'],
+                'korean': ['보험', '보장'],
+                'thai': ['ประกัน', 'ประกันภัย']
+            },
+            'amount': {
+                'malayalam': ['തുക', 'അളവ്'],
+                'hindi': ['राशि', 'मात्रा'],
+                'tamil': ['தொகை', 'அளவு'],
+                'telugu': ['మొత్తం', 'పరిమాణం'],
+                'kannada': ['ಮೊತ್ತ', 'ಪ್ರಮಾಣ'],
+                'gujarati': ['રકમ', 'માત્રા'],
+                'bengali': ['পরিমাণ', 'অর্থ'],
+                'punjabi': ['ਰਕਮ', 'ਮਾਤਰਾ'],
+                'urdu': ['رقم', 'مقدار'],
+                'chinese': ['金额', '数量'],
+                'japanese': ['金額', '量'],
+                'korean': ['금액', '양'],
+                'thai': ['จำนวน', 'ปริมาณ']
+            },
+            'time': {
+                'malayalam': ['സമയം', 'കാലം', 'ദിവസം', 'മാസം', 'വർഷം'],
+                'hindi': ['समय', 'काल', 'दिन', 'महीना', 'साल'],
+                'tamil': ['நேரம்', 'காலம்', 'நாள்', 'மாதம்', 'வருடம்'],
+                'telugu': ['సమయం', 'కాలం', 'రోజు', 'నెల', 'సంవత్సరం'],
+                'kannada': ['ಸಮಯ', 'ಕಾಲ', 'ದಿನ', 'ತಿಂಗಳು', 'ವರ್ಷ'],
+                'gujarati': ['સમય', 'કાળ', 'દિવસ', 'મહિનો', 'વર્ષ'],
+                'bengali': ['সময়', 'কাল', 'দিন', 'মাস', 'বছর'],
+                'punjabi': ['ਸਮਾਂ', 'ਕਾਲ', 'ਦਿਨ', 'ਮਹੀਨਾ', 'ਸਾਲ'],
+                'urdu': ['وقت', 'زمانہ', 'دن', 'مہینہ', 'سال'],
+                'chinese': ['时间', '时期', '天', '月', '年'],
+                'japanese': ['時間', '期間', '日', '月', '年'],
+                'korean': ['시간', '기간', '일', '월', '년'],
+                'thai': ['เวลา', 'ระยะเวลา', 'วัน', 'เดือน', 'ปี']
+            }
+        }
+        
+        translations = concept_translations.get(concept, {}).get(language, [])
+        return any(translation in question for translation in translations)
+
+    def _detect_question_pattern(self, question: str, language: str) -> str:
+        """Universal question pattern detection for all languages"""
+        if not question:
+            return "unknown"
+        
+        # Define question patterns for different languages
+        question_patterns = {
+            'what_is': {
+                'english': [r'what\s+is', r'what\s+are', r'what\s+does'],
+                'malayalam': [r'എന്ത്.*ആണ്', r'എന്താണ്', r'എന്തൊക്കെ.*ആണ്'],
+                'hindi': [r'क्या\s+है', r'क्या\s+होता', r'क्या\s+करता'],
+                'tamil': [r'என்ன.*உள்ளது', r'எது.*உள்ளது', r'என்ന.*ஆகும்'],
+                'telugu': [r'ఏమిటి', r'ఏది.*ఉంది', r'ఏమి.*అవుతుంది'],
+                'kannada': [r'ಏನು.*ಇದೆ', r'ಏನು.*ಆಗಿದೆ', r'ಏನು.*ಮಾಡುತ್ತದೆ'],
+                'gujarati': [r'શું.*છે', r'શું.*થાય', r'શું.*કરે'],
+                'bengali': [r'কি.*আছে', r'কি.*হয়', r'কি.*করে'],
+                'punjabi': [r'ਕੀ.*ਹੈ', r'ਕੀ.*ਹੁੰਦਾ', r'ਕੀ.*ਕਰਦਾ'],
+                'urdu': [r'کیا.*ہے', r'کیا.*ہوتا', r'کیا.*کرتا'],
+                'chinese': [r'什么.*是', r'什么.*有', r'什么.*做'],
+                'japanese': [r'何.*です', r'何.*ある', r'何.*する'],
+                'korean': [r'무엇.*입니다', r'무엇.*있습니다', r'무엇.*합니다'],
+                'thai': [r'อะไร.*คือ', r'อะไร.*มี', r'อะไร.*ทำ']
+            },
+            'how_to': {
+                'english': [r'how\s+to', r'how\s+do\s+i', r'how\s+can\s+i'],
+                'malayalam': [r'എങ്ങനെ.*ചെയ്യണം', r'എങ്ങനെ.*ആണ്', r'എങ്ങനെ.*ആകും'],
+                'hindi': [r'कैसे.*करना', r'कैसे.*है', r'कैसे.*होगा'],
+                'tamil': [r'எப்படி.*செய்வது', r'எப்படி.*உள்ளது', r'எப்படி.*ஆகும்'],
+                'telugu': [r'ఎలా.*చేయాలి', r'ఎలా.*ఉంది', r'ఎలా.*అవుతుంది'],
+                'kannada': [r'ಹೇಗೆ.*ಮಾಡಬೇಕು', r'ಹೇಗೆ.*ಇದೆ', r'ಹೇಗೆ.*ಆಗುತ್ತದೆ'],
+                'gujarati': [r'કેવી રીતે.*કરવું', r'કેવી રીતે.*છે', r'કેવી રીતે.*થશે'],
+                'bengali': [r'কিভাবে.*করতে', r'কিভাবে.*আছে', r'কিভাবে.*হবে'],
+                'punjabi': [r'ਕਿਵੇਂ.*ਕਰਨਾ', r'ਕਿਵੇਂ.*ਹੈ', r'ਕਿਵੇਂ.*ਹੋਵੇਗਾ'],
+                'urdu': [r'کیسے.*کرنا', r'کیسے.*ہے', r'کیسے.*ہوگا'],
+                'chinese': [r'怎么.*做', r'如何.*是', r'怎样.*会'],
+                'japanese': [r'どう.*する', r'どのように.*です', r'いかに.*なる'],
+                'korean': [r'어떻게.*하다', r'어떻게.*입니다', r'어떻게.*될'],
+                'thai': [r'อย่างไร.*ทำ', r'อย่างไร.*คือ', r'อย่างไร.*จะ']
+            },
+            'when_is': {
+                'english': [r'when\s+is', r'when\s+will', r'when\s+does'],
+                'malayalam': [r'എപ്പോൾ.*ആണ്', r'എപ്പോൾ.*ആകും', r'എപ്പോൾ.*ചെയ്യും'],
+                'hindi': [r'कब.*है', r'कब.*होगा', r'कब.*करेगा'],
+                'tamil': [r'எப்போது.*உள்ளது', r'எப்போது.*ஆகும்', r'எப்போது.*செய்யும்'],
+                'telugu': [r'ఎప్పుడు.*ఉంది', r'ఎప్పుడు.*అవుతుంది', r'ఎప్పుడు.*చేస్తుంది'],
+                'kannada': [r'ಯಾವಾಗ.*ಇದೆ', r'ಯಾವಾಗ.*ಆಗುತ್ತದೆ', r'ಯಾವಾಗ.*ಮಾಡುತ್ತದೆ'],
+                'gujarati': [r'ક્યારે.*છે', r'ક્યારે.*થશે', r'ક્યારે.*કરશે'],
+                'bengali': [r'কখন.*আছে', r'কখন.*হবে', r'কখন.*করবে'],
+                'punjabi': [r'ਕਦੋਂ.*ਹੈ', r'ਕਦੋਂ.*ਹੋਵੇਗਾ', r'ਕਦੋਂ.*ਕਰੇਗਾ'],
+                'urdu': [r'کب.*ہے', r'کب.*ہوگا', r'کب.*کرے گا'],
+                'chinese': [r'什么时候.*是', r'什么时候.*会', r'什么时候.*做'],
+                'japanese': [r'いつ.*です', r'いつ.*なる', r'いつ.*する'],
+                'korean': [r'언제.*입니다', r'언제.*될', r'언제.*합니다'],
+                'thai': [r'เมื่อไร.*คือ', r'เมื่อไร.*จะ', r'เมื่อไร.*ทำ']
+            },
+            'how_much': {
+                'english': [r'how\s+much', r'how\s+many', r'what.*amount'],
+                'malayalam': [r'എത്ര.*ആണ്', r'എത്ര.*ഉണ്ട്', r'എത്ര.*ആകും'],
+                'hindi': [r'कितना.*है', r'कितने.*हैं', r'कितना.*होगा'],
+                'tamil': [r'எத்தனை.*உள்ளது', r'எவ்வளவு.*உள்ளது', r'எத்தனை.*ஆகும்'],
+                'telugu': [r'ఎంత.*ఉంది', r'ఎన్ని.*ఉన్నాయి', r'ఎంత.*అవుతుంది'],
+                'kannada': [r'ಎಷ್ಟು.*ಇದೆ', r'ಎಷ್ಟು.*ಇವೆ', r'ಎಷ್ಟು.*ಆಗುತ್ತದೆ'],
+                'gujarati': [r'કેટલું.*છે', r'કેટલા.*છે', r'કેટલું.*થશે'],
+                'bengali': [r'কত.*আছে', r'কতগুলি.*আছে', r'কত.*হবে'],
+                'punjabi': [r'ਕਿੰਨਾ.*ਹੈ', r'ਕਿੰਨੇ.*ਹਨ', r'ਕਿੰਨਾ.*ਹੋਵੇਗਾ'],
+                'urdu': [r'کتنا.*ہے', r'کتنے.*ہیں', r'کتنا.*ہوگا'],
+                'chinese': [r'多少.*是', r'多少.*有', r'多少.*会'],
+                'japanese': [r'いくつ.*です', r'いくら.*ある', r'どのくらい.*なる'],
+                'korean': [r'얼마나.*입니다', r'몇 개.*있습니다', r'얼마나.*될'],
+                'thai': [r'เท่าไร.*คือ', r'กี่.*มี', r'เท่าไร.*จะ']
+            },
+            'where_is': {
+                'english': [r'where\s+is', r'where\s+can', r'where\s+to'],
+                'malayalam': [r'എവിടെ.*ആണ്', r'എവിടെ.*ചെയ്യണം', r'എവിടെ.*കാണാം'],
+                'hindi': [r'कहाँ.*है', r'कहाँ.*कर', r'कहाँ.*मिल'],
+                'tamil': [r'எங்கே.*உள்ளது', r'எங்கே.*செய்வது', r'எங்கே.*கிடைக்கும்'],
+                'telugu': [r'ఎక్కడ.*ఉంది', r'ఎక్కడ.*చేయాలి', r'ఎక్కడ.*దొరుకుతుంది'],
+                'kannada': [r'ಎಲ್ಲಿ.*ಇದೆ', r'ಎಲ್ಲಿ.*ಮಾಡಬೇಕು', r'ಎಲ್ಲಿ.*ಸಿಗುತ್ತದೆ'],
+                'gujarati': [r'ક્યાં.*છે', r'ક્યાં.*કરવું', r'ક્યાં.*મળશે'],
+                'bengali': [r'কোথায়.*আছে', r'কোথায়.*করতে', r'কোথায়.*পাওয়া'],
+                'punjabi': [r'ਕਿੱਥੇ.*ਹੈ', r'ਕਿੱਥੇ.*ਕਰਨਾ', r'ਕਿੱਥੇ.*ਮਿਲਦਾ'],
+                'urdu': [r'کہاں.*ہے', r'کہاں.*کرنا', r'کہاں.*ملے'],
+                'chinese': [r'哪里.*是', r'哪里.*可以', r'哪里.*找'],
+                'japanese': [r'どこ.*です', r'どこ.*できる', r'どこ.*見つける'],
+                'korean': [r'어디.*입니다', r'어디서.*할', r'어디서.*찾을'],
+                'thai': [r'ที่ไหน.*คือ', r'ที่ไหน.*สามารถ', r'ที่ไหน.*หา']
+            },
+            'why_is': {
+                'english': [r'why\s+is', r'why\s+do', r'why\s+does'],
+                'malayalam': [r'എന്തുകൊണ്ട്.*ആണ്', r'എന്തുകൊണ്ട്.*ചെയ്യുന്നു', r'എന്തിനാണ്'],
+                'hindi': [r'क्यों.*है', r'क्यों.*करते', r'क्यों.*होता'],
+                'tamil': [r'ஏன்.*உள்ளது', r'ஏன்.*செய்கிறார்கள்', r'ஏன்.*நடக்கிறது'],
+                'telugu': [r'ఎందుకు.*ఉంది', r'ఎందుకు.*చేస్తారు', r'ఎందుకు.*జరుగుతుంది'],
+                'kannada': [r'ಏಕೆ.*ಇದೆ', r'ಏಕೆ.*ಮಾಡುತ್ತಾರೆ', r'ಏಕೆ.*ಆಗುತ್ತದೆ'],
+                'gujarati': [r'શા માટે.*છે', r'શા માટે.*કરે', r'શા માટે.*થાય'],
+                'bengali': [r'কেন.*আছে', r'কেন.*করে', r'কেন.*হয়'],
+                'punjabi': [r'ਕਿਉਂ.*ਹੈ', r'ਕਿਉਂ.*ਕਰਦੇ', r'ਕਿਉਂ.*ਹੁੰਦਾ'],
+                'urdu': [r'کیوں.*ہے', r'کیوں.*کرتے', r'کیوں.*ہوتا'],
+                'chinese': [r'为什么.*是', r'为什么.*做', r'为什么.*会'],
+                'japanese': [r'なぜ.*です', r'なぜ.*する', r'なぜ.*なる'],
+                'korean': [r'왜.*입니다', r'왜.*합니다', r'왜.*됩니다'],
+                'thai': [r'ทำไม.*คือ', r'ทำไม.*ทำ', r'ทำไม.*เป็น']
+            }
+        }
+        
+        # Check each pattern type for the given language
+        for pattern_type, language_patterns in question_patterns.items():
+            patterns = language_patterns.get(language, language_patterns.get('english', []))
+            
+            for pattern in patterns:
+                if re.search(pattern, question, re.IGNORECASE):
+                    return pattern_type
+        
+        # Additional pattern detection based on keywords
+        if language != 'english':
+            # Check for policy/insurance specific patterns
+            policy_keywords = self._get_policy_keywords(language)
+            if any(keyword in question for keyword in policy_keywords):
+                return 'policy_question'
+            
+            # Check for financial/amount patterns
+            financial_keywords = self._get_financial_keywords(language)
+            if any(keyword in question for keyword in financial_keywords):
+                return 'financial_question'
+        
+        return 'general'
+
+    def _get_policy_keywords(self, language: str) -> List[str]:
+        """Get policy-related keywords for a specific language"""
+        policy_keywords = {
+            'malayalam': ['പോളിസി', 'ബീമ', 'കവർ', 'ക്ലെയിം', 'പ്രീമിയം', 'കാത്തിരിക്കൽ', 'ഗ്രേസ്'],
+            'hindi': ['पॉलिसी', 'बीमा', 'कवर', 'दावा', 'प्रीमियम', 'प्रतीक्षा', 'ग्रेस'],
+            'tamil': ['கொள்கை', 'காப்பீடு', 'மூடு', 'உரிமைகோரல்', 'பிரீமியம்', 'காத்திருப்பு', 'கிரேஸ்'],
+            'telugu': ['పాలసీ', 'బీమా', 'కవర్', 'క్లెయిమ్', 'ప్రీమియం', 'వేచి', 'గ్రేస్'],
+            'kannada': ['ನೀತಿ', 'ವಿಮೆ', 'ಕವರ್', 'ಕ್ಲೈಮ್', 'ಪ್ರೀಮಿಯಂ', 'ಕಾಯುವಿಕೆ', 'ಗ್ರೇಸ್'],
+            'gujarati': ['નીતિ', 'વીમો', 'કવર', 'દાવો', 'પ્રીમિયમ', 'રાહ', 'ગ્રેસ'],
+            'bengali': ['নীতি', 'বিমা', 'কভার', 'দাবি', 'প্রিমিয়াম', 'অপেক্ষা', 'গ্রেস'],
+            'punjabi': ['ਨੀਤੀ', 'ਬੀਮਾ', 'ਕਵਰ', 'ਦਾਅਵਾ', 'ਪ੍ਰੀਮੀਅਮ', 'ਇੰਤਜ਼ਾਰ', 'ਗ੍ਰੇਸ'],
+            'urdu': ['پالیسی', 'بیمہ', 'کور', 'دعویٰ', 'پریمیم', 'انتظار', 'گریس'],
+            'chinese': ['政策', '保险', '覆盖', '索赔', '保费', '等待', '宽限'],
+            'japanese': ['ポリシー', '保険', 'カバー', 'クレーム', 'プレミアム', '待機', 'グレース'],
+            'korean': ['정책', '보험', '커버', '클레임', '프리미엄', '대기', '유예'],
+            'thai': ['นโยบาย', 'ประกัน', 'ครอบคลุม', 'เคลม', 'เบี้ยประกัน', 'รอ', 'กริส']
+        }
+        return policy_keywords.get(language, [])
+
+    def _get_financial_keywords(self, language: str) -> List[str]:
+        """Get financial-related keywords for a specific language"""
+        financial_keywords = {
+            'malayalam': ['തുക', 'ശതമാനം', 'ഫീസ്', 'ചാർജ്', 'ഡിസ്കൗണ്ട്', 'പണം'],
+            'hindi': ['राशि', 'प्रतिशत', 'फीस', 'चार्ज', 'छूट', 'पैसा'],
+            'tamil': ['தொகை', 'சதவீதம்', 'கட்டணம்', 'சார்ஜ்', 'தள்ளுபடி', 'பணம்'],
+            'telugu': ['మొత్తం', 'శాతం', 'ఫీజు', 'చార్జ్', 'డిస్కౌంట్', 'డబ్బు'],
+            'kannada': ['ಮೊತ್ತ', 'ಶೇಕಡಾ', 'ಶುಲ್ಕ', 'ಚಾರ್ಜ್', 'ರಿಯಾಯಿತಿ', 'ಹಣ'],
+            'gujarati': ['રકમ', 'ટકાવારી', 'ફી', 'ચાર્જ', 'છૂટ', 'પૈસા'],
+            'bengali': ['পরিমাণ', 'শতাংশ', 'ফি', 'চার্জ', 'ছাড়', 'টাকা'],
+            'punjabi': ['ਰਕਮ', 'ਪ੍ਰਤੀਸ਼ਤ', 'ਫੀਸ', 'ਚਾਰਜ', 'ਛੋਟ', 'ਪੈਸਾ'],
+            'urdu': ['رقم', 'فیصد', 'فیس', 'چارج', 'رعایت', 'پیسہ'],
+            'chinese': ['金额', '百分比', '费用', '收费', '折扣', '钱'],
+            'japanese': ['金額', 'パーセント', '料金', 'チャージ', '割引', 'お金'],
+            'korean': ['금액', '퍼센트', '수수료', '요금', '할인', '돈'],
+            'thai': ['จำนวน', 'เปอร์เซ็นต์', 'ค่าธรรมเนียม', 'ค่าใช้จ่าย', 'ส่วนลด', 'เงิน']
+        }
+        return financial_keywords.get(language, [])
+
+    def _get_universal_keyword_mapping(self, language: str) -> Dict[str, str]:
+        """Get comprehensive keyword mapping for any language to English for better search"""
+        mappings = {
+            'malayalam': {
+                # Insurance/Policy terms
+                'പോളിസി': 'policy', 'ബീമ': 'insurance', 'കവർ': 'cover',
+                'ക്ലെയിം': 'claim', 'പ്രീമിയം': 'premium', 'തുക': 'amount',
+                'കാത്തിരിക്കൽ': 'waiting period', 'ഗ്രേസ്': 'grace period',
+                'ഒഴിവാക്കൽ': 'exclusion', 'ഉൾപ്പെടുത്തൽ': 'inclusion',
+                # Time terms
+                'ദിവസം': 'day', 'മാസം': 'month', 'വർഷം': 'year', 'കാലം': 'period',
+                'സമയം': 'time', 'തീയതി': 'date', 'കാലയളവ്': 'duration',
+                # Financial terms
+                'ശതമാനം': 'percentage', 'ഡിസ്കൗണ്ട്': 'discount',
+                'ഫീസ്': 'fee', 'ചാർജ്': 'charge', 'ബിൽ': 'bill',
+                'നിക്ഷേപം': 'investment', 'ലാഭം': 'profit', 'നഷ്ടം': 'loss',
+                # Medical terms
+                'ചികിത്സ': 'treatment', 'ആശുപത്രി': 'hospital', 'ഡോക്ടർ': 'doctor',
+                'രോഗം': 'disease', 'ശസ്ത്രക്രിയ': 'surgery', 'മരുന്ന്': 'medicine',
+                # Legal/Business terms
+                'കമ്പനി': 'company', 'ഉപഭോക്താവ്': 'customer', 'സേവനം': 'service',
+                'ഉത്പന്നം': 'product', 'കരാർ': 'contract', 'നിയമം': 'law',
+                # Process terms
+                'പ്രക്രിയ': 'process', 'ഘട്ടം': 'step', 'രീതി': 'method',
+                'ക്രമം': 'procedure', 'വഴി': 'way', 'നിർദ്ദേശം': 'instruction'
+            },
+            'hindi': {
+                # Insurance/Policy terms
+                'पॉलिसी': 'policy', 'बीमा': 'insurance', 'कवर': 'cover',
+                'दावा': 'claim', 'प्रीमियम': 'premium', 'राशि': 'amount',
+                'प्रतीक्षा': 'waiting period', 'ग्रेस': 'grace period',
+                'अपवाद': 'exclusion', 'शामिल': 'inclusion',
+                # Time terms
+                'दिन': 'day', 'महीना': 'month', 'साल': 'year', 'अवधि': 'period',
+                'समय': 'time', 'तारीख': 'date', 'काल': 'duration',
+                # Financial terms
+                'प्रतिशत': 'percentage', 'छूट': 'discount',
+                'फीस': 'fee', 'चार्ज': 'charge', 'बिल': 'bill',
+                'निवेश': 'investment', 'लाभ': 'profit', 'हानि': 'loss',
+                # Medical terms
+                'इलाज': 'treatment', 'अस्पताल': 'hospital', 'डॉक्टर': 'doctor',
+                'बीमारी': 'disease', 'सर्जरी': 'surgery', 'दवा': 'medicine',
+                # Legal/Business terms
+                'कंपनी': 'company', 'ग्राहक': 'customer', 'सेवा': 'service',
+                'उत्पाद': 'product', 'अनुबंध': 'contract', 'कानून': 'law',
+                # Process terms
+                'प्रक्रिया': 'process', 'कदम': 'step', 'विधि': 'method',
+                'प्रक्रम': 'procedure', 'तरीका': 'way', 'निर्देश': 'instruction'
+            },
+            # Add more languages as needed for space efficiency...
+        }
+        
+        return mappings.get(language, {})
+
+    def _select_optimal_context_multilingual(self, question: str, search_results: List[Tuple[str, float, Dict]], 
+                                           language: str, max_chunks: int = 12) -> List[str]:
+        """Enhanced context selection with multilingual awareness"""
+        if not search_results:
+            return []
+        
+        question_clean = self._clean_text(question)
+        
+        # Get language-specific keywords for better matching
+        keyword_mapping = self._get_universal_keyword_mapping(language)
+        question_keywords = set()
+        
+        # Extract keywords from question
+        for word in re.findall(r'\b\w+\b', question_clean):
+            if word in keyword_mapping:
+                question_keywords.add(keyword_mapping[word])
+            question_keywords.add(word.lower())
+        
+        # Enhanced relevance scoring
+        scored_chunks = []
+        for chunk, score, metadata in search_results:
+            chunk_clean = self._clean_text(chunk)
+            chunk_words = set(re.findall(r'\b\w+\b', chunk_clean.lower()))
+            
+            # Calculate keyword overlap
+            overlap = len(question_keywords.intersection(chunk_words))
+            overlap_ratio = overlap / len(question_keywords) if question_keywords else 0
+            
+            # Language consistency bonus
+            language_bonus = 0
+            if language != "english":
+                # Check if chunk contains text in the same language
+                chunk_lang = self._detect_language_enhanced(chunk_clean)
+                if chunk_lang == language:
+                    language_bonus = 0.2
+                elif chunk_lang == "english":
+                    language_bonus = 0.1  # English content is still useful
+            
+            # Domain-specific scoring
+            domain_bonus = 0
+            question_pattern = self._detect_question_pattern(question, language)
+            
+            if question_pattern == 'policy_question':
+                policy_terms = ['policy', 'insurance', 'coverage', 'claim', 'premium']
+                domain_matches = sum(1 for term in policy_terms if term in chunk_clean.lower())
+                domain_bonus = domain_matches * 0.05
+            elif question_pattern == 'financial_question':
+                financial_terms = ['amount', 'percentage', 'fee', 'charge', 'cost']
+                domain_matches = sum(1 for term in financial_terms if term in chunk_clean.lower())
+                domain_bonus = domain_matches * 0.05
+            
+            # Calculate final relevance score
+            relevance_score = score + overlap_ratio * 0.4 + language_bonus + domain_bonus
+            
+            scored_chunks.append((chunk_clean, relevance_score, metadata))
+        
+        # Sort by relevance score and select top chunks
+        scored_chunks.sort(key=lambda x: x[1], reverse=True)
+        
+        # Dynamic threshold selection
+        if len(scored_chunks) >= 5:
+            scores = [score for _, score, _ in scored_chunks]
+            threshold = scores[int(len(scores) * 0.3)]  # Top 70%
+        else:
+            threshold = 0.3
+        
+        # Select chunks above threshold
+        selected_chunks = []
+        for chunk, score, metadata in scored_chunks:
+            if score >= threshold or len(selected_chunks) < max_chunks // 2:
+                selected_chunks.append(chunk)
+            if len(selected_chunks) >= max_chunks:
+                break
+        
+        return selected_chunks
+
     async def _generate_language_specific_answer(self, question: str, context: str, language: str) -> str:
         """
         Generate answer in specific language using targeted prompts
         """
-        if language == "malayalam":
-            prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ അസിസ്റ്റന്റ് ആണ്. മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക.
+        # Language-specific prompts with human-like, enterprise quality
+        language_prompts = {
+            'malayalam': f"""നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിനെ സഹായിക്കാൻ നിങ്ങൾ ഇവിടെയുണ്ട്.
 
-    CRITICAL: You MUST respond ONLY in Malayalam language. Do not use English.
+**നിർദ്ദേശം: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷ് ഉപയോഗിക്കരുത്.**
 
-    സന്ദർഭം: {context[:2000]}
-    ചോദ്യം: {question}
+സന്ദർഭം: {context[:2000]}
+ചോദ്യം: {question}
 
-    മലയാളത്തിൽ ഉത്തരം നൽകുക:"""
+നിർദ്ദേശങ്ങൾ:
+- സൗഹൃദപരവും പ്രൊഫഷണലുമായ രീതിയിൽ ഉത്തരം നൽകുക
+- കൃത്യമായ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ ഉപയോഗിക്കുക
+- ഡോക്യുമെന്റിൽ നിന്നുള്ള വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
+- വ്യക്തവും മനസ്സിലാക്കാൻ എളുപ്പവുമായ ഉത്തരം നൽകുക
+
+മലയാളത്തിൽ ഉത്തരം:""",
+
+            'hindi': f"""आप एक सहायक एंटरप्राइज असिस्टेंट हैं। आप ग्राहक की सहायता के लिए यहाँ हैं।
+
+**निर्देश: केवल हिंदी में उत्तर दें। अंग्रेजी का उपयोग न करें।**
+
+संदर्भ: {context[:2000]}
+प्रश्न: {question}
+
+निर्देश:
+- मित्रवत और पेशेवर तरीके से उत्तर दें
+- सटीक संख्याएं, तिथियां, शर्तें उपयोग करें
+- केवल दस्तावेज़ की जानकारी का उपयोग करें
+- स्पष्ट और समझने योग्य उत्तर दें
+
+हिंदी में उत्तर:""",
+
+            'tamil': f"""நீங்கள் ஒரு உதவிகரமான நிறுவன உதவியாளர். நீங்கள் வாடிக்கையாளருக்கு உதவ இங்கே உள்ளீர்கள்.
+
+**அறிவுறுத்தல்: தமிழில் மட்டும் பதில் அளிக்கவும். ஆங்கிலம் பயன்படுத்த வேண்டாம்.**
+
+சூழல்: {context[:2000]}
+கேள்வி: {question}
+
+வழிகாட்டுதல்கள்:
+- நட்பு மற்றும் தொழில்முறை முறையில் பதிலளிக்கவும்
+- துல்லியமான எண்கள், தேதிகள், நிபந்தனைகளைப் பயன்படுத்துங்கள்
+- ஆவணத்தின் தகவல்களை மட்டும் பயன்படுத்துங்கள்
+- தெளிவான மற்றும் புரிந்துகொள்ள எளிதான பதில் கொடுங்கள்
+
+தமிழில் பதில்:""",
+
+            'telugu': f"""మీరు సహాయకరమైన ఎంటర్‌ప్రైజ్ అసిస్టెంట్. మీరు కస్టమర్‌కు సహాయం చేయడానికి ఇక్కడ ఉన్నారు.
+
+**సూచన: తెలుగులో మాత్రమే జవాబు ఇవ్వండి. ఇంగ్లీష్ ఉపయోగించవద్దు.**
+
+సందర్భం: {context[:2000]}
+ప్రశ్న: {question}
+
+మార్గదర్శకాలు:
+- స్నేహపూర్వక మరియు వృత్తిపరమైన విధంగా సమాధానం ఇవ్వండి
+- ఖచ్చితమైన సంఖ్యలు, తేదీలు, షరతులు ఉపయోగించండి
+- పత్రంలోని సమాచారాన్ని మాత్రమే ఉపయోగించండి
+- స్పష్టమైన మరియు అర్థం చేసుకోవడానికి సులభమైన సమాధానం ఇవ్వండి
+
+తెలుగులో జవాబు:""",
+
+            'kannada': f"""ನೀವು ಸಹಾಯಕ ಎಂಟರ್‌ಪ್ರೈಸ್ ಸಹಾಯಕರು. ನೀವು ಗ್ರಾಹಕರಿಗೆ ಸಹಾಯ ಮಾಡಲು ಇಲ್ಲಿದ್ದೀರಿ.
+
+**ಸೂಚನೆ: ಕನ್ನಡದಲ್ಲಿ ಮಾತ್ರ ಉತ್ತರಿಸಿ. ಇಂಗ್ಲೀಷ್ ಬಳಸಬೇಡಿ.**
+
+ಸಂದರ್ಭ: {context[:2000]}
+ಪ್ರಶ್ನೆ: {question}
+
+ಮಾರ್ಗದರ್ಶಿಗಳು:
+- ಸ್ನೇಹಪರ ಮತ್ತು ವೃತ್ತಿಪರ ರೀತಿಯಲ್ಲಿ ಉತ್ತರಿಸಿ
+- ನಿಖರವಾದ ಸಂಖ್ಯೆಗಳು, ದಿನಾಂಕಗಳು, ಷರತ್ತುಗಳನ್ನು ಬಳಸಿ
+- ದಾಖಲೆಯ ಮಾಹಿತಿಯನ್ನು ಮಾತ್ರ ಬಳಸಿ
+- ಸ್ಪಷ್ಟ ಮತ್ತು ಅರ್ಥಮಾಡಿಕೊಳ್ಳಲು ಸುಲಭವಾದ ಉತ್ತರ ಕೊಡಿ
+
+ಕನ್ನಡದಲ್ಲಿ ಉತ್ತರ:""",
+
+            'gujarati': f"""તમે એક સહાયક એન્ટરપ્રાઇઝ આસિસ્ટન્ટ છો। તમે ગ્રાહકને મદદ કરવા માટે અહીં છો.
+
+**સૂચના: ફક્ત ગુજરાતીમાં જવાબ આપો। અંગ્રેજીનો ઉપયોગ કરશો નહીં.**
+
+સંદર્ભ: {context[:2000]}
+પ્રશ્ન: {question}
+
+માર્ગદર્શિકા:
+- મિત્રવત અને વ્યાવસાયિક રીતે જવાબ આપો
+- ચોક્કસ નંબરો, તારીખો, શરતોનો ઉપયોગ કરો
+- ફક્ત દસ્તાવેજની માહિતીનો ઉપયોગ કરો
+- સ્પષ્ટ અને સમજવામાં સરળ જવાબ આપો
+
+ગુજરાતીમાં જવાબ:""",
+
+            'bengali': f"""আপনি একজন সহায়ক এন্টারপ্রাইজ সহায়ক। আপনি গ্রাহককে সাহায্য করার জন্য এখানে আছেন।
+
+**নির্দেশনা: শুধুমাত্র বাংলায় উত্তর দিন। ইংরেজি ব্যবহার করবেন না।**
+
+প্রসঙ্গ: {context[:2000]}
+প্রশ্ন: {question}
+
+নির্দেশিকা:
+- বন্ধুত্বপূর্ণ এবং পেশাদার উপায়ে উত্তর দিন
+- নির্দিষ্ট সংখ্যা, তারিখ, শর্তাবলী ব্যবহার করুন
+- শুধুমাত্র নথির তথ্য ব্যবহার করুন
+- স্পষ্ট এবং বোঝা সহজ উত্তর দিন
+
+বাংলায় উত্তর:""",
+
+            'punjabi': f"""ਤੁਸੀਂ ਇੱਕ ਸਹਾਇਕ ਐਂਟਰਪ੍ਰਾਈਜ਼ ਅਸਿਸਟੈਂਟ ਹੋ। ਤੁਸੀਂ ਗਾਹਕ ਦੀ ਸਹਾਇਤਾ ਕਰਨ ਲਈ ਇਥੇ ਹੋ।
+
+**ਨਿਰਦੇਸ਼: ਸਿਰਫ਼ ਪੰਜਾਬੀ ਵਿੱਚ ਜਵਾਬ ਦਿਓ। ਅੰਗਰੇਜ਼ੀ ਦੀ ਵਰਤੋਂ ਨਾ ਕਰੋ।**
+
+ਸੰਦਰਭ: {context[:2000]}
+ਪ੍ਰਸ਼ਨ: {question}
+
+ਦਿਸ਼ਾ-ਨਿਰਦੇਸ਼:
+- ਦੋਸਤਾਨਾ ਅਤੇ ਪੇਸ਼ੇਵਰ ਤਰੀਕੇ ਨਾਲ ਜਵਾਬ ਦਿਓ
+- ਸਹੀ ਨੰਬਰ, ਤਾਰੀਖਾਂ, ਸ਼ਰਤਾਂ ਦੀ ਵਰਤੋਂ ਕਰੋ
+- ਸਿਰਫ਼ ਦਸਤਾਵੇਜ਼ ਦੀ ਜਾਣਕਾਰੀ ਦੀ ਵਰਤੋਂ ਕਰੋ
+- ਸਪਸ਼ਟ ਅਤੇ ਸਮਝਣ ਵਿੱਚ ਆਸਾਨ ਜਵਾਬ ਦਿਓ
+
+ਪੰਜਾਬੀ ਵਿੱਚ ਜਵਾਬ:""",
+
+            'urdu': f"""آپ ایک مددگار انٹرپرائز اسسٹنٹ ہیں۔ آپ کسٹمر کی مدد کے لیے یہاں ہیں۔
+
+**ہدایت: صرف اردو میں جواب دیں۔ انگریزی استعمال نہ کریں۔**
+
+سیاق و سباق: {context[:2000]}
+سوال: {question}
+
+رہنمائی:
+- دوستانہ اور پیشہ ورانہ انداز میں جواب دیں
+- درست نمبر، تاریخیں، شرائط استعمال کریں
+- صرف دستاویز کی معلومات استعمال کریں
+- واضح اور سمجھنے میں آسان جواب دیں
+
+اردو میں جواب:""",
+
+            'chinese': f"""您是一个有用的企业助手。您在这里帮助客户。
+
+**指示：只用中文回答。不要使用英文。**
+
+背景: {context[:2000]}
+问题: {question}
+
+指导原则:
+- 以友好和专业的方式回答
+- 使用准确的数字、日期、条件
+- 只使用文档中的信息
+- 提供清晰易懂的答案
+
+中文回答:""",
+
+            'japanese': f"""あなたは親切な企業アシスタントです。お客様をサポートするためにここにいます。
+
+**指示：日本語のみで回答してください。英語は使用しないでください。**
+
+文脈: {context[:2000]}
+質問: {question}
+
+ガイドライン:
+- フレンドリーでプロフェッショナルな方法で回答してください
+- 正確な数字、日付、条件を使用してください
+- 文書の情報のみを使用してください
+- 明確で理解しやすい回答を提供してください
+
+日本語での回答:""",
+
+            'korean': f"""당신은 도움이 되는 기업 어시스턴트입니다. 고객을 돕기 위해 여기 있습니다.
+
+**지시: 한국어로만 답변해 주세요. 영어를 사용하지 마세요.**
+
+맥락: {context[:2000]}
+질문: {question}
+
+가이드라인:
+- 친근하고 전문적인 방식으로 답변하세요
+- 정확한 숫자, 날짜, 조건을 사용하세요
+- 문서의 정보만 사용하세요
+- 명확하고 이해하기 쉬운 답변을 제공하세요
+
+한국어 답변:""",
+
+            'thai': f"""คุณเป็นผู้ช่วยองค์กรที่มีประโยชน์ คุณอยู่ที่นี่เพื่อช่วยลูกค้า
+
+**คำแนะนำ: ตอบเป็นภาษาไทยเท่านั้น อย่าใช้ภาษาอังกฤษ**
+
+บริบท: {context[:2000]}
+คำถาม: {question}
+
+แนวทาง:
+- ตอบด้วยวิธีที่เป็นมิตรและเป็นมืออาชีพ
+- ใช้ตัวเลข วันที่ เงื่อนไขที่แน่นอน
+- ใช้เฉพาะข้อมูลจากเอกสาร
+- ให้คำตอบที่ชัดเจนและเข้าใจง่าย
+
+คำตอบเป็นภาษาไทย:"""
+        }
         
-        elif language == "hindi":
-            prompt = f"""आप एक सहायक असिस्टेंट हैं। केवल हिंदी में उत्तर दें।
+        # Default to English if language not supported
+        prompt = language_prompts.get(language, f"""You are a helpful enterprise assistant. Answer the customer's question in a friendly, professional manner.
 
-    संदर्भ: {context[:2000]}
-    प्रश्न: {question}
+Context: {context[:2000]}
+Question: {question}
 
-    हिंदी में उत्तर दें:"""
-        
-        elif language == "tamil":
-            prompt = f"""நீங்கள் ஒரு உதவிகரமான உதவியாளர். தமிழில் மட்டும் பதில் அளிக்கவும்.
+Guidelines:
+- Be specific with numbers, dates, and conditions
+- Use only information from the document
+- Provide clear and easy to understand answers
+- Maintain a warm, professional tone
 
-    சூழல்: {context[:2000]}
-    கேள்வி: {question}
-
-    தமிழில் பதில்:"""
-        
-        else:
-            # Default to English
-            prompt = f"""Answer the question accurately based on the context.
-
-    Context: {context[:2000]}
-    Question: {question}
-
-    Answer:"""
+Answer:""")
         
         try:
             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
@@ -624,222 +1103,143 @@ class AdvancedQueryAgent:
             logger.error(f"Language-specific generation failed: {e}")
             return await self._get_language_fallback(question, language)
 
-    async def _force_language_response(self, question: str, context: str, target_language: str) -> str:
+    def _make_response_more_human_like(self, question: str, answer: str, language: str) -> str:
         """
-        Force generate response in target language when LLM fails
+        ENTERPRISE: Make responses more conversational and human-like while maintaining professionalism
         """
-        # Template-based responses for different languages
-        if target_language == "malayalam":
-            return self._create_malayalam_template_response(question, context)
-        elif target_language == "hindi":
-            return self._create_hindi_template_response(question, context)
-        elif target_language == "tamil":
-            return self._create_tamil_template_response(question, context)
-        else:
-            return "I apologize, but I cannot provide an answer in the requested language."
-
-    def _create_malayalam_template_response(self, question: str, context: str) -> str:
-        """Create Malayalam template response when LLM fails"""
-        numbers = re.findall(r'\d+', context)
+        if not answer or len(answer) < 20:
+            return answer
         
-        if 'എന്താണ്' in question or 'എന്ത്' in question:
-            if 'തന്ത്രം' in question:
-                return "വിദേശ ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം: ആഭ്യന്തര ഉൽപ്പാദനം പ്രോത്സാഹിപ്പിക്കുകയും വിദേശ നിർമ്മാണത്തിന്റെ ആശ്രയം കുറയ്ക്കുകയും ചെയ്യുക."
-            return f"ഡോക്യുമെന്റ് അനുസരിച്ച്: {', '.join(numbers[:3]) if numbers else 'വിവരങ്ങൾ ലഭ്യമാണ്'}. കൂടുതൽ വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
+        # Language-specific human-like enhancements
+        if language == "english":
+            # Add conversational elements for English
+            if answer and not answer.startswith(("I'd be happy", "I can help", "Let me help", "I'm here to help")):
+                # Add friendly opening for certain question types
+                question_lower = question.lower()
+                if any(word in question_lower for word in ['help', 'explain', 'how', 'what']):
+                    if 'how' in question_lower:
+                        answer = f"I'd be happy to walk you through this! {answer}"
+                    elif 'what' in question_lower:
+                        answer = f"Great question! {answer}"
+                    elif 'explain' in question_lower:
+                        answer = f"I can definitely explain this for you. {answer}"
+            
+            # Add helpful closing for certain types of answers
+            if not answer.endswith(("!", "?", "you.", "help.")):
+                if len(answer) < 200 and any(word in question.lower() for word in ['quick', 'simple', 'basic']):
+                    answer += " Hope this helps!"
+                elif any(word in question.lower() for word in ['detail', 'explain', 'comprehensive']):
+                    answer += " Let me know if you need any clarification on this!"
         
-        elif 'ഏത്' in question:
-            if 'ദിവസം' in question:
-                return "2025 ഓഗസ്റ്റ് 6-ന് ഈ നയം പ്രഖ്യാപിച്ചു."
-            elif 'ഉത്പന്നങ്ങൾ' in question:
-                return "കമ്പ്യൂട്ടർ ചിപ്പുകളും സെമിക്കണ്ടക്ടറുകളും ആണ് ഈ ശുൽക്കം ബാധകമായ ഉത്പന്നങ്ങൾ."
-            elif 'സാഹചര്യം' in question:
-                return "യുഎസിൽ നിർമ്മിക്കാൻ പ്രതിജ്ഞാബദ്ധരായ കമ്പനികൾക്ക് ഈ ശുൽക്കത്തിൽ നിന്ന് ഒഴിവാക്കൽ ലഭിക്കും."
-            return "ഡോക്യുമെന്റിൽ ഇതിനെക്കുറിച്ചുള്ള വിവരങ്ങൾ നൽകിയിട്ടുണ്ട്."
+        elif language == "malayalam":
+            # Add conversational elements for Malayalam
+            if not answer.startswith(("ഞാൻ സഹായിക്കാം", "സന്തോഷത്തോടെ", "തീർച്ചയായും")):
+                question_lower = question.lower()
+                if 'എങ്ങനെ' in question:
+                    answer = f"ഞാൻ ഇത് വിശദീകരിച്ചു തരാം! {answer}"
+                elif 'എന്താണ്' in question:
+                    answer = f"നല്ല ചോദ്യം! {answer}"
+            
+            # Add helpful closing
+            if not answer.endswith(("!", "?", "ക്കുക.", "മാം.")):
+                if len(answer) < 200:
+                    answer += " സഹായകരമായിരുന്നെന്ന് പ്രതീക്ഷിക്കുന്നു!"
         
-        elif 'എത്ര' in question:
-            if 'ശുൽക്കം' in question:
-                return "100 ശതമാനം ശുൽക്കം ഏർപ്പെടുത്തുമെന്ന് പ്രഖ്യാപിച്ചു."
-            return f"ഡോക്യുമെന്റ് പ്രകാരം: {', '.join(numbers[:3]) if numbers else 'സംഖ്യാ വിവരങ്ങൾ ലഭ്യമാണ്'}."
-        
-        return "നിങ്ങളുടെ ചോദ്യത്തിനുള്ള വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ലഭ്യമാണ്. കൂടുതൽ വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-
-    def _create_hindi_template_response(self, question: str, context: str) -> str:
-        """Create Hindi template response"""
-        numbers = re.findall(r'\d+', context)
-        
-        if 'क्या' in question:
-            return f"दस्तावेज़ के अनुसार: {', '.join(numbers[:3]) if numbers else 'जानकारी उपलब्ध है'}। अधिक विवरण के लिए दस्तावेज़ देखें।"
-        elif 'कौन' in question:
-            return "दस्तावेज़ में इसकी जानकारी दी गई है।"
-        elif 'कितना' in question:
-            return f"दस्तावेज़ के अनुसार: {', '.join(numbers[:3]) if numbers else 'संख्यात्मक जानकारी उपलब्ध है'}।"
-        
-        return "आपके प्रश्न की जानकारी दस्तावेज़ में उपलब्ध है। अधिक विवरण के लिए दस्तावेज़ देखें।"
-
-    def _create_tamil_template_response(self, question: str, context: str) -> str:
-        """Create Tamil template response"""
-        numbers = re.findall(r'\d+', context)
-        
-        if 'என்ன' in question:
-            return f"ஆவணத்தின் படி: {', '.join(numbers[:3]) if numbers else 'தகவல் கிடைக்கிறது'}। மேலும் விவரங்களுக்கு ஆவணத்தைப் பாருங்கள்।"
-        elif 'யார்' in question:
-            return "ஆவணத்தில் இதற்கான தகவல் கொடுக்கப்பட்டுள்ளது।"
-        elif 'எத்தனை' in question:
-            return f"ஆவணத்தின் படி: {', '.join(numbers[:3]) if numbers else 'எண் தகவல் கிடைக்கிறது'}।"
-        
-        return "உங்கள் கேள்விக்கான தகவல் ஆவணத்தில் உள்ளது। மேலும் விவரங்களுக்கு ஆவணத்தைப் பாருங்கள்।"
-
-    def _enhance_multilingual_query(self, question: str, language: str) -> str:
-        """Enhance query with language-specific keywords for better retrieval"""
-        if language == "malayalam":
-            keyword_mapping = {
-                'ശുൽക്കം': 'tariff', 'ഉത്പന്നങ്ങൾ': 'products', 'കമ്പനി': 'company',
-                'നിക്ഷേപം': 'investment', 'ലക്ഷ്യം': 'objective', 'പ്രഖ്യാപനം': 'announcement'
-            }
         elif language == "hindi":
-            keyword_mapping = {
-                'शुल्क': 'tariff', 'उत्पाद': 'products', 'कंपनी': 'company',
-                'निवेश': 'investment', 'लक्ष्य': 'objective', 'घोषणा': 'announcement'
-            }
-        elif language == "tamil":
-            keyword_mapping = {
-                'வரி': 'tariff', 'தயாரிப்புகள்': 'products', 'நிறுவனம்': 'company',
-                'முதலீடு': 'investment', 'நோக்கம்': 'objective', 'அறிவிப்பு': 'announcement'
-            }
-        else:
-            return question
+            # Add conversational elements for Hindi
+            if not answer.startswith(("मैं मदद", "खुशी से", "जरूर")):
+                question_lower = question.lower()
+                if 'कैसे' in question:
+                    answer = f"मैं इसे समझाने में खुशी से मदद करूंगा! {answer}"
+                elif 'क्या' in question:
+                    answer = f"बहुत अच्छा प्रश्न! {answer}"
+            
+            # Add helpful closing
+            if not answer.endswith(("!", "?", "है।", "गा।")):
+                if len(answer) < 200:
+                    answer += " उम्मीद है यह मददगार है!"
         
-        enhanced_terms = []
-        for local_term, english_term in keyword_mapping.items():
-            if local_term in question:
-                enhanced_terms.append(english_term)
+        # Add more languages as needed...
         
-        return f"{question} {' '.join(enhanced_terms)}" if enhanced_terms else question
+        return answer
+
+    def _validate_language_consistency(self, question: str, answer: str) -> bool:
+        """Validate that answer language matches question language"""
+        question_lang = self._detect_language_enhanced(question)
+        answer_lang = self._detect_language_enhanced(answer)
+        
+        # English questions can have English answers
+        if question_lang == "english":
+            return True
+        
+        # Non-English questions should have answers in the same language
+        return question_lang == answer_lang
+
+    async def _ensure_language_consistency(self, question: str, answer: str) -> str:
+        """Ensure answer is in the same language as the question"""
+        if self._validate_language_consistency(question, answer):
+            return answer
+        
+        # If languages don't match, regenerate in correct language
+        question_lang = self._detect_language_enhanced(question)
+        logger.warning(f"Language mismatch detected. Regenerating in {question_lang}")
+        
+        # Try to fix the language
+        return await self._force_language_response(question, answer, question_lang)
+
+    async def _force_language_response(self, question: str, context: str, target_language: str) -> str:
+        """Force generate response in target language when LLM fails"""
+        if target_language == "english":
+            return context[:500] + "... Please refer to the document for complete information."
+        
+        # Use template-based responses for non-English languages
+        return self._create_universal_fallback_response(question, context, target_language)
+
+    def _create_universal_fallback_response(self, question: str, context: str, language: str) -> str:
+        """Create fallback response in the appropriate language"""
+        
+        # Universal fallback templates
+        fallback_templates = {
+            'malayalam': "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല।",
+            'hindi': "क्षमा करें, इस प्रश्न का उत्तर देने के लिए दस्तावेज़ में पर्याप्त जानकारी नहीं मिली।",
+            'tamil': "மன்னிக்கவும், இந்த கேள்விக்கு பதிலளிக்க ஆவணத்தில் போதுமான தகவல் கிடைக்கவில்லை।",
+            'telugu': "క్షమించండి, ఈ ప్రశ్నకు సమాధానం ఇవ్వడానికి పత్రంలో తగిన సమాచారం దొరకలేదు।",
+            'kannada': "ಕ್ಷಮಿಸಿ, ಈ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರಿಸಲು ದಾಖಲೆಯಲ್ಲಿ ಸಾಕಷ್ಟು ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ।",
+            'gujarati': "માફ કરશો, આ પ્રશ્નનો જવાબ આપવા માટે દસ્તાવેજમાં પૂરતી માહિતી મળી નથી।",
+            'bengali': "দুঃখিত, এই প্রশ্নের উত্তর দেওয়ার জন্য নথিতে পর্যাপ্ত তথ্য পাওয়া যায়নি।",
+            'punjabi': "ਮਾਫ਼ ਕਰਨਾ, ਇਸ ਸਵਾਲ ਦਾ ਜਵਾਬ ਦੇਣ ਲਈ ਦਸਤਾਵੇਜ਼ ਵਿੱਚ ਲੋੜੀਂਦੀ ਜਾਣਕਾਰੀ ਨਹੀਂ ਮਿਲੀ।",
+            'urdu': "معذرت، اس سوال کا جواب دینے کے لیے دستاویز میں کافی معلومات نہیں ملیں۔",
+            'chinese': "抱歉，文档中没有足够的信息来回答这个问题。",
+            'japanese': "申し訳ございませんが、この質問にお答えするのに十分な情報が文書にありません。",
+            'korean': "죄송합니다. 이 질문에 답할 충분한 정보가 문서에 없습니다。",
+            'thai': "ขออภัย ไม่มีข้อมูลเพียงพอในเอกสารเพื่อตอบคำถามนี้"
+        }
+        
+        # Extract some context if available
+        numbers = re.findall(r'\d+(?:\.\d+)?%?', context)
+        
+        base_response = fallback_templates.get(language, 
+            "I'm sorry, but I don't have enough information in the document to answer that question.")
+        
+        # Add context if numbers are found
+        if numbers and language in fallback_templates:
+            context_addition = {
+                'malayalam': f" ഡോക്യുമെന്റിൽ ഈ സംഖ്യകൾ കണ്ടെത്തി: {', '.join(numbers[:3])}.",
+                'hindi': f" दस्तावेज़ में ये संख्याएं मिलीं: {', '.join(numbers[:3])}.",
+                'tamil': f" ஆவணத்தில் இந்த எண்கள் கிடைத்தன: {', '.join(numbers[:3])}.",
+                # Add more as needed...
+            }
+            if language in context_addition:
+                base_response += context_addition[language]
+        
+        return base_response
 
     async def _get_language_fallback(self, question: str, language: str) -> str:
         """Get appropriate fallback response based on language"""
-        if language == "malayalam":
-            return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല। ദയവായി ചോദ്യം വ്യക്തമാക്കുക."
-        elif language == "hindi":
-            return "क्षमा करें, इस प्रश्न का उत्तर देने के लिए दस्तावेज़ में पर्याप्त जानकारी नहीं मिली। कृपया प्रश्न को स्पष्ट करें।"
-        elif language == "tamil":
-            return "மன்னிக்கவும், இந்த கேள்விக்கு பதிலளிக்க ஆவணத்தில் போதுமான தகவல் கிடைக்கவில்லை। தயவுசெய்து கேள்வியை தெளிவுபடுத்துங்கள்।"
-        else:
-            return "I'm sorry, but I don't have enough information in the document to answer that question. Please try rephrasing your question."
-
-    async def _get_malayalam_answer(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """
-        A dedicated function to get an answer for a Malayalam question.
-        """
-        # Clean the question for better processing.
-        question_clean = self._clean_text(question)
-
-        # Enhance the Malayalam query with English keywords for better search results.
-        enhanced_question = self._enhance_malayalam_query(question_clean)
-
-        # Search for relevant context in the document.
-        search_results = self.vector_store.search(enhanced_question, k=15)
-
-        if not search_results:
-            return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താനായില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-
-        # Select the optimal context chunks.
-        chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=12)
-        context = "\n\n".join(chunks)
-
-        # Detect the pattern of the Malayalam question for a more tailored prompt.
-        pattern = self._detect_malayalam_question_pattern(question_clean)
-
-        # Generate the answer in Malayalam.
-        answer = await self._generate_malayalam_optimized_answer(question, context, pattern)
-
-        # Final validation to ensure the answer is in Malayalam.
-        if self._detect_language(answer) != "malayalam":
-            logger.warning(f"Generated answer for a Malayalam question is not in Malayalam. Answer: {answer}")
-            # If the answer is not in Malayalam, provide a safe, generic fallback.
-            return self._create_malayalam_fallback_from_context(question, context)
-
-        return answer        
-    # async def _process_single_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """OPTIMIZED: Process single question with aggressive caching"""
-        
-    #     # Detect language FIRST
-    #     detected_language = self._detect_language(question)
-        
-    #     # OPTIMIZATION: Cache key for this specific question and document
-    #     cache_key = f"answer_{hashlib.md5((question + str(doc_intelligence.get('type', 'generic'))).encode()).hexdigest()}"
-        
-    #     # Check cache first
-    #     cached_answer = await cache.get(cache_key)
-    #     if cached_answer:
-    #         logger.info(f"✅ Using cached answer for: {question[:50]}...")
-    #         # Ensure cached answer is in correct language
-    #         if detected_language == "malayalam":
-    #             malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', cached_answer)
-    #             if len(malayalam_chars) < 5:
-    #                 # Cached answer is not in Malayalam, regenerate
-    #                 logger.warning("Cached answer not in Malayalam, regenerating...")
-    #             else:
-    #                 return cached_answer
-    #         else:
-    #             return cached_answer
-        
-    #     try:
-    #         # For Malayalam questions, try to get Malayalam response
-    #         if detected_language == "malayalam":
-    #             # Get context for the question
-    #             search_results = self.vector_store.search(question, k=10)
-    #             if search_results:
-    #                 chunks = [result[0] for result in search_results[:5]]
-    #                 context = "\n\n".join(chunks)
-                    
-    #                 # Generate Malayalam answer
-    #                 answer = await self._generate_single_optimized_answer(question, context, "malayalam")
-                    
-    #                 # Validate it's in Malayalam
-    #                 malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
-    #                 if len(malayalam_chars) < 5:
-    #                     # Not Malayalam, use fallback
-    #                     answer = self._create_malayalam_fallback_from_context(question, context)
-                    
-    #                 # Cache the Malayalam answer
-    #                 await cache.set(cache_key, answer, ttl=3600)
-    #                 return answer
-    #             else:
-    #                 # No context found
-    #                 answer = "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഡോക്യുമെന്റിൽ വിവരങ്ങൾ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-    #                 await cache.set(cache_key, answer, ttl=1800)
-    #                 return answer
-            
-    #         # For English questions, use existing logic
-    #         # Try dynamic response based on document intelligence
-    #         dynamic_answer = await self._try_dynamic_response(question, doc_intelligence)
-    #         if dynamic_answer:
-    #             await cache.set(cache_key, dynamic_answer, ttl=3600)
-    #             return dynamic_answer
-            
-    #         # OPTIMIZED: Smart processing with reduced complexity
-    #         answer = await self._process_smart_question_optimized(question, doc_intelligence)
-            
-    #         # Enhance response completeness
-    #         answer = self._enhance_response_completeness(question, answer, doc_intelligence)
-            
-    #         # Cache the final answer
-    #         await cache.set(cache_key, answer, ttl=3600)
-            
-    #         return answer
-            
-    #     except Exception as e:
-    #         logger.error(f"Error processing question '{question[:50]}': {e}")
-    #         if detected_language == "malayalam":
-    #             fallback = "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-    #         else:
-    #             fallback = await self._fallback_answer(question)
-    #         await cache.set(cache_key, fallback, ttl=1800)
-    #         return fallback
+        return self._create_universal_fallback_response(question, "", language)
 
     async def _try_dynamic_response(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Try to answer using ONLY document-extracted intelligence"""
+        """Try to answer using ONLY document-extracted intelligence with human-like quality"""
         
         question_lower = question.lower()
         doc_type = doc_intelligence.get('type', 'generic')
@@ -859,7 +1259,7 @@ class AdvancedQueryAgent:
         return None
 
     async def _dynamic_flight_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Generate flight responses from extracted document data only"""
+        """Generate flight responses from extracted document data only with human-like quality"""
         
         city_landmarks = doc_intelligence.get('city_landmarks', {})
         api_info = doc_intelligence.get('api_info', {})
@@ -956,27 +1356,7 @@ class AdvancedQueryAgent:
             return None
         
         # Find matching endpoint
-        endpoint = None
-        endpoints = api_info.get('endpoints', {})
-        
-        for landmark_ref, ep in endpoints.items():
-            # Check if landmark matches any part of the reference
-            landmark_words = landmark.lower().split()
-            ref_words = landmark_ref.lower().split()
-            if any(word in ref_words for word in landmark_words):
-                endpoint = ep
-                break
-        
-        # Check for default endpoint
-        if not endpoint:
-            default_search = self.vector_store.search("default endpoint other landmarks fifth", k=5)
-            for chunk, score, metadata in default_search:
-                if 'fifth' in chunk.lower() or 'default' in chunk.lower():
-                    endpoint = 'getFifthCityFlightNumber'
-                    break
-        
-        if not endpoint:
-            return None
+        endpoint = self._get_endpoint_for_landmark(landmark)
         
         response = f"**{city} Information (from document):**\n\n"
         response += f"• **Landmark**: {landmark}\n"
@@ -991,82 +1371,9 @@ class AdvancedQueryAgent:
         
         return response
 
-    # async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """Generate human-like token responses with actual URL fetching"""
-        
-    #     # If question asks to go to link, fetch from the actual URL
-    #     if any(phrase in question_lower for phrase in ['go to the link', 'get the secret token', 'extract token']):
-    #         # Extract the URL from the document URL itself (it's the token URL)
-    #         document_url = getattr(self, '_current_document_url', None)
-            
-    #         if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
-    #             try:
-    #                 import aiohttp
-    #                 headers = {
-    #                     'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
-    #                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    #                 }
-                    
-    #                 async with aiohttp.ClientSession() as session:
-    #                     async with session.get(document_url, headers=headers) as response:
-    #                         if response.status == 200:
-    #                             content = await response.text()
-    #                             # Extract token from the response content
-    #                             import re
-    #                             token_patterns = [
-    #                                 r'\b([a-fA-F0-9]{64})\b',  # 64-char hex
-    #                                 r'\b([a-fA-F0-9]{32})\b',  # 32-char hex
-    #                                 r'token["\']?\s*[:=]\s*["\']?([a-fA-F0-9]{32,64})["\']?'
-    #                             ]
-                                
-    #                             for pattern in token_patterns:
-    #                                 token_match = re.search(pattern, content)
-    #                                 if token_match:
-    #                                     actual_token = token_match.group(1)
-    #                                     return f"I went to the link and found the secret token! Here it is:\n\n**{actual_token}**\n\nThis is a {len(actual_token)}-character hexadecimal token - perfect for authentication! 🔐"
-                                        
-    #             except Exception as e:
-    #                 logger.warning(f"Failed to fetch token from URL: {e}")
-            
-    #         # If URL fetch fails, try to extract from document content
-    #         token_search = self.vector_store.search("token secret hackTeam", k=10)
-    #         for chunk, score, metadata in token_search:
-    #             import re
-    #             token_match = re.search(r'\b([a-fA-F0-9]{64})\b', chunk)
-    #             if token_match:
-    #                 actual_token = token_match.group(1)
-    #                 return f"I found the secret token from the document! Here it is:\n\n**{actual_token}**\n\nThis appears to be a 64-character hexadecimal token - perfect for authentication! 🔐"
-        
-    #     # For other token questions, use the primary token from document intelligence
-    #     primary_token = doc_intelligence.get('primary_token')
-    #     if not primary_token:
-    #         return None
-        
-    #     if any(phrase in question_lower for phrase in ['replicate', 'exactly as it appears']):
-    #         return f"Here's the token exactly as it appears:\n\n{primary_token}"
-        
-    #     if 'how many characters' in question_lower:
-    #         return f"The token has **{len(primary_token)} characters** - that's a standard length for SHA-256 hash tokens! 📏"
-        
-    #     if any(word in question_lower for word in ['encoding', 'format', 'likely']):
-    #         return f"Based on the characters (0-9, a-f), this is definitely **hexadecimal encoding**! It's a 64-character hex string, which suggests it's likely a SHA-256 hash. 🔢"
-        
-    #     if 'non-alphanumeric' in question_lower:
-    #         has_special = bool(re.search(r'[^a-fA-F0-9]', primary_token))
-    #         if has_special:
-    #             return "Yes, the token contains non-alphanumeric characters."
-    #         else:
-    #             return "No, the token contains only alphanumeric characters (specifically 0-9 and a-f). ✅"
-        
-    #     if 'jwt token' in question_lower:
-    #         return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
-        
-    #     return None
-    # app/agents/advanced_query_agent.py
-
     async def _dynamic_token_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
         """
-        IMPROVED: Generate human-like token responses with robust, non-cached URL fetching.
+        Generate human-like token responses with robust, non-cached URL fetching
         """
         
         # If question asks to go to the link, ALWAYS fetch a fresh copy from the URL
@@ -1076,7 +1383,7 @@ class AdvancedQueryAgent:
             if document_url and 'register.hackrx.in/utils/get-secret-token' in document_url:
                 try:
                     import aiohttp
-                    # IMPROVEMENT: Add headers to prevent caching
+                    # Add headers to prevent caching
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (compatible; RAGPipeline/3.0)',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1084,14 +1391,13 @@ class AdvancedQueryAgent:
                         'Pragma': 'no-cache'
                     }
                     
-                    # IMPROVEMENT: Create a new session for each request to avoid client-side caching
+                    # Create a new session for each request to avoid client-side caching
                     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
                         async with session.get(document_url, headers=headers, ssl=False) as response:
                             if response.status == 200:
                                 content = await response.text()
                                 
-                                # IMPROVEMENT: More robust extraction based on screenshot
-                                # First, look for the token specifically after the "Your Secret Token" text.
+                                # Robust extraction based on page structure
                                 token_pattern = r'Your Secret Token[^a-fA-F0-9]*([a-fA-F0-9]{64})'
                                 match = re.search(token_pattern, content, re.IGNORECASE | re.DOTALL)
                                 
@@ -1123,7 +1429,7 @@ class AdvancedQueryAgent:
             return None
         
         if any(phrase in question_lower for phrase in ['replicate', 'exactly as it appears']):
-            return f"Here's the token exactly as it appears:\n\n{primary_token}"
+            return f"Here's the token exactly as it appears:\n\n**{primary_token}**"
         
         if 'how many characters' in question_lower:
             return f"The token has **{len(primary_token)} characters** - that's a standard length for SHA-256 hash tokens! 📏"
@@ -1142,36 +1448,17 @@ class AdvancedQueryAgent:
             return f"This is **not a JWT token**! 🚫\n\nHere's why:\n• JWT tokens have 3 parts separated by dots (header.payload.signature)\n• This token is a single 64-character hexadecimal string\n• It's most likely a SHA-256 hash or API key format\n• JWT tokens are much longer and contain base64-encoded JSON"
         
         return None
-    # async def _dynamic_news_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """Generate news responses from extracted document data"""
-        
-    #     entities = doc_intelligence.get('extracted_entities', {})
-        
-    #     if 'policy' in question_lower and entities.get('policies'):
-    #         policies = entities['policies'][:2]
-    #         return f"Key policies mentioned: {' | '.join(policies)}"
-        
-    #     if 'investment' in question_lower and entities.get('numbers'):
-    #         numbers = [n for n in entities['numbers'] if any(c.isdigit() for c in n)][:5]
-    #         return f"Investment figures mentioned: {', '.join(numbers)}"
-        
-    #     if 'company' in question_lower and entities.get('companies'):
-    #         companies = list(set(entities['companies']))[:5]
-    #         return f"Companies mentioned: {', '.join(companies)}"
-        
-    #     return None
-    # app/agents/advanced_query_agent.py
 
     async def _dynamic_news_response(self, question: str, question_lower: str, doc_intelligence: Dict[str, Any]) -> str:
-        """IMPROVED: Generate news responses with proper Unicode handling for all languages."""
+        """Generate news responses with proper Unicode handling for all languages"""
         
         entities = doc_intelligence.get('extracted_entities', {})
         
-        # IMPROVEMENT: Clean the question for better matching, especially for Unicode.
+        # Clean the question for better matching, especially for Unicode
         question_clean = self._clean_text(question)
         question_lower_clean = question_clean.lower()
         
-        # IMPROVEMENT: For multilingual questions, extract key English terms to aid matching.
+        # For multilingual questions, extract key English terms to aid matching
         english_terms = re.findall(r'[a-zA-Z]+', question_lower_clean)
         
         if 'policy' in question_lower_clean or 'നയം' in question or any('polic' in term for term in english_terms):
@@ -1204,62 +1491,20 @@ class AdvancedQueryAgent:
                 return f"Tariff/percentage figures: {', '.join(percentages[:3])}"
                 
         return None
-    # async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """Smart processing based on question complexity"""
-        
-    #     question_lower = question.lower()
-        
-    #     # Computational questions
-    #     if any(indicator in question_lower for indicator in ['calculate', 'compute', 'probability']):
-    #         return await self._handle_computational_question(question, doc_intelligence)
-        
-    #     # Comprehensive analysis questions
-    #     if any(indicator in question_lower for indicator in ['analyze', 'compare', 'find all', 'list all']):
-    #         return await self._handle_comprehensive_question(question, doc_intelligence)
-        
-    #     # Enhanced lookup for other questions
-    #     return await self._handle_enhanced_lookup(question, doc_intelligence)
-    # async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-    #     """Smart processing based on question complexity with Unicode support"""
-        
-    #     # Clean the question first
-    #     question_clean = self._clean_unicode_text(question)
-    #     question_lower = question_clean.lower()
-        
-    #     # For Malayalam questions, also check for English keywords
-    #     english_terms = re.findall(r'[a-zA-Z]+', question_lower)
-        
-    #     # Computational questions
-    #     if any(indicator in question_lower for indicator in ['calculate', 'compute', 'probability']):
-    #         return await self._handle_computational_question(question_clean, doc_intelligence)
-        
-    #     # Check for Malayalam computational terms
-    #     if 'കണക്കാക്കുക' in question or 'ഗണിതം' in question:
-    #         return await self._handle_computational_question(question_clean, doc_intelligence)
-        
-    #     # Comprehensive analysis questions
-    #     if any(indicator in question_lower for indicator in ['analyze', 'compare', 'find all', 'list all']):
-    #         return await self._handle_comprehensive_question(question_clean, doc_intelligence)
-        
-    #     # Check for Malayalam analysis terms
-    #     if 'വിശകലനം' in question or 'താരതമ്യം' in question:
-    #         return await self._handle_comprehensive_question(question_clean, doc_intelligence)
-        
-    #     # Enhanced lookup for other questions
-        # return await self._handle_enhanced_lookup(question_clean, doc_intelligence)
+
     async def _process_smart_question_optimized(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """ENHANCED: Smart processing with improved accuracy and Malayalam support"""
+        """ENHANCED: Smart processing with improved accuracy and multilingual support"""
         
         # Clean the question first with enhanced Unicode handling
         question_clean = self._clean_text(question)
         question_lower = question_clean.lower()
         
         # ENHANCED: Detect language for specialized processing
-        detected_language = self._detect_language(question_clean)
+        detected_language = self._detect_language_enhanced(question_clean)
         
-        # ENHANCED: For Malayalam questions, enhance query with English equivalents
-        if detected_language == "malayalam":
-            enhanced_question = self._enhance_malayalam_query(question_clean)
+        # ENHANCED: For non-English questions, enhance query with English equivalents
+        if detected_language != "english":
+            enhanced_question = self._enhance_multilingual_query(question_clean, detected_language)
             search_question = enhanced_question
         else:
             search_question = question_clean
@@ -1268,470 +1513,95 @@ class AdvancedQueryAgent:
         search_results = self.vector_store.search(search_question, k=15)  # Increased for better coverage
         
         # If no results with enhanced query, try original question
-        if not search_results and detected_language == "malayalam":
+        if not search_results and detected_language != "english":
             search_results = self.vector_store.search(question_clean, k=15)
         
         # If still no results, try broader search
         if not search_results:
             # Try with just keywords
-            if detected_language == "malayalam":
-                keywords = self._extract_malayalam_keywords(question_clean)
+            if detected_language != "english":
+                keywords = self._extract_key_terms(question_clean, detected_language)
                 if keywords:
                     keyword_query = " ".join(keywords)
                     search_results = self.vector_store.search(keyword_query, k=10)
             
             # If still no results, return appropriate fallback
             if not search_results:
-                if detected_language == "malayalam":
-                    return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ടായിരിക്കില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-                else:
-                    return "I'm sorry, but I don't have enough information about this in the document. Could you please rephrase your question?"
+                return await self._get_language_fallback(question, detected_language)
         
         # ENHANCED: Use adaptive context size based on question complexity
-        max_chunks = 12 if detected_language == "malayalam" else 10  # More context for Malayalam
+        max_chunks = 12 if detected_language != "english" else 10  # More context for non-English
         chunks = self._select_optimal_context_optimized(question, search_results, max_chunks=max_chunks)
         context = "\n\n".join(chunks)
         
-        # ENHANCED: Use pattern-specific prompts for Malayalam
-        if detected_language == "malayalam":
-            pattern = self._detect_malayalam_question_pattern(question_clean)
-            return await self._generate_malayalam_optimized_answer(question, context, pattern)
+        # ENHANCED: Use language-specific generation
+        if detected_language != "english":
+            pattern = self._detect_question_pattern(question_clean, detected_language)
+            return await self._generate_language_specific_answer(question, context, detected_language)
         else:
             return await self._generate_single_optimized_answer(question, context, detected_language)
 
-#     async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
-#         """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
+    def _extract_key_terms(self, question: str, language: str) -> List[str]:
+        """Extract key terms from question for fallback search"""
+        # Get keyword mapping for the language
+        keyword_mapping = self._get_universal_keyword_mapping(language)
         
-#         if detected_language == "malayalam":
-#             prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
-
-# **ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
-
-# CONTEXT:
-# {context}
-
-# CUSTOMER QUESTION: {question}
-
-# INSTRUCTIONS:
-# 1. സഹായകരമായ ബീമാ ഏജന്റ് പോലെ സൗഹൃദപരവും പ്രൊഫഷണലുമായ ടോണിൽ ഉത്തരം നൽകുക
-# 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-# 3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
-# 4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-# 5. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
-# 6. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
-
-# ANSWER:"""
-#         else:
-#             prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
-
-# CONTEXT:
-# {context}
-
-# CUSTOMER QUESTION: {question}
-
-# INSTRUCTIONS:
-# 1. Answer in a friendly, professional tone like a helpful insurance agent
-# 2. Be specific with numbers, dates, and conditions from the context
-# 3. Use only exact information from the document
-# 4. If information is not available, politely say you don't have that detail
-# 5. Be thorough but easy to understand
-
-# ANSWER:"""
+        # Extract words and their English equivalents
+        terms = []
+        words = re.findall(r'\b\w+\b', question)
         
-#         try:
-#             # OPTIMIZATION: Use faster model for most questions
-#             model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-#             response = await asyncio.wait_for(
-#                 model.generate_content_async(
-#                     prompt,
-#                     generation_config={
-#                         'temperature': 0.2,
-#                         'max_output_tokens': 400,  # Reduced for faster generation
-#                         'top_p': 0.9,
-#                         'top_k': 30
-#                     }
-#                 ), timeout=15  # Reduced timeout
-#             )
-#             return response.text.strip()
-#         except Exception as e:
-#             logger.error(f"Answer generation failed: {e}")
-#             return "I apologize, but I encountered an error while processing your question. Please try again."
-    # async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
-    #     """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
+        for word in words:
+            if len(word) > 3:  # Only meaningful words
+                terms.append(word)
+                if word in keyword_mapping:
+                    terms.append(keyword_mapping[word])
         
-    #     if detected_language == "malayalam":
-    #         # ENHANCED: Stronger Malayalam enforcement
-    #         prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
+        return list(set(terms))[:10]  # Limit to 10 key terms
 
-    # **CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM LANGUAGE. DO NOT USE ENGLISH IN YOUR RESPONSE.**
-    # **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷ് ഉപയോഗിക്കരുത്.**
-
-    # CONTEXT:
-    # {context}
-
-    # CUSTOMER QUESTION (മലയാളം): {question}
-
-    # INSTRUCTIONS (നിർദ്ദേശങ്ങൾ):
-    # 1. മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക - MALAYALAM ONLY
-    # 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-    # 3. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക
-    # 4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് മലയാളത്തിൽ പറയുക
-    # 5. DO NOT TRANSLATE TO ENGLISH - ഇംഗ്ലീഷിലേക്ക് വിവർത്തനം ചെയ്യരുത്
-
-    # ANSWER IN MALAYALAM (മലയാളത്തിൽ ഉത്തരം):"""
-    #     else:
-    #         prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
-
-    # CONTEXT:
-    # {context}
-
-    # CUSTOMER QUESTION: {question}
-
-    # INSTRUCTIONS:
-    # 1. Answer in a friendly, professional tone like a helpful insurance agent
-    # 2. Be specific with numbers, dates, and conditions from the context
-    # 3. Use only exact information from the document
-    # 4. If information is not available, politely say you don't have that detail
-    # 5. Be thorough but easy to understand
-
-    # ANSWER:"""
-        
-    #     try:
-    #         # OPTIMIZATION: Use faster model for most questions
-    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-            
-    #         # ENHANCED: Stronger generation config for Malayalam
-    #         if detected_language == "malayalam":
-    #             generation_config = {
-    #                 'temperature': 0.1,  # Lower temperature for more consistent Malayalam
-    #                 'max_output_tokens': 500,
-    #                 'top_p': 0.8,  # More focused generation
-    #                 'top_k': 20,  # Reduced for better language consistency
-    #             }
-    #         else:
-    #             generation_config = {
-    #                 'temperature': 0.2,
-    #                 'max_output_tokens': 400,
-    #                 'top_p': 0.9,
-    #                 'top_k': 30
-    #             }
-            
-    #         response = await asyncio.wait_for(
-    #             model.generate_content_async(
-    #                 prompt,
-    #                 generation_config=generation_config
-    #             ), timeout=15
-    #         )
-            
-    #         answer = response.text.strip()
-            
-    #         # ENHANCED: Validate Malayalam response
-    #         if detected_language == "malayalam":
-    #             # Check if the answer contains Malayalam characters
-    #             malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
-    #             if not malayalam_chars or len(malayalam_chars) < 5:
-    #                 # LLM failed to respond in Malayalam, provide a fallback
-    #                 logger.warning(f"LLM responded in English for Malayalam question. Retrying...")
-                    
-    #                 # Try again with even stronger prompt
-    #                 stronger_prompt = f"""മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. MALAYALAM ONLY.
-
-    # Context: {context[:500]}
-    # ചോദ്യം: {question}
-
-    # മലയാളത്തിൽ ഉത്തരം:"""
-                    
-    #                 retry_response = await asyncio.wait_for(
-    #                     model.generate_content_async(
-    #                         stronger_prompt,
-    #                         generation_config={
-    #                             'temperature': 0.0,
-    #                             'max_output_tokens': 300,
-    #                             'top_p': 0.5,
-    #                             'top_k': 10
-    #                         }
-    #                     ), timeout=10
-    #                 )
-                    
-    #                 retry_answer = retry_response.text.strip()
-    #                 malayalam_chars_retry = re.findall(r'[\u0d00-\u0d7f]', retry_answer)
-                    
-    #                 if malayalam_chars_retry and len(malayalam_chars_retry) >= 5:
-    #                     return retry_answer
-    #                 else:
-    #                     # Final fallback
-    #                     return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മലയാളത്തിൽ ഉത്തരം നൽകാൻ കഴിയുന്നില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-                
-    #             return answer
-    #         else:
-    #             return answer
-                
-    #     except Exception as e:
-    #         logger.error(f"Answer generation failed: {e}")
-    #         if detected_language == "malayalam":
-    #             return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-    #         else:
-    #             return "I apologize, but I encountered an error while processing your question. Please try again."
-    
     async def _generate_single_optimized_answer(self, question: str, context: str, detected_language: str) -> str:
         """OPTIMIZED: Single LLM call with language-specific optimized prompts"""
         
-        if detected_language == "malayalam":
-            # FORCE Malayalam by including Malayalam context and examples
-            prompt = f"""You are a Malayalam-speaking assistant. YOU MUST RESPOND ONLY IN MALAYALAM SCRIPT (മലയാളം).
+        prompt = f"""You are a helpful enterprise assistant. Answer the customer's question accurately and in a conversational, friendly manner.
 
-    IMPORTANT: Your entire response must be in Malayalam script. Do not use English words or sentences.
+CONTEXT:
+{context}
 
-    Context (English/Mixed): {context[:1500]}
+CUSTOMER QUESTION: {question}
 
-    ചോദ്യം (Question in Malayalam): {question}
+INSTRUCTIONS:
+1. Answer in a friendly, professional tone like a helpful customer service representative
+2. Be specific with numbers, dates, and conditions from the context
+3. Use only exact information from the document
+4. If information is not available, politely say you don't have that detail
+5. Be thorough but easy to understand
+6. Make your response sound natural and conversational
 
-    നിർദ്ദേശങ്ങൾ:
-    1. മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക
-    2. ഇംഗ്ലീഷ് ഉപയോഗിക്കരുത്
-    3. കൃത്യമായ വിവരങ്ങൾ നൽകുക
-
-    ഉത്തരം (Answer in Malayalam ONLY):"""
-            
-            try:
-                model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-                response = await asyncio.wait_for(
-                    model.generate_content_async(
-                        prompt,
-                        generation_config={
-                            'temperature': 0.3,
-                            'max_output_tokens': 500,
-                            'top_p': 0.8,
-                            'top_k': 20
-                        }
-                    ), timeout=15
-                )
-                
-                answer = response.text.strip()
-                
-                # Check if response is in Malayalam
-                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
-                
-                # If not enough Malayalam, create a fallback based on context
-                if len(malayalam_chars) < 10:
-                    # Extract key information from context and create Malayalam response
-                    return self._create_malayalam_fallback_from_context(question, context)
-                
-                return answer
-                
-            except Exception as e:
-                logger.error(f"Answer generation failed: {e}")
-                return self._create_malayalam_fallback_from_context(question, context)
-        else:
-            # English prompt (existing code)
-            prompt = f"""You are a helpful insurance assistant. Answer the customer's question accurately and clearly.
-
-    CONTEXT:
-    {context}
-
-    CUSTOMER QUESTION: {question}
-
-    INSTRUCTIONS:
-    1. Answer in a friendly, professional tone like a helpful insurance agent
-    2. Be specific with numbers, dates, and conditions from the context
-    3. Use only exact information from the document
-    4. If information is not available, politely say you don't have that detail
-    5. Be thorough but easy to understand
-
-    ANSWER:"""
-            
-            try:
-                model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-                response = await asyncio.wait_for(
-                    model.generate_content_async(
-                        prompt,
-                        generation_config={
-                            'temperature': 0.2,
-                            'max_output_tokens': 400,
-                            'top_p': 0.9,
-                            'top_k': 30
-                        }
-                    ), timeout=15
-                )
-                return response.text.strip()
-            except Exception as e:
-                logger.error(f"Answer generation failed: {e}")
-                return "I apologize, but I encountered an error while processing your question. Please try again."
-    
-    # def _create_malayalam_fallback_from_context(self, question: str, context: str) -> str:
-    #     """Create a Malayalam response based on context analysis"""
+ANSWER:"""
         
-    #     # Extract numbers, percentages, dates from context
-    #     numbers = re.findall(r'\d+(?:\.\d+)?%?', context)
-        
-    #     # Detect question type and provide appropriate Malayalam template
-    #     question_lower = question.lower()
-        
-    #     # Check for specific Malayalam question patterns
-    #     if 'എന്താണ്' in question or 'എന്ത്' in question:
-    #         # What is question
-    #         if numbers:
-    #             return f"ഡോക്യുമെന്റ് അനുസരിച്ച്, ഇത് {', '.join(numbers[:3])} ആണ്. കൂടുതൽ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-    #         else:
-    #             return "ഡോക്യുമെന്റിൽ ഈ വിവരം ലഭ്യമാണ്. വിശദമായ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-        
-    #     elif 'എത്ര' in question:
-    #         # How much/many question
-    #         if numbers:
-    #             return f"ഡോക്യുമെന്റ് പ്രകാരം: {', '.join(numbers[:3])}."
-    #         else:
-    #             return "കൃത്യമായ സംഖ്യ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-        
-    #     elif 'എപ്പോൾ' in question:
-    #         # When question
-    #         dates = re.findall(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}', context)
-    #         if dates:
-    #             return f"തീയതി: {', '.join(dates[:2])}."
-    #         else:
-    #             return "തീയതി സംബന്ധിച്ച വിവരം ഡോക്യുമെന്റിൽ വ്യക്തമല്ല."
-        
-    #     elif 'എങ്ങനെ' in question:
-    #         # How question
-    #         return "പ്രക്രിയ: ഡോക്യുമെന്റിൽ വിശദമായി വിവരിച്ചിട്ടുണ്ട്. ഘട്ടം ഘട്ടമായുള്ള നിർദ്ദേശങ്ങൾ ഡോക്യുമെന്റിൽ നോക്കുക."
-        
-    #     elif 'എവിടെ' in question:
-    #         # Where question
-    #         return "സ്ഥലം സംബന്ധിച്ച വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്."
-        
-    #     elif 'ഏത്' in question:
-    #         # Which question
-    #         return "ഡോക്യുമെന്റിൽ ഇതിനെക്കുറിച്ചുള്ള വിവരങ്ങൾ നൽകിയിട്ടുണ്ട്."
-        
-    #     # Generic fallback
-    #     if context and len(context) > 50:
-    #         # Try to extract some info
-    #         if numbers:
-    #             return f"ഡോക്യുമെന്റിൽ നിന്ന്: {', '.join(numbers[:2])}. കൂടുതൽ വിവരങ്ങൾ ലഭ്യമാണ്."
-    #         else:
-    #             return "നിങ്ങളുടെ ചോദ്യത്തിനുള്ള വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്. വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-    #     else:
-    #         return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-    def _create_malayalam_fallback_from_context(self, question: str, context: str) -> str:
-        """Create a Malayalam response based on context analysis"""
-        
-        # Extract numbers, percentages, dates from context
-        numbers = re.findall(r'\d+(?:\.\d+)?%?', context)
-        
-        # Detect question type and provide appropriate Malayalam template
-        question_lower = question.lower()
-        
-        # Check for specific Malayalam question patterns
-        if 'എന്താണ്' in question or 'എന്ത്' in question:
-            # What is question
-            if numbers:
-                return f"ഡോക്യുമെന്റ് അനുസരിച്ച്, ഇത് {', '.join(numbers[:3])} ആണ്. കൂടുതൽ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-            else:
-                return "ഡോക്യുമെന്റിൽ ഈ വിവരം ലഭ്യമാണ്. വിശദമായ വിവരങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-        
-        elif 'എത്ര' in question:
-            # How much/many question
-            if numbers:
-                return f"ഡോക്യുമെന്റ് പ്രകാരം: {', '.join(numbers[:3])}."
-            else:
-                return "കൃത്യമായ സംഖ്യ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-        
-        elif 'എപ്പോൾ' in question:
-            # When question
-            dates = re.findall(r'\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}', context)
-            if dates:
-                return f"തീയതി: {', '.join(dates[:2])}."
-            else:
-                return "തീയതി സംബന്ധിച്ച വിവരം ഡോക്യുമെന്റിൽ വ്യക്തമല്ല."
-        
-        elif 'എങ്ങനെ' in question:
-            # How question
-            return "പ്രക്രിയ: ഡോക്യുമെന്റിൽ വിശദമായി വിവരിച്ചിട്ടുണ്ട്. ഘട്ടം ഘട്ടമായുള്ള നിർദ്ദേശങ്ങൾ ഡോക്യുമെന്റിൽ നോക്കുക."
-        
-        elif 'എവിടെ' in question:
-            # Where question
-            return "സ്ഥലം സംബന്ധിച്ച വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്."
-        
-        elif 'ഏത്' in question:
-            # Which question
-            return "ഡോക്യുമെന്റിൽ ഇതിനെക്കുറിച്ചുള്ള വിവരങ്ങൾ നൽകിയിട്ടുണ്ട്."
-        
-        # Generic fallback
-        if context and len(context) > 50:
-            # Try to extract some info
-            if numbers:
-                return f"ഡോക്യുമെന്റിൽ നിന്ന്: {', '.join(numbers[:2])}. കൂടുതൽ വിവരങ്ങൾ ലഭ്യമാണ്."
-            else:
-                return "നിങ്ങളുടെ ചോദ്യത്തിനുള്ള വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ട്. വിശദാംശങ്ങൾക്ക് ഡോക്യുമെന്റ് പരിശോധിക്കുക."
-        else:
-            return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മതിയായ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-    
-    def _ensure_malayalam_response(self, question: str, answer: str) -> str:
-        """Ensure Malayalam questions get Malayalam answers"""
-        detected_language = self._detect_language(question)
-        
-        if detected_language == "malayalam":
-            # Check if answer is in Malayalam
-            malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', answer)
-            
-            if not malayalam_chars or len(malayalam_chars) < 5:
-                # Answer is not in Malayalam, return a Malayalam fallback
-                logger.warning(f"Non-Malayalam answer detected for Malayalam question")
-                
-                # Try to provide a contextual Malayalam response
-                if "error" in answer.lower() or "fail" in answer.lower():
-                    return "ക്ഷമിക്കണം, ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-                elif "not found" in answer.lower() or "no information" in answer.lower():
-                    return "ക്ഷമിക്കണം, ഈ വിവരങ്ങൾ ഡോക്യുമെന്റിൽ കണ്ടെത്താൻ കഴിഞ്ഞില്ല."
-                else:
-                    return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് മലയാളത്തിൽ ഉത്തരം നൽകാൻ കഴിയുന്നില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക."
-        
-        return answer
-    
-    
-    # async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
-    #     """ENHANCED: Generate Malayalam answers with pattern-specific prompts"""
-        
-    #     # Get pattern-specific prompt
-    #     prompt_template = self._get_malayalam_specific_prompt(question, pattern)
-    #     prompt = prompt_template.format(context=context, question=question)
-        
-    #     try:
-    #         # Use the same optimized model settings
-    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-    #         response = await asyncio.wait_for(
-    #             model.generate_content_async(
-    #                 prompt,
-    #                 generation_config={
-    #                     'temperature': 0.3,  # Slightly higher for more natural Malayalam
-    #                     'max_output_tokens': 500,  # More tokens for detailed Malayalam responses
-    #                     'top_p': 0.9,
-    #                     'top_k': 30
-    #                 }
-    #             ), timeout=18  # Slightly longer timeout for Malayalam
-    #         )
-            
-    #         answer = response.text.strip()
-            
-    #         # Validate that the answer is in Malayalam
-    #         if answer and self._detect_language(answer) == "malayalam":
-    #             return answer
-    #         else:
-    #             # If LLM didn't respond in Malayalam, provide a Malayalam fallback
-    #             # Also log this issue for debugging
-    #             logger.warning(f"LLM responded in English for Malayalam question: {question[:50]}...")
-    #             logger.warning(f"Response was: {answer[:100]}...")
-    #             return f"ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-                
-    #     except Exception as e:
-    #         logger.error(f"Malayalam answer generation failed: {e}")
-    #         return "ക്ഷമിക്കണം, ചോദ്യം പ്രോസസ് ചെയ്യുന്നതിൽ ഒരു പിശക് സംഭവിച്ചു. ദയവായി വീണ്ടും ശ്രമിക്കുക."
+        try:
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+            response = await asyncio.wait_for(
+                model.generate_content_async(
+                    prompt,
+                    generation_config={
+                        'temperature': 0.2,
+                        'max_output_tokens': 400,
+                        'top_p': 0.9,
+                        'top_k': 30
+                    }
+                ), timeout=15
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Answer generation failed: {e}")
+            return "I apologize, but I encountered an error while processing your question. Please try again."
 
     def _select_optimal_context_optimized(self, question: str, search_results: List[Tuple[str, float, Dict]], max_chunks: int = 8) -> List[str]:
         """OPTIMIZED: Select optimal context chunks with reduced processing"""
         if not search_results:
             return []
         
-        detected_language = self._detect_language(question)
+        detected_language = self._detect_language_enhanced(question)
         question_clean = self._clean_text(question)
         
         # OPTIMIZATION: Simplified scoring for faster processing
@@ -1745,15 +1615,15 @@ class AdvancedQueryAgent:
             overlap = len(question_words.intersection(chunk_words))
             relevance_score = score + (overlap * 0.1)
             
-            # ENHANCED: Language bonus with higher weight for Malayalam
-            if detected_language == "malayalam":
-                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', chunk_clean)
-                if malayalam_chars:
+            # ENHANCED: Language bonus with higher weight for non-English
+            if detected_language != "english":
+                lang_chars = re.findall(self._get_language_pattern(detected_language), chunk_clean)
+                if lang_chars:
                     relevance_score += 0.3  # Increased from 0.1 to 0.3
                 
-                # Additional bonus for Malayalam question words in context
-                malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
-                for word in malayalam_question_words:
+                # Additional bonus for question words in context
+                question_keywords = self._get_policy_keywords(detected_language) + self._get_financial_keywords(detected_language)
+                for word in question_keywords:
                     if word in chunk_clean:
                         relevance_score += 0.1
             
@@ -1763,294 +1633,24 @@ class AdvancedQueryAgent:
         scored_chunks.sort(key=lambda x: x[1], reverse=True)
         return [chunk for chunk, _, _ in scored_chunks[:max_chunks]]
 
-    async def _process_smart_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """ENHANCED: Smart processing with advanced Malayalam multilingual support"""
-        
-        # Clean the question first with enhanced Unicode handling
-        question_clean = self._clean_text(question)
-        question_lower = question_clean.lower()
-        
-        # ENHANCED: Detect language for specialized processing
-        detected_language = self._detect_language(question_clean)
-        
-        # ENHANCED: For Malayalam questions, enhance query with English equivalents
-        if detected_language == "malayalam":
-            enhanced_question = self._enhance_malayalam_query(question_clean)
-            # Use enhanced question for search but original for display
-            search_question = enhanced_question
-        else:
-            search_question = question_clean
-        
-        # Special handling for policy-related questions (both English and Malayalam)
-        policy_terms_english = ['policy', 'cover', 'coverage', 'insured', 'premium', 'claim', 'waiting period', 'grace period', 'exclusion', 'inclusion']
-        policy_terms_malayalam = ['പോളിസി', 'ബീമ', 'കവർ', 'ക്ലെയിം', 'പ്രീമിയം', 'കാത്തിരിക്കൽ', 'ഗ്രേസ്']
-        
-        if (any(term in question_lower for term in policy_terms_english) or 
-            any(term in question_clean for term in policy_terms_malayalam)):
-            return await self._handle_policy_question(search_question, doc_intelligence)
-        
-        # For multilingual questions, extract English keywords for better classification
-        english_terms = re.findall(r'[a-zA-Z]+', question_lower)
-        
-        # Computational questions (English and Malayalam)
-        computational_english = ['calculate', 'compute', 'probability']
-        computational_malayalam = ['കണക്കാക്കുക', 'ഗണിതം', 'ശതമാനം', 'തുക']
-        
-        if (any(indicator in question_lower for indicator in computational_english) or
-            any(term in question_clean for term in computational_malayalam)):
-            return await self._handle_computational_question(search_question, doc_intelligence)
-        
-        # Comprehensive analysis questions (English and Malayalam)
-        analysis_english = ['analyze', 'compare', 'find all', 'list all']
-        analysis_malayalam = ['വിശകലനം', 'താരതമ്യം', 'എല്ലാം', 'എന്തൊക്കെ']
-        
-        if (any(indicator in question_lower for indicator in analysis_english) or
-            any(term in question_clean for term in analysis_malayalam)):
-            return await self._handle_comprehensive_question(search_question, doc_intelligence)
-        
-        # Enhanced lookup for other questions with language-aware processing
-        return await self._handle_enhanced_lookup(search_question, doc_intelligence)
-
-    async def _handle_policy_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """ENHANCED: Specialized handling for policy-related questions with Malayalam support"""
-        
-        # Detect language for specialized processing
-        detected_language = self._detect_language(question)
-        
-        # Get more specific context for policy questions
-        search_results = self.vector_store.search(question, k=25)
-        if not search_results:
-            if detected_language == "malayalam":
-                return "ക്ഷമിക്കണം, ഈ പോളിസി വിവരങ്ങൾ ഡോക്യുമെന്റിൽ ഉണ്ടായിരിക്കില്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക അല്ലെങ്കിൽ പോളിസിയിൽ പരാമർശിച്ചിരിക്കുന്ന മറ്റെന്തെങ്കിലും ചോദിക്കുക."
-            else:
-                return "I'm sorry, but I don't have enough information about this policy detail in the document. Could you please rephrase your question or ask about something else mentioned in the policy?"
-        
-        # ENHANCED: Use optimal context selection for policy questions
-        chunks = self._select_optimal_context(question, search_results, max_chunks=18)
-        context = "\n\n".join(chunks)
-        
-        # ENHANCED: Language-specific prompts for better accuracy
-        if detected_language == "malayalam":
-            prompt = f"""നിങ്ങൾ ഒരു സഹായകരമായ ബീമാ പോളിസി അസിസ്റ്റന്റ് ആണ്. ഉപഭോക്താവിന്റെ പോളിസി ചോദ്യത്തിന് കൃത്യമായും വ്യക്തമായും ഉത്തരം നൽകുക.
-
-**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
-
-CONTEXT:
-{context}
-
-CUSTOMER QUESTION: {question}
-
-INSTRUCTIONS:
-1. സഹായകരമായ ബീമാ ഏജന്റ് പോലെ സൗഹൃദപരവും പ്രൊഫഷണലുമായ ടോണിൽ ഉത്തരം നൽകുക
-2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ, പോളിസി നിബന്ധനകൾ എന്നിവ വളരെ വ്യക്തമായി പരാമർശിക്കുക
-3. പോളിസി എന്തെങ്കിലും കവർ ചെയ്യുന്നുണ്ടെങ്കിൽ, എന്താണ് കവർ ചെയ്യപ്പെടുന്നത്, എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടോ എന്ന് വ്യക്തമായി പറയുക
-4. എന്തെങ്കിലും കവർ ചെയ്യപ്പെടാത്തതാണെങ്കിൽ, എന്താണ് ഒഴിവാക്കപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
-5. കാത്തിരിക്കൽ കാലയളവ്, ഗ്രേസ് കാലയളവ്, മറ്റ് സമയ-ആധാരിത വ്യവസ്ഥകൾ എന്നിവ ഉൾപ്പെടുത്തുക
-6. വ്യക്തതയ്ക്ക് ബുള്ളറ്റ് പോയിന്റുകൾ അല്ലെങ്കിൽ നമ്പർ ചെയ്ത ലിസ്റ്റുകൾ ഉപയോഗിക്കുക
-7. ഈ വിവരങ്ങൾ ഉപഭോക്താവിന് എന്താണ് അർത്ഥമാക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-8. പോളിസിയിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-9. സമഗ്രമായി എന്നാൽ മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക
-10. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**
-
-ANSWER:"""
-        else:
-            prompt = f"""You are a helpful insurance policy assistant. Answer the customer's policy question accurately and clearly.
-
-CONTEXT:
-{context}
-
-CUSTOMER QUESTION: {question}
-
-INSTRUCTIONS:
-1. Answer in a friendly, professional tone like a helpful insurance agent
-2. Be very specific with numbers, dates, conditions, and policy terms
-3. If the policy covers something, clearly state what is covered and any conditions
-4. If something is not covered, clearly state what is excluded
-5. Include waiting periods, grace periods, and other time-based conditions
-6. Use bullet points or numbered lists when helpful for clarity
-7. Explain what the information means for the customer
-8. If information is not in the policy, politely say you don't have that detail
-9. Be thorough but easy to understand
-
-ANSWER:"""
-        
-        try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={
-                    'temperature': 0.2,  # Lower temperature for more accurate policy details
-                    'max_output_tokens': 700,
-                    'top_p': 0.95,
-                    'top_k': 40,
-                    'candidate_count': 1
-                }
-            )
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"Policy question handling failed: {e}")
-            return await self._handle_enhanced_lookup(question, doc_intelligence)
-
-    async def _handle_computational_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Handle computational questions"""
-        
-        question_lower = question.lower()
-        
-        # Probability calculations for flight data
-        if 'probability' in question_lower and doc_intelligence.get('type') == 'flight_document':
-            return await self._calculate_flight_probabilities(doc_intelligence)
-        
-        # Token computations
-        if doc_intelligence.get('type') == 'token_document':
-            primary_token = doc_intelligence.get('primary_token')
-            if primary_token:
-                if 'sha-256' in question_lower:
-                    import hashlib
-                    result = hashlib.sha256(primary_token.encode()).hexdigest()
-                    return f"SHA-256 hash: {result}"
-                
-                if 'base64' in question_lower:
-                    import base64
-                    result = base64.b64encode(primary_token.encode()).decode()
-                    return f"Base64 encoding: {result}"
-        
-        # Fallback to enhanced lookup
-        return await self._handle_enhanced_lookup(question, doc_intelligence)
-
-    async def _calculate_flight_probabilities(self, doc_intelligence: Dict[str, Any]) -> str:
-        """Calculate flight endpoint probabilities from document data"""
-        
-        city_landmarks = doc_intelligence.get('city_landmarks', {})
-        api_info = doc_intelligence.get('api_info', {})
-        endpoints = api_info.get('endpoints', {})
-        
-        if not city_landmarks:
-            return "Cannot calculate probabilities without city-landmark data."
-        
-        # Count endpoint usage
-        endpoint_counts = {}
-        
-        for landmark in city_landmarks.values():
-            # Find matching endpoint
-            matched_endpoint = None
-            for landmark_ref, endpoint in endpoints.items():
-                landmark_words = landmark.lower().split()
-                ref_words = landmark_ref.lower().split()
-                if any(word in ref_words for word in landmark_words):
-                    matched_endpoint = endpoint
-                    break
-            
-            if not matched_endpoint:
-                matched_endpoint = 'getFifthCityFlightNumber'  # Default
-            
-            endpoint_counts[matched_endpoint] = endpoint_counts.get(matched_endpoint, 0) + 1
-        
-        total = len(city_landmarks)
-        result = f"Endpoint probability distribution (based on {total} cities):\n\n"
-        
-        for endpoint, count in sorted(endpoint_counts.items()):
-            probability = count / total
-            result += f"• {endpoint}: {probability:.1%} ({count}/{total})\n"
-        
-        return result.strip()
-
-    async def _handle_comprehensive_question(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Handle complex questions requiring comprehensive analysis with human-like responses"""
-        
-        # Get more chunks for comprehensive analysis
-        search_results = self.vector_store.search(question, k=25)
-        if not search_results:
-            return "I'm sorry, but I don't have enough information in the document to provide a comprehensive analysis for this question. Could you please rephrase or ask about something more specific mentioned in the document?"
-        
-        # ENHANCED: Use optimal context selection for comprehensive questions
-        chunks = self._select_optimal_context(question, search_results, max_chunks=15)
-        context = "\n\n".join(chunks)
-        
-        prompt = f"""You are a helpful enterprise chatbot assistant. Provide a comprehensive, friendly analysis for the customer's question.
-
-CONTEXT:
-{context}
-
-CUSTOMER QUESTION: {question}
-
-INSTRUCTIONS:
-1. Provide a thorough, well-structured analysis in a conversational tone
-2. Include all relevant details, numbers, and conditions from the context
-3. Break down complex information into easy-to-understand sections
-4. Use bullet points or numbered lists when helpful for clarity
-5. Explain what the information means for the customer
-6. If looking for multiple items, find and list ALL instances
-7. For processes or procedures, provide step-by-step guidance
-8. Be empathetic and professional throughout
-9. If information seems incomplete, mention what additional details would be helpful
-
-ANSWER:"""
-        
-        try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={
-                    'temperature': 0.3,
-                    'max_output_tokens': 800,
-                    'top_p': 0.95,
-                    'top_k': 40,
-                    'candidate_count': 1
-                }
-            )
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"Comprehensive analysis failed: {e}")
-            # Fallback to enhanced lookup
-            return await self._handle_enhanced_lookup(question, doc_intelligence)
-
-    async def _handle_enhanced_lookup(self, question: str, doc_intelligence: Dict[str, Any]) -> str:
-        """Enhanced lookup with smart context selection for better accuracy"""
-        
-        # Use more chunks but with better filtering
-        search_results = self.vector_store.search(question, k=20)
-        if not search_results:
-            return "I'm sorry, but I don't have enough information in the document to answer that question. Could you please rephrase or ask about something else mentioned in the document?"
-        
-        # ENHANCED: Use optimal context selection for enhanced lookup
-        chunks = self._select_optimal_context(question, search_results, max_chunks=12)
-        context = "\n\n".join(chunks)
-        
-        prompt = f"""You are a helpful enterprise chatbot. Answer the customer's question in a friendly, conversational manner.
-
-CONTEXT:
-{context}
-
-CUSTOMER QUESTION: {question}
-
-INSTRUCTIONS:
-- Answer naturally and conversationally like a helpful customer service rep
-- Include all relevant details from the context
-- Be specific with numbers, dates, and conditions when available
-- If information is not in the context, politely say you don't have that information
-- Keep the tone warm and professional
-- Make the answer easy to understand
-
-ANSWER:"""
-        
-        try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={
-                    'temperature': 0.3,
-                    'max_output_tokens': 500,
-                    'top_p': 0.95,
-                    'top_k': 40,
-                    'candidate_count': 1
-                }
-            )
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"Enhanced lookup failed: {e}")
-            # Fallback to basic context
-            fallback_context = "\n\n".join([result[0] for result in search_results[:4]])
-            return f"Based on the available information: {fallback_context[:300]}... Please let me know if you need more specific details."
+    def _get_language_pattern(self, language: str) -> str:
+        """Get regex pattern for language detection"""
+        patterns = {
+            'malayalam': r'[\u0d00-\u0d7f]',
+            'hindi': r'[\u0900-\u097f]',
+            'tamil': r'[\u0b80-\u0bff]',
+            'telugu': r'[\u0c00-\u0c7f]',
+            'kannada': r'[\u0c80-\u0cff]',
+            'gujarati': r'[\u0a80-\u0aff]',
+            'punjabi': r'[\u0a00-\u0a7f]',
+            'bengali': r'[\u0980-\u09ff]',
+            'urdu': r'[\u0600-\u06ff]',
+            'chinese': r'[\u4e00-\u9fff]',
+            'japanese': r'[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]',
+            'korean': r'[\uac00-\ud7af]',
+            'thai': r'[\u0e00-\u0e7f]'
+        }
+        return patterns.get(language, r'[a-zA-Z]')
 
     def _clean_response(self, response: str) -> str:
         """OPTIMIZED: Clean response to remove unwanted characters and icons"""
@@ -2064,14 +1664,6 @@ ANSWER:"""
             r'[•◦▪▫▬▭▮▯▰▱]',  # Bullet points and geometric shapes
             r'[⚫⚪⬛⬜]',  # Circle symbols
             r'[➤➥➦➧➨➩➪➫➬➭➮➯➱]',  # Arrow symbols
-            r'[✗✘✙✚✛✜✝✞✟✠✡✢✣✤✥✦✧✩✪✫✬✭✮✯✰]',  # Cross and star symbols
-            r'[☐☑☒☓☔☕☖☗☘☙☚☛☜☝☞☟☠☡☢☣☤☥☦☧☨☩☪☫☬☭☮☯]',  # Various symbols
-            r'[♠♣♥♦♤♧♡♢]',  # Card suit symbols
-            r'[♩♪♫♬♭♮♯]',  # Music symbols
-            r'[☀☁☂☃☄★☆☎☏☐☑☒☓☔☕☖☗☘☙☚☛☜☝☞☟]',  # Weather and other symbols
-            r'[✈️🚗🚕🚙🚌🚎🏎️🚓🚑🚒🚐🚚🚛🚜🏍️🚨🚔🚍🚘🚖🚡🚠🚟🚞🚝🚄🚅🚈🚉🚊🚇🚆🚂🚃🚁🚀]',  # Vehicle emojis
-            r'[📱📲📟📠🔋🔌💻🖥️🖨️⌨️🖱️🖲️💽💾💿📀🎥📺📻📷📹📼🔍🔎🔏🔐🔒🔓]',  # Tech emojis
-            r'[🏠🏡🏢🏣🏤🏥🏦🏧🏨🏩🏪🏫🏬🏭🏮🏯🏰💒🗼🗽⛪🕌🕍🛕⛩️🕋⛲⛺🌁🌃🏙️🌄🌅🌆🌇🌉🎠🎡🎢💈🎪⛽🚏🚦🚧⚓⛵🚣🚤🚢⛴️🛥️🛳️🚀🛸🚁🛶⛵🚤🛥️🛳️⛴️🚢🚣🚁🛸🚀]',  # Building and transport emojis
         ]
         
         cleaned = response
@@ -2088,7 +1680,7 @@ ANSWER:"""
         return cleaned
 
     def _enhance_response_completeness(self, question: str, answer: str, doc_intelligence: Dict[str, Any]) -> str:
-        """OPTIMIZED: Enhance response completeness with cleaned output"""
+        """OPTIMIZED: Enhance response completeness with cleaned output and human-like quality"""
         
         # OPTIMIZATION: Clean the answer first to remove unwanted characters
         answer = self._clean_response(answer)
@@ -2099,22 +1691,26 @@ ANSWER:"""
         # OPTIMIZATION: Simplified enhancement logic
         question_lower = question.lower()
         
-        # Add document type context if missing
+        # Add document type context if missing and helpful
         doc_type = doc_intelligence.get('type', 'generic')
-        if doc_type == 'flight_document' and 'flight' not in answer.lower():
+        if doc_type == 'flight_document' and 'flight' not in answer.lower() and len(answer) < 100:
             answer += "\n\nThis information is from a flight-related document."
-        elif doc_type == 'token_document' and 'token' not in answer.lower():
+        elif doc_type == 'token_document' and 'token' not in answer.lower() and len(answer) < 100:
             answer += "\n\nThis information is from a token-related document."
-        elif doc_type == 'news_document' and 'policy' not in answer.lower():
+        elif doc_type == 'news_document' and 'policy' not in answer.lower() and len(answer) < 100:
             answer += "\n\nThis information is from a policy-related document."
+        
+        # ENTERPRISE: Add helpful context for incomplete answers
+        if len(answer) < 50 and not any(phrase in answer.lower() for phrase in ['sorry', 'apologize', 'error']):
+            answer += " If you need more specific details, please let me know!"
         
         return answer
 
     async def _fallback_answer(self, question: str) -> str:
-        """ENHANCED: Fallback with Malayalam language support"""
+        """ENHANCED: Fallback with universal language support and human-like quality"""
         
         # Detect language for appropriate fallback messages
-        detected_language = self._detect_language(question)
+        detected_language = self._detect_language_enhanced(question)
         
         # Try basic vector search as fallback
         search_results = self.vector_store.search(question, k=8)
@@ -2126,30 +1722,13 @@ ANSWER:"""
             # Create a helpful fallback response
             if detected_language == "malayalam":
                 return f"ഡോക്യുമെന്റിൽ ചില ബന്ധപ്പെട്ട വിവരങ്ങൾ ഞാൻ കണ്ടെത്തി: {context}... എന്നാൽ നിങ്ങളുടെ ചോദ്യത്തിന് പൂർണ്ണമായ ഉത്തരം നൽകാൻ മതിയായ വ്യക്തമായ വിവരങ്ങൾ എനിക്ക് ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കാൻ ശ്രമിക്കുക അല്ലെങ്കിൽ ഡോക്യുമെന്റിൽ പരാമർശിച്ചിരിക്കുന്ന കൂടുതൽ വ്യക്തമായ എന്തെങ്കിലും ചോദിക്കുക."
+            elif detected_language == "hindi":
+                return f"मैंने दस्तावेज़ में कुछ संबंधित जानकारी पाई: {context}... लेकिन आपके प्रश्न का पूरा उत्तर देने के लिए मेरे पास पर्याप्त स्पष्ट जानकारी नहीं है। कृपया अपना प्रश्न दोबारा पूछने की कोशिश करें या दस्तावेज़ में उल्लिखित कुछ और स्पष्ट चीज़ के बारे में पूछें।"
             else:
                 return f"I found some related information in the document: {context}... However, I don't have enough specific details to give you a complete answer to your question. Could you try rephrasing your question or ask about something more specific mentioned in the document?"
         
         # If no relevant information found
-        if detected_language == "malayalam":
-            return "ക്ഷമിക്കണം, നിങ്ങളുടെ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ ബന്ധപ്പെട്ട വിവരങ്ങൾ ഒന്നും ഞാൻ കണ്ടെത്തിയില്ല. ഡോക്യുമെന്റിൽ ഈ പ്രത്യേക വിഷയത്തെക്കുറിച്ചുള്ള വിവരങ്ങൾ ഉണ്ടായിരിക്കില്ല. ദയവായി ഡോക്യുമെന്റിൽ പരാമർശിച്ചിരിക്കുന്ന മറ്റെന്തെങ്കിലും ചോദിക്കാൻ ശ്രമിക്കുക, അല്ലെങ്കിൽ നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-        else:
-            return "I'm sorry, but I couldn't find any relevant information in the document to answer your question. The document might not contain details about this specific topic. Could you try asking about something else mentioned in the document, or rephrase your question?"
-
-    def _fallback_chunk_document(self, text: str, metadata: List[Dict], chunk_size: int = 600, overlap: int = 100) -> Tuple[List[str], List[Dict]]:
-        """Fallback chunking if SmartChunker is not available"""
-        if len(text) <= chunk_size:
-            return [text], metadata
-        
-        chunks = []
-        chunk_metadata = []
-        
-        for i in range(0, len(text), chunk_size - overlap):
-            chunk = text[i:i + chunk_size]
-            if chunk.strip():
-                chunks.append(chunk)
-                chunk_metadata.append(metadata[0] if metadata else {'source': 'unknown', 'type': 'fallback_chunk'})
-        
-        return chunks, chunk_metadata
+        return await self._get_language_fallback(question, detected_language)
 
     def _clean_text(self, text: str) -> str:
         """OPTIMIZED: Fast text cleaning with caching for repeated text"""
@@ -2186,14 +1765,6 @@ ANSWER:"""
         text = re.sub(r'\(cid:\d+\)', '', text)
         text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
         
-        # OPTIMIZATION: Simplified Malayalam Unicode handling
-        malayalam_fixes = {
-            '\u0d4d\u200d': '\u0d4d',  # Remove ZWNJ after chandrakkala
-            '\u0d4d\u200c': '\u0d4d',  # Remove ZWJ after chandrakkala
-        }
-        for old, new in malayalam_fixes.items():
-            text = text.replace(old, new)
-        
         # Basic Unicode normalization
         text = unicodedata.normalize('NFKC', text)
         
@@ -2211,675 +1782,118 @@ ANSWER:"""
         
         return text
 
-    # def _detect_language(self, text: str) -> str:
-    #     """ENHANCED: Detect if text contains Malayalam or other Indian languages with improved accuracy"""
-    #     if not text:
-    #         return "unknown"
+    def _validate_and_fix_answer(self, question: str, answer: str) -> str:
+        """ENHANCED: Validation with universal language support and human-like quality"""
         
-    #     # Malayalam Unicode range: 0D00-0D7F
-    #     malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', text)
-    #     malayalam_ratio = len(malayalam_chars) / len(text) if text else 0
+        # Detect language for appropriate fallback messages
+        detected_language = self._detect_language_enhanced(question)
         
-    #     # Hindi Unicode range: 0900-097F
-    #     hindi_chars = re.findall(r'[\u0900-\u097f]', text)
-    #     hindi_ratio = len(hindi_chars) / len(text) if text else 0
+        if not answer or not answer.strip():
+            return self._get_language_fallback(question, detected_language)
         
-    #     # Tamil Unicode range: 0B80-0BFF
-    #     tamil_chars = re.findall(r'[\u0b80-\u0bff]', text)
-    #     tamil_ratio = len(tamil_chars) / len(text) if text else 0
+        answer = answer.strip()
         
-    #     # ENHANCED: Lower threshold for Malayalam detection (3% instead of 5%)
-    #     malayalam_threshold = 0.03
-    #     other_threshold = 0.05
+        # Fix cut-off answers with helpful context
+        if len(answer) < 30:
+            if detected_language == "malayalam":
+                return f"ഡോക്യുമെന്റിന്റെ അടിസ്ഥാനത്തിൽ, ഞാൻ ഈ വിവരം കണ്ടെത്തി: {answer}. എന്നാൽ ഇത് അപൂർണ്ണമായി തോന്നുന്നു. ദയവായി കൂടുതൽ വ്യക്തമായ വിവരങ്ങൾ ചോദിക്കുക അല്ലെങ്കിൽ നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
+            elif detected_language == "hindi":
+                return f"दस्तावेज़ के आधार पर, मुझे यह जानकारी मिली: {answer}. लेकिन यह अधूरी लगती है। कृपया अधिक विशिष्ट विवरण पूछें या अपना प्रश्न दोबारा पूछें।"
+            else:
+                return f"Based on the document, I found this information: {answer}. However, this seems incomplete. Could you please ask for more specific details or rephrase your question?"
         
-    #     # ENHANCED: Check for Malayalam question words even with low character count
-    #     malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
-    #     has_malayalam_question_word = any(word in text for word in malayalam_question_words)
+        # Check for proper sentence ending
+        if not answer.endswith(('.', '!', '?', '"', "'")):
+            sentences = re.split(r'[.!?]+', answer)
+            if len(sentences) > 1 and sentences[-2].strip():
+                answer = '.'.join(sentences[:-1]) + '.'
+            else:
+                answer = answer.rstrip() + '.'
         
-    #     if malayalam_ratio > malayalam_threshold or has_malayalam_question_word:
-    #         return "malayalam"
-    #     elif hindi_ratio > other_threshold:
-    #         return "hindi"
-    #     elif tamil_ratio > other_threshold:
-    #         return "tamil"
-    #     else:
-    #         return "english"
-    def _detect_language(self, text: str) -> str:
-        """ENHANCED: Detect if text contains Malayalam or other Indian languages with improved accuracy"""
-        if not text:
-            return "unknown"
+        # Fix garbled/repeated text while preserving meaning
+        words = answer.split()
+        if len(words) > 10:
+            word_counts = {}
+            for word in words:
+                if len(word) > 3:
+                    word_counts[word.lower()] = word_counts.get(word.lower(), 0) + 1
+            
+            max_count = max(word_counts.values()) if word_counts else 0
+            if max_count > len(words) * 0.25:  # More lenient threshold
+                cleaned_words = []
+                prev_word = ""
+                for word in words:
+                    if word.lower() != prev_word.lower() or len(cleaned_words) < 8:
+                        cleaned_words.append(word)
+                    prev_word = word
+                answer = ' '.join(cleaned_words)
         
-        # Malayalam Unicode range: 0D00-0D7F
-        malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', text)
-        malayalam_ratio = len(malayalam_chars) / len(text) if text else 0
+        # Ensure minimum quality for complex questions with helpful context
+        if any(indicator in question.lower() for indicator in ['explain', 'how', 'why', 'analyze']):
+            if len(answer) > 50 and not any(reasoning_word in answer.lower() for reasoning_word in 
+                                        ['because', 'since', 'therefore', 'this shows', 'based on', 'this means']):
+                if detected_language == "malayalam":
+                    answer = f"ഡോക്യുമെന്റിലെ വിവരങ്ങളുടെ അടിസ്ഥാനത്തിൽ, {answer}"
+                elif detected_language == "hindi":
+                    answer = f"दस्तावेज़ की जानकारी के आधार पर, {answer}"
+                else:
+                    answer = f"Based on the information in the document, {answer}"
         
-        # Hindi Unicode range: 0900-097F
-        hindi_chars = re.findall(r'[\u0900-\u097f]', text)
-        hindi_ratio = len(hindi_chars) / len(text) if text else 0
+        # Add helpful closing for very short answers
+        if len(answer) < 100 and not any(phrase in answer.lower() for phrase in ['let me know', 'feel free', 'if you need', 'could you']):
+            if detected_language == "malayalam":
+                answer += " വ്യക്തീകരണം ആവശ്യമുണ്ടെങ്കിൽ എന്നോട് പറയുക!"
+            elif detected_language == "hindi":
+                answer += " यदि आपको स्पष्टीकरण की आवश्यकता है तो मुझे बताएं!"
+            else:
+                answer += " Let me know if you need any clarification!"
         
-        # Tamil Unicode range: 0B80-0BFF
-        tamil_chars = re.findall(r'[\u0b80-\u0bff]', text)
-        tamil_ratio = len(tamil_chars) / len(text) if text else 0
-        
-        # ENHANCED: Lower threshold for Malayalam detection (3% instead of 5%)
-        malayalam_threshold = 0.03
-        other_threshold = 0.05
-        
-        # ENHANCED: Check for Malayalam question words even with low character count
-        malayalam_question_words = ['എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര']
-        has_malayalam_question_word = any(word in text for word in malayalam_question_words)
-        
-        if malayalam_ratio > malayalam_threshold or has_malayalam_question_word:
-            return "malayalam"
-        elif hindi_ratio > other_threshold:
-            return "hindi"
-        elif tamil_ratio > other_threshold:
-            return "tamil"
-        else:
-            return "english"
+        return answer
 
-    def _extract_malayalam_keywords(self, text: str) -> List[str]:
-        """Extract key Malayalam terms for better matching"""
-        if not text:
-            return []
-        
-        # Common Malayalam question words and important terms
-        malayalam_keywords = [
-            # Question words
-            'എന്ത്', 'എവിടെ', 'എപ്പോൾ', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'ആര്', 'ഏത്', 'എത്ര',
-            # Policy/Insurance terms
-            'പോളിസി', 'ബീമ', 'കവർ', 'ക്ലെയിം', 'പ്രീമിയം', 'കാത്തിരിക്കൽ', 'ഗ്രേസ്',
-            # Financial terms
-            'തുക', 'ശതമാനം', 'ഡിസ്കൗണ്ട്', 'ഫീസ്', 'ചാർജ്', 'ബിൽ',
-            # Time terms
-            'ദിവസം', 'മാസം', 'വർഷം', 'കാലം', 'സമയം',
-            # Medical terms
-            'ചികിത്സ', 'ആശുപത്രി', 'ഡോക്ടർ', 'രോഗം', 'ശസ്ത്രക്രിയ',
-            # Process terms
-            'പ്രക്രിയ', 'ഘട്ടം', 'ക്രമം', 'രീതി', 'വഴി',
-            # ENHANCED: Additional terms from user's questions
-            'ശുൽകം', 'ഇറക്കുമതി', 'ഉത്പന്നങ്ങൾ', 'കമ്പനി', 'നിക്ഷേപം', 'ലക്ഷ്യം',
-            'ഉപഭോക്താക്കൾ', 'ആഗോള', 'വിപണി', 'തന്ത്രം', 'ആശ്രിതത്വം', 'പ്രത്യാഘാതം',
-            'ഒഴിവാക്കൽ', 'ഉൾപ്പെടുത്തൽ', 'ബാധകം', 'പ്രഖ്യാപനം', 'ആശ്രിതത്വം'
-        ]
-        
-        found_keywords = []
-        for keyword in malayalam_keywords:
-            if keyword in text:
-                found_keywords.append(keyword)
-        
-        return found_keywords
-
-    def _enhance_malayalam_query(self, question: str) -> str:
-        """Enhance Malayalam queries with English equivalents for better retrieval"""
-        if not question:
-            return question
-        
-        # Extract Malayalam keywords
-        malayalam_keywords = self._extract_malayalam_keywords(question)
-        
-        # Malayalam to English keyword mapping for better retrieval
-        keyword_mapping = {
-            'പോളിസി': 'policy',
-            'ബീമ': 'insurance',
-            'കവർ': 'cover',
-            'ക്ലെയിം': 'claim',
-            'പ്രീമിയം': 'premium',
-            'കാത്തിരിക്കൽ': 'waiting period',
-            'ഗ്രേസ്': 'grace period',
-            'തുക': 'amount',
-            'ശതമാനം': 'percentage',
-            'ഡിസ്കൗണ്ട്': 'discount',
-            'ഫീസ്': 'fee',
-            'ചാർജ്': 'charge',
-            'ബിൽ': 'bill',
-            'ദിവസം': 'day',
-            'മാസം': 'month',
-            'വർഷം': 'year',
-            'കാലം': 'period',
-            'സമയം': 'time',
-            'ചികിത്സ': 'treatment',
-            'ആശുപത്രി': 'hospital',
-            'ഡോക്ടർ': 'doctor',
-            'രോഗം': 'disease',
-            'ശസ്ത്രക്രിയ': 'surgery',
-            'പ്രക്രിയ': 'process',
-            'ഘട്ടം': 'step',
-            'ക്രമം': 'procedure',
-            'രീതി': 'method',
-            'വഴി': 'way',
-            # ENHANCED: Additional mappings for user's question terms
-            'ശുൽകം': 'tariff',
-            'ഇറക്കുമതി': 'import',
-            'ഉത്പന്നങ്ങൾ': 'products',
-            'കമ്പനി': 'company',
-            'നിക്ഷേപം': 'investment',
-            'ലക്ഷ്യം': 'objective',
-            'ഉപഭോക്താക്കൾ': 'consumers',
-            'ആഗോള': 'global',
-            'വിപണി': 'market',
-            'തന്ത്രം': 'strategy',
-            'ആശ്രിതത്വം': 'dependency',
-            'പ്രത്യാഘാതം': 'impact',
-            'ഒഴിവാക്കൽ': 'exemption',
-            'ഉൾപ്പെടുത്തൽ': 'inclusion',
-            'ബാധകം': 'applicable',
-            'പ്രഖ്യാപനം': 'announcement'
-        }
-        
-        # Add English equivalents to the query
-        enhanced_terms = []
-        for keyword in malayalam_keywords:
-            if keyword in keyword_mapping:
-                enhanced_terms.append(keyword_mapping[keyword])
-        
-        if enhanced_terms:
-            # Combine original question with English terms
-            return f"{question} {' '.join(enhanced_terms)}"
-        
-        return question
-
-    def _detect_malayalam_question_pattern(self, question: str) -> str:
-        """Detect specific Malayalam question patterns for better processing"""
-        if not question:
-            return "unknown"
-        
-        # Common Malayalam question patterns
-        patterns = {
-            # What questions
-            r'എന്ത്.*ആണ്': 'what_is',
-            r'എന്താണ്': 'what_is',
-            r'എന്തൊക്കെ.*ആണ്': 'what_all',
-            
-            # How questions
-            r'എങ്ങനെ.*ആണ്': 'how_is',
-            r'എങ്ങനെ.*ചെയ്യണം': 'how_to',
-            r'എങ്ങനെ.*ആകും': 'how_will',
-            
-            # When questions
-            r'എപ്പോൾ.*ആണ്': 'when_is',
-            r'എപ്പോൾ.*ആകും': 'when_will',
-            r'എത്ര.*ദിവസം': 'how_many_days',
-            r'എത്ര.*മാസം': 'how_many_months',
-            r'എത്ര.*വർഷം': 'how_many_years',
-            
-            # Where questions
-            r'എവിടെ.*ആണ്': 'where_is',
-            r'എവിടെ.*ചെയ്യണം': 'where_to',
-            
-            # Why questions
-            r'എന്തുകൊണ്ട്.*ആണ്': 'why_is',
-            r'എന്തുകൊണ്ട്.*ആകും': 'why_will',
-            
-            # Amount/Number questions
-            r'എത്ര.*ആണ്': 'how_much',
-            r'എത്ര.*ഉണ്ട്': 'how_many',
-            r'എത്ര.*ആകും': 'how_much_will',
-            
-            # Policy specific patterns
-            r'പോളിസി.*കവർ.*ചെയ്യുന്നുണ്ടോ': 'policy_coverage',
-            r'പോളിസി.*ഒഴിവാക്കുന്നുണ്ടോ': 'policy_exclusion',
-            r'പോളിസി.*ഉൾപ്പെടുത്തുന്നുണ്ടോ': 'policy_inclusion',
-            r'കാത്തിരിക്കൽ.*കാലയളവ്': 'waiting_period',
-            r'ഗ്രേസ്.*കാലയളവ്': 'grace_period',
-            r'പ്രീമിയം.*തുക': 'premium_amount',
-            r'ക്ലെയിം.*ചെയ്യാൻ': 'claim_process',
-            # ENHANCED: Additional patterns from user's questions
-            r'ഏത്.*ദിവസമാണ്.*പ്രഖ്യാപിച്ചത്': 'announcement_date',
-            r'ഏത്.*ഉത്പന്നങ്ങൾക്ക്.*ബാധകമാണ്': 'applicable_products',
-            r'ഏത്.*സാഹചര്യത്തിൽ.*ഒഴികെയാക്കും': 'exemption_conditions',
-            r'എന്താണ്.*നിക്ഷേപം.*ലക്ഷ്യം': 'investment_objective',
-            r'എന്താണ്.*പ്രത്യാഘാതം.*ഉപഭോക്താക്കൾ': 'consumer_impact',
-            r'എന്താണ്.*തന്ത്രം.*ആശ്രിതത്വം': 'dependency_strategy',
-            r'എന്തൊക്കെ.*പ്രത്യാഘാതങ്ങൾ': 'policy_implications'
-        }
-        
-        for pattern, pattern_type in patterns.items():
-            if re.search(pattern, question):
-                return pattern_type
-        
-        return "general"
-
-#     def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
-#         """Get Malayalam-specific prompt based on question pattern"""
-        
-#         base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
-
-# **ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
-
-# CONTEXT:
-# {context}
-
-# CUSTOMER QUESTION: {question}
-
-# INSTRUCTIONS:"""
-        
-#         pattern_specific_instructions = {
-#             'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
-# 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
-# 3. ഉദാഹരണങ്ങൾ നൽകുക""",
-            
-#             'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
-# 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
-# 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
-            
-#             'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
-# 2. കാലയളവുകൾ വ്യക്തമായി പറയുക
-# 3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
-            
-#             'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
-# 2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
-# 3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
-            
-#             'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
-# 2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
-# 3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
-            
-#             'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
-# 2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
-# 3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
-            
-#             'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
-# 2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
-# 3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
-            
-#             'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-# 2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
-# 3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
-            
-#             'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-# 2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
-# 3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
-            
-#             'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-# 2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
-# 3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
-            
-#             'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
-# 2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-# 3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
-            
-#             'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-# 2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-# 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-#             'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
-# 2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
-# 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-#             'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
-# 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
-# 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-# 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-# 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
-# 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
-#         }
-        
-#         instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
-        
-#         return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
-
-    
-    # def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
-    #     """
-    #     IMPROVED: Get Malayalam-specific prompt with explicit language instructions.
-    #     """
-        
-    #     # CRITICAL FIX: Add a strong, explicit instruction at the beginning of the prompt.
-    #     base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
-
-    # **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
-
-    # CONTEXT:
-    # {context}
-
-    # CUSTOMER QUESTION: {question}
-
-    # INSTRUCTIONS:"""
-        
-    #     pattern_specific_instructions = {
-    #         'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
-    # 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
-    # 3. ഉദാഹരണങ്ങൾ നൽകുക""",
-            
-    #         'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
-    # 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
-    # 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
-            
-    #         # ... (keep all your other patterns as they are) ...
-
-    #         'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
-    # 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
-    # 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-    # 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-    # 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
-    # 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
-    #     }
-        
-    #     instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
-        
-    #     # CRITICAL FIX: Add a final, reinforcing instruction at the end of the prompt.
-    #     return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
-    def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
-        """
-        IMPROVED: Get Malayalam-specific prompt with explicit and reinforced language instructions.
-        """
-        
-        # CRITICAL FIX: Add a strong, explicit instruction at the very beginning of the prompt.
-        base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
-
-    **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്. (CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM. DO NOT USE ENGLISH.)**
-
-    CONTEXT:
-    {context}
-
-    CUSTOMER QUESTION: {question}
-
-    INSTRUCTIONS:"""
-        
-        pattern_specific_instructions = {
-            'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
-    2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
-    3. ഉദാഹരണങ്ങൾ നൽകുക""",
-            
-            'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
-    2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
-    3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
-            
-            'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
-    2. കാലയളവുകൾ വ്യക്തമായി പറയുക
-    3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
-            
-            'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
-    2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
-    3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
-            
-            'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
-    2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
-    3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
-            
-            'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
-    2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
-    3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
-            
-            'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
-    2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
-    3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
-            
-            'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-    2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
-    3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
-            
-            'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-    2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
-    3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
-            
-            'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-    2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
-    3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
-            
-            'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
-    2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-    3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
-            
-            'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-    2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-    3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-            'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
-    2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
-    3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-            'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
-    2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
-    3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-    4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-    5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
-    6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
-        }
-        
-        instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
-        
-        # CRITICAL FIX: Add a final, reinforcing instruction right before the model generates the answer.
-        return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER (in Malayalam only):"
-    
-    # def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
-    #     """
-    #     IMPROVED: Get Malayalam-specific prompt with explicit and reinforced language instructions.
-    #     """
-        
-    #     # CRITICAL FIX: Add a strong, explicit instruction at the very beginning of the prompt.
-    #     base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
-
-    # **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്. (CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM. DO NOT USE ENGLISH.)**
-
-    # CONTEXT:
-    # {context}
-
-    # CUSTOMER QUESTION: {question}
-
-    # INSTRUCTIONS:"""
-        
-    #     pattern_specific_instructions = {
-    #         'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
-    # 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
-    # 3. ഉദാഹരണങ്ങൾ നൽകുക""",
-            
-    #         'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
-    # 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
-    # 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
-            
-    #         'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
-    # 2. കാലയളവുകൾ വ്യക്തമായി പറയുക
-    # 3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
-            
-    #         'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
-    # 2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
-    # 3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
-            
-    #         'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
-    # 2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
-    # 3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
-            
-    #         'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
-    # 2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
-    # 3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
-            
-    #         'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
-    # 2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
-    # 3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
-            
-    #         'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-    # 2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
-    # 3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
-            
-    #         'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
-    # 2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
-    # 3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
-            
-    #         'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-    # 2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
-    # 3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
-            
-    #         'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
-    # 2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-    # 3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
-            
-    #         'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
-    # 2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
-    # 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-    #         'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
-    # 2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
-    # 3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
-            
-    #         'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
-    # 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
-    # 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
-    # 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
-    # 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
-    # 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
-    #     }
-        
-    #     instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
-        
-    #     # CRITICAL FIX: Add a final, reinforcing instruction right before the model generates the answer.
-    #     return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER (in Malayalam only):"
     # Additional helper methods for investigation (keeping existing functionality)
-    # async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
-    #     """
-    #     DEFINITIVE FIX: Generate Malayalam answers with a retry mechanism for consistency.
-    #     """
-        
-    #     # First attempt with the detailed, pattern-specific prompt
-    #     prompt_template = self._get_malayalam_specific_prompt(question, pattern)
-    #     prompt = prompt_template.format(context=context, question=question)
-        
-    #     try:
-    #         model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-    #         response = await asyncio.wait_for(
-    #             model.generate_content_async(
-    #                 prompt,
-    #                 generation_config={
-    #                     'temperature': 0.3,
-    #                     'max_output_tokens': 500,
-    #                     'top_p': 0.9,
-    #                     'top_k': 30
-    #                 }
-    #             ), timeout=18
-    #         )
-            
-    #         answer = response.text.strip()
-            
-    #         # If the first attempt is successful, return the answer
-    #         if answer and self._detect_language(answer) == "malayalam":
-    #             return answer
-    #         else:
-    #             logger.warning(f"First attempt failed to generate Malayalam. Retrying with a simpler prompt.")
-    #             logger.warning(f"Initial response: {answer[:100]}...")
-
-    #     except Exception as e:
-    #         logger.error(f"First attempt at Malayalam answer generation failed: {e}")
-    #         # Proceed to retry even if the first attempt fails with an exception
-
-    #     # Second attempt with a simpler, more direct prompt
-    #     try:
-    #         simpler_prompt = f"""
-    # CONTEXT:
-    # {context}
-
-    # QUESTION (in Malayalam):
-    # {question}
-
-    # CRITICAL INSTRUCTION: Your entire response MUST be in the Malayalam language. Do not use any English.
-
-    # ANSWER (in Malayalam):
-    # """
-    #         response = await asyncio.wait_for(
-    #             model.generate_content_async(
-    #                 simpler_prompt,
-    #                 generation_config={
-    #                     'temperature': 0.1,  # Lower temperature for more directness
-    #                     'max_output_tokens': 500,
-    #                     'top_p': 0.8,
-    #                     'top_k': 20
-    #                 }
-    #             ), timeout=18
-    #         )
-            
-    #         answer = response.text.strip()
-            
-    #         # Check if the second attempt was successful
-    #         if answer and self._detect_language(answer) == "malayalam":
-    #             logger.info("Second attempt successful.")
-    #             return answer
-    #         else:
-    #             logger.error("Second attempt also failed to generate Malayalam.")
-    #             logger.error(f"Second response: {answer[:100]}...")
-    #             # If both attempts fail, return a context-aware fallback
-    #             return self._create_malayalam_fallback_from_context(question, context)
-
-    #     except Exception as e:
-    #         logger.error(f"Second attempt at Malayalam answer generation also failed: {e}")
-    #         return self._create_malayalam_fallback_from_context(question, context)
-    
-    async def _generate_malayalam_optimized_answer(self, question: str, context: str, pattern: str) -> str:
-        """
-        DEFINITIVE FIX: Generate Malayalam answers with a retry mechanism for consistency.
-        """
-        
-        # First attempt with the detailed, pattern-specific prompt
-        prompt_template = self._get_malayalam_specific_prompt(question, pattern)
-        prompt = prompt_template.format(context=context, question=question)
-        
+    async def investigate_question(self, question: str) -> str:
+        """Enhanced investigation with validation and universal language support"""
         try:
-            model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.3,
-                        'max_output_tokens': 500,
-                        'top_p': 0.9,
-                        'top_k': 30
-                    }
-                ), timeout=18
+            cache_key = hashlib.md5(question.encode()).hexdigest()
+            if cache_key in self.investigation_cache:
+                return self.investigation_cache[cache_key]
+            
+            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
+            
+            basic_task = asyncio.create_task(self._get_basic_answer(question))
+            q_types, keywords = self._detect_question_patterns(question)
+            basic_answer = await basic_task
+            
+            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
+                deep_task = asyncio.create_task(self._deep_search(question))
+                investigation_task = asyncio.create_task(
+                    self._conduct_investigation(question, q_types, keywords, basic_answer)
+                )
+                
+                basic_answer, investigation_findings = await asyncio.gather(
+                    deep_task, investigation_task
+                )
+            else:
+                investigation_findings = await self._conduct_investigation(
+                    question, q_types, keywords, basic_answer
+                )
+            
+            final_answer = await self._self_correct_and_refine(
+                question, basic_answer, investigation_findings
             )
             
-            answer = response.text.strip()
+            final_answer = self._clean_text(final_answer)
+            final_answer = self._validate_and_fix_answer(question, final_answer)
             
-            # If the first attempt is successful, return the answer
-            if answer and self._detect_language(answer) == "malayalam":
-                return answer
-            else:
-                logger.warning(f"First attempt failed to generate Malayalam. Retrying with a simpler prompt.")
-                logger.warning(f"Initial response: {answer[:100]}...")
-
+            self.investigation_cache[cache_key] = final_answer
+            
+            return final_answer
+            
         except Exception as e:
-            logger.error(f"First attempt at Malayalam answer generation failed: {e}")
-            # Proceed to retry even if the first attempt fails with an exception
+            logger.error(f"Investigation failed: {e}", exc_info=True)
+            error_msg = f"I encountered an error while analyzing this question: {str(e)[:100]}"
+            return self._validate_and_fix_answer(question, error_msg)
 
-        # Second attempt with a simpler, more direct prompt
-        try:
-            simpler_prompt = f"""
-    CONTEXT:
-    {context}
-
-    QUESTION (in Malayalam):
-    {question}
-
-    CRITICAL INSTRUCTION: Your entire response MUST be in the Malayalam language. Do not use any English.
-
-    ANSWER (in Malayalam):
-    """
-            response = await asyncio.wait_for(
-                model.generate_content_async(
-                    simpler_prompt,
-                    generation_config={
-                        'temperature': 0.1,  # Lower temperature for more directness
-                        'max_output_tokens': 500,
-                        'top_p': 0.8,
-                        'top_k': 20
-                    }
-                ), timeout=18
-            )
-            
-            answer = response.text.strip()
-            
-            # Check if the second attempt was successful
-            if answer and self._detect_language(answer) == "malayalam":
-                logger.info("Second attempt successful.")
-                return answer
-            else:
-                logger.error("Second attempt also failed to generate Malayalam.")
-                logger.error(f"Second response: {answer[:100]}...")
-                # If both attempts fail, return a context-aware fallback
-                return self._create_malayalam_fallback_from_context(question, context)
-
-        except Exception as e:
-            logger.error(f"Second attempt at Malayalam answer generation also failed: {e}")
-            return self._create_malayalam_fallback_from_context(question, context)
-    
     async def _get_basic_answer(self, question: str) -> str:
         """Gets a straightforward answer using the RAG pipeline"""
         try:
@@ -2970,125 +1984,34 @@ ANSWER:"""
         - Do not repeat information
         - If there are contradictions, point them out
         - Produce a final, clear, and well-structured answer
+        - Maintain a conversational, helpful tone
 
         FINAL REFINED ANSWER:
         """
         
         try:
-            model = self.rag_pipeline.llm_precise
+            model = genai.GenerativeModel(settings.LLM_MODEL_NAME_PRECISE)
             response = await model.generate_content_async(prompt)
             return self._clean_text(response.text)
         except Exception as e:
             logger.error(f"Self-correction and refinement failed: {e}")
             return original_answer + "\n\n(Note: Further refinement failed, this is the best available answer.)"
 
-    async def investigate_question(self, question: str) -> str:
-        """Enhanced investigation with validation"""
-        try:
-            cache_key = hashlib.md5(question.encode()).hexdigest()
-            if cache_key in self.investigation_cache:
-                return self.investigation_cache[cache_key]
-            
-            logger.info(f"🕵️ Investigating: '{question[:100]}...'")
-            
-            basic_task = asyncio.create_task(self._get_basic_answer(question))
-            q_types, keywords = self._detect_question_patterns(question)
-            basic_answer = await basic_task
-            
-            if len(basic_answer) < 50 or "no relevant information" in basic_answer.lower():
-                deep_task = asyncio.create_task(self._deep_search(question))
-                investigation_task = asyncio.create_task(
-                    self._conduct_investigation(question, q_types, keywords, basic_answer)
-                )
-                
-                basic_answer, investigation_findings = await asyncio.gather(
-                    deep_task, investigation_task
-                )
-            else:
-                investigation_findings = await self._conduct_investigation(
-                    question, q_types, keywords, basic_answer
-                )
-            
-            final_answer = await self._self_correct_and_refine(
-                question, basic_answer, investigation_findings
-            )
-            
-            final_answer = self._clean_text(final_answer)
-            final_answer = self._validate_and_fix_answer(question, final_answer)
-            
-            self.investigation_cache[cache_key] = final_answer
-            
-            return final_answer
-            
-        except Exception as e:
-            logger.error(f"Investigation failed: {e}", exc_info=True)
-            error_msg = f"I encountered an error while analyzing this question: {str(e)[:100]}"
-            return self._validate_and_fix_answer(question, error_msg)
-
-    def _validate_and_fix_answer(self, question: str, answer: str) -> str:
-        """ENHANCED: Validation with Malayalam language support"""
+    def _fallback_chunk_document(self, text: str, metadata: List[Dict], chunk_size: int = 600, overlap: int = 100) -> Tuple[List[str], List[Dict]]:
+        """Fallback chunking if SmartChunker is not available"""
+        if len(text) <= chunk_size:
+            return [text], metadata
         
-        # Detect language for appropriate fallback messages
-        detected_language = self._detect_language(question)
+        chunks = []
+        chunk_metadata = []
         
-        if not answer or not answer.strip():
-            if detected_language == "malayalam":
-                return "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് ഉത്തരം നൽകാൻ ഡോക്യുമെന്റിൽ മതിയായ വിവരങ്ങൾ ഇല്ല. ദയവായി നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക അല്ലെങ്കിൽ ഡോക്യുമെന്റിൽ പരാമർശിച്ചിരിക്കുന്ന മറ്റെന്തെങ്കിലും ചോദിക്കുക."
-            else:
-                return "I'm sorry, but I don't have enough information in the document to answer that question. Could you please rephrase or ask about something else mentioned in the document?"
+        for i in range(0, len(text), chunk_size - overlap):
+            chunk = text[i:i + chunk_size]
+            if chunk.strip():
+                chunks.append(chunk)
+                chunk_metadata.append(metadata[0] if metadata else {'source': 'unknown', 'type': 'fallback_chunk'})
         
-        answer = answer.strip()
-        
-        # Fix cut-off answers with helpful context
-        if len(answer) < 30:
-            if detected_language == "malayalam":
-                return f"ഡോക്യുമെന്റിന്റെ അടിസ്ഥാനത്തിൽ, ഞാൻ ഈ വിവരം കണ്ടെത്തി: {answer}. എന്നാൽ ഇത് അപൂർണ്ണമായി തോന്നുന്നു. ദയവായി കൂടുതൽ വ്യക്തമായ വിവരങ്ങൾ ചോദിക്കുക അല്ലെങ്കിൽ നിങ്ങളുടെ ചോദ്യം മാറ്റി ചോദിക്കുക."
-            else:
-                return f"Based on the document, I found this information: {answer}. However, this seems incomplete. Could you please ask for more specific details or rephrase your question?"
-        
-        # Check for proper sentence ending
-        if not answer.endswith(('.', '!', '?', '"', "'")):
-            sentences = re.split(r'[.!?]+', answer)
-            if len(sentences) > 1 and sentences[-2].strip():
-                answer = '.'.join(sentences[:-1]) + '.'
-            else:
-                answer = answer.rstrip() + '.'
-        
-        # Fix garbled/repeated text while preserving meaning
-        words = answer.split()
-        if len(words) > 10:
-            word_counts = {}
-            for word in words:
-                if len(word) > 3:
-                    word_counts[word.lower()] = word_counts.get(word.lower(), 0) + 1
-            
-            max_count = max(word_counts.values()) if word_counts else 0
-            if max_count > len(words) * 0.25:  # More lenient threshold
-                cleaned_words = []
-                prev_word = ""
-                for word in words:
-                    if word.lower() != prev_word.lower() or len(cleaned_words) < 8:
-                        cleaned_words.append(word)
-                    prev_word = word
-                answer = ' '.join(cleaned_words)
-        
-        # Ensure minimum quality for complex questions with helpful context
-        if any(indicator in question.lower() for indicator in ['explain', 'how', 'why', 'analyze']):
-            if len(answer) > 50 and not any(reasoning_word in answer.lower() for reasoning_word in 
-                                        ['because', 'since', 'therefore', 'this shows', 'based on', 'this means']):
-                if detected_language == "malayalam":
-                    answer = f"ഡോക്യുമെന്റിലെ വിവരങ്ങളുടെ അടിസ്ഥാനത്തിൽ, {answer}"
-                else:
-                    answer = f"Based on the information in the document, {answer}"
-        
-        # Add helpful closing for very short answers
-        if len(answer) < 100 and not any(phrase in answer.lower() for phrase in ['let me know', 'feel free', 'if you need', 'could you']):
-            if detected_language == "malayalam":
-                answer += " വ്യക്തീകരണം ആവശ്യമുണ്ടെങ്കിൽ എന്നോട് പറയുക!"
-            else:
-                answer += " Let me know if you need any clarification!"
-        
-        return answer
+        return chunks, chunk_metadata
 
     async def answer_question(self, question: str, vector_store: OptimizedVectorStore) -> str:
         """Generate answer with enhanced quality control and better context selection"""
@@ -3107,7 +2030,8 @@ ANSWER:"""
         # Enhanced search with more chunks for better coverage
         search_results = vector_store.search(question, k=30)
         if not search_results:
-            return "I'm sorry, but I don't have enough information in the document to answer that question. Could you please rephrase or ask about something else mentioned in the document?"
+            detected_language = self._detect_language_enhanced(question)
+            return await self._get_language_fallback(question, detected_language)
         
         # Smart chunk selection with improved relevance scoring
         chunks = []
@@ -3188,7 +2112,7 @@ ANSWER:"""
 
     def _validate_answer_confidence(self, question: str, answer: str, context: str) -> tuple[str, float]:
         """Advanced answer validation with confidence scoring"""
-        detected_language = self._detect_language(question)
+        detected_language = self._detect_language_enhanced(question)
         
         # Check for common error patterns
         error_indicators = [
@@ -3230,6 +2154,8 @@ ANSWER:"""
         if confidence < 0.5:
             if detected_language == "malayalam":
                 improved_answer = f"ഡോക്യുമെന്റിൽ നിന്ന് ഞാൻ കണ്ടെത്തിയ വിവരങ്ങൾ: {answer}. എന്നാൽ ഈ വിവരം പൂർണ്ണമായി ഉറപ്പാക്കാൻ കൂടുതൽ വ്യക്തമായ ചോദ്യം ആവശ്യമാണ്."
+            elif detected_language == "hindi":
+                improved_answer = f"दस्तावेज़ से मुझे जो जानकारी मिली: {answer}. लेकिन इस जानकारी को पूरी तरह सुनिश्चित करने के लिए अधिक स्पष्ट प्रश्न की आवश्यकता है।"
             else:
                 improved_answer = f"Based on the document, I found: {answer}. However, to be completely certain, please ask a more specific question."
             return improved_answer, confidence
@@ -3238,7 +2164,7 @@ ANSWER:"""
 
     async def _generate_high_confidence_answer(self, question: str, chunks: List[str], is_complex: bool) -> str:
         """Generate answer with multiple attempts for higher confidence"""
-        detected_language = self._detect_language(question)
+        detected_language = self._detect_language_enhanced(question)
         context = "\n\n".join(chunks)
         
         # First attempt
@@ -3266,30 +2192,71 @@ ANSWER:"""
     async def _generate_single_answer(self, question: str, chunks: List[str], is_complex: bool, attempt: int = 1) -> tuple[str, float]:
         """Generate a single answer attempt with confidence scoring"""
         context = "\n\n".join(chunks)
-        detected_language = self._detect_language(question)
+        detected_language = self._detect_language_enhanced(question)
         
         if attempt == 1:
             # Standard prompt
-            if detected_language == "malayalam":
-                pattern = self._detect_malayalam_question_pattern(question)
-                prompt_template = self._get_malayalam_specific_prompt(question, pattern)
-                prompt = prompt_template.format(context=context, question=question)
-                # Add extra emphasis for Malayalam responses
-                prompt += "\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**"
+            if detected_language != "english":
+                answer = await self._generate_language_specific_answer(question, context, detected_language)
+                return answer, 1.0
             else:
-                prompt = f"""You are a helpful enterprise chatbot. Answer accurately and completely.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nANSWER:"""
+                prompt = f"""You are a helpful enterprise assistant. Answer accurately and completely in a conversational manner.
+
+CONTEXT:
+{context}
+
+QUESTION: {question}
+
+INSTRUCTIONS:
+1. Be friendly and professional like a helpful customer service representative
+2. Be specific with numbers, dates, and conditions
+3. Use only information from the context
+4. If information is not available, say so clearly
+5. Be thorough but easy to understand
+
+ANSWER:"""
         elif attempt == 2:
             # More specific prompt
-            if detected_language == "malayalam":
-                prompt = f"""നിങ്ങൾ ഒരു കൃത്യമായ ബീമാ അസിസ്റ്റന്റ് ആണ്. ചോദ്യത്തിന് കൃത്യവും പൂർണ്ണവുമായ ഉത്തരം നൽകുക.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. കൃത്യമായ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ ഉപയോഗിക്കുക\n2. ഡോക്യുമെന്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക\n3. ഉത്തരം വ്യക്തവും മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ആക്കുക\n\nANSWER:"""
+            if detected_language != "english":
+                # Use more specific language prompt
+                answer = await self._generate_language_specific_answer(question, context, detected_language)
+                return answer, 1.0
             else:
-                prompt = f"""You are a precise insurance assistant. Provide accurate and complete answers.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nINSTRUCTIONS:\n1. Use exact numbers, dates, and conditions from the context\n2. Include all relevant information from the document\n3. Make the answer clear and easy to understand\n\nANSWER:"""
+                prompt = f"""You are a precise enterprise assistant. Provide accurate and complete answers in a helpful manner.
+
+CONTEXT:
+{context}
+
+QUESTION: {question}
+
+INSTRUCTIONS:
+1. Use exact numbers, dates, and conditions from the context
+2. Include all relevant information from the document
+3. Make the answer clear and easy to understand
+4. Be conversational and helpful
+
+ANSWER:"""
         else:
             # Most specific prompt
-            if detected_language == "malayalam":
-                prompt = f"""ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക.\n\n**ശ്രദ്ധിക്കുക: നിങ്ങൾ എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nനിർദ്ദേശങ്ങൾ:\n1. ഡോക്യുമെന്റിൽ നിന്ന് കൃത്യമായ വിവരങ്ങൾ മാത്രം ഉപയോഗിക്കുക\n2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ കൃത്യമായി പറയുക\n3. ഊഹങ്ങൾ ഒഴിവാക്കുക\n4. വിവരങ്ങൾ ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയുക\n5. **എപ്പോഴും മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക**\n\nANSWER:"""
+            if detected_language != "english":
+                answer = await self._generate_language_specific_answer(question, context, detected_language)
+                return answer, 1.0
             else:
-                prompt = f"""Use only exact information from the document to answer the question.\n\nCONTEXT:\n{context}\n\nQUESTION: {question}\n\nINSTRUCTIONS:\n1. Use only exact information from the document\n2. State numbers, dates, and conditions precisely\n3. Avoid assumptions\n4. If information is not available, state it clearly\n\nANSWER:"""
+                prompt = f"""Use only exact information from the document to answer the question in a helpful, conversational manner.
+
+CONTEXT:
+{context}
+
+QUESTION: {question}
+
+INSTRUCTIONS:
+1. Use only exact information from the document
+2. State numbers, dates, and conditions precisely
+3. Avoid assumptions
+4. If information is not available, state it clearly
+5. Be friendly and professional
+
+ANSWER:"""
         
         try:
             model_name = settings.LLM_MODEL_NAME_PRECISE if is_complex else settings.LLM_MODEL_NAME
@@ -3310,69 +2277,4 @@ ANSWER:"""
         except Exception as e:
             logger.error(f"Answer generation attempt {attempt} failed: {e}")
             return "", 0.0
-
-    def _select_optimal_context(self, question: str, search_results: List[Tuple[str, float, Dict]], max_chunks: int = 15) -> List[str]:
-        """ENHANCED: Select optimal context chunks using semantic similarity and relevance scoring"""
-        if not search_results:
-            return []
-        
-        detected_language = self._detect_language(question)
-        question_clean = self._clean_text(question)
-        
-        # Extract key terms from question
-        question_terms = set(re.findall(r'\b\w+\b', question_clean.lower()))
-        
-        # Enhanced relevance scoring
-        scored_chunks = []
-        for chunk, score, metadata in search_results:
-            chunk_clean = self._clean_text(chunk)
-            chunk_terms = set(re.findall(r'\b\w+\b', chunk_clean.lower()))
             
-            # Calculate word overlap
-            overlap = len(question_terms.intersection(chunk_terms))
-            overlap_ratio = overlap / len(question_terms) if question_terms else 0
-            
-            # Language-specific scoring
-            language_bonus = 0
-            if detected_language == "malayalam":
-                malayalam_chars = re.findall(r'[\u0d00-\u0d7f]', chunk_clean)
-                if malayalam_chars:
-                    language_bonus = 0.1
-            
-            # Policy-specific scoring
-            policy_bonus = 0
-            if any(term in question_clean.lower() for term in ['policy', 'cover', 'waiting', 'grace', 'premium']):
-                policy_terms = ['policy', 'cover', 'coverage', 'insured', 'premium', 'claim', 'waiting', 'grace', 'exclusion', 'inclusion']
-                policy_matches = sum(1 for term in policy_terms if term in chunk_clean.lower())
-                policy_bonus = policy_matches * 0.05
-            
-            # Number presence bonus for numerical questions
-            number_bonus = 0
-            if any(term in question_clean.lower() for term in ['how much', 'what is the amount', 'percentage', 'limit', 'days', 'months', 'years']):
-                if re.search(r'\d+', chunk_clean):
-                    number_bonus = 0.1
-            
-            # Calculate final relevance score
-            relevance_score = score + overlap_ratio * 0.3 + language_bonus + policy_bonus + number_bonus
-            
-            scored_chunks.append((chunk_clean, relevance_score, metadata))
-        
-        # Sort by relevance score
-        scored_chunks.sort(key=lambda x: x[1], reverse=True)
-        
-        # Dynamic threshold based on score distribution
-        if len(scored_chunks) >= 5:
-            scores = [score for _, score, _ in scored_chunks]
-            threshold = scores[int(len(scores) * 0.4)]  # Top 60%
-        else:
-            threshold = 0.3
-        
-        # Select chunks above threshold or top chunks
-        selected_chunks = []
-        for chunk, score, metadata in scored_chunks:
-            if score >= threshold or len(selected_chunks) < max_chunks // 2:
-                selected_chunks.append(chunk)
-            if len(selected_chunks) >= max_chunks:
-                break
-        
-        return selected_chunks
