@@ -2149,15 +2149,55 @@ ANSWER:"""
 #         return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
 
     
+    # def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
+    #     """
+    #     IMPROVED: Get Malayalam-specific prompt with explicit language instructions.
+    #     """
+        
+    #     # CRITICAL FIX: Add a strong, explicit instruction at the beginning of the prompt.
+    #     base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
+
+    # **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+
+    # CONTEXT:
+    # {context}
+
+    # CUSTOMER QUESTION: {question}
+
+    # INSTRUCTIONS:"""
+        
+    #     pattern_specific_instructions = {
+    #         'what_is': """1. എന്താണ് എന്ന് വ്യക്തമായി വിശദീകരിക്കുക
+    # 2. സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ ഉപയോഗിക്കുക
+    # 3. ഉദാഹരണങ്ങൾ നൽകുക""",
+            
+    #         'how_to': """1. ഘട്ടങ്ങളായി വിഭജിച്ച് വിശദീകരിക്കുക
+    # 2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
+    # 3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
+            
+    #         # ... (keep all your other patterns as they are) ...
+
+    #         'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
+    # 2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
+    # 3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
+    # 4. കോൺടെക്സ്റ്റിൽ വിവരങ്ങൾ ഇല്ലെങ്കിൽ, ആ വിവരം ഇല്ലെന്ന് ഭക്തിയോടെ പറയുക
+    # 5. ചൂടുള്ളതും പ്രൊഫഷണലുമായ ടോൺ നിലനിർത്തുക
+    # 6. ഉത്തരം മനസ്സിലാക്കാൻ എളുപ്പമുള്ളതായി ഉത്തരം നൽകുക"""
+    #     }
+        
+    #     instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
+        
+    #     # CRITICAL FIX: Add a final, reinforcing instruction at the end of the prompt.
+    #     return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
     def _get_malayalam_specific_prompt(self, question: str, pattern: str) -> str:
         """
-        IMPROVED: Get Malayalam-specific prompt with explicit language instructions.
+        IMPROVED: Get Malayalam-specific prompt with explicit and reinforced language instructions.
         """
         
-        # CRITICAL FIX: Add a strong, explicit instruction at the beginning of the prompt.
+        # CRITICAL FIX: Add a strong, explicit instruction at the very beginning of the prompt.
         base_prompt = """നിങ്ങൾ ഒരു സഹായകരമായ എന്റർപ്രൈസ് ചാറ്റ്ബോട്ട് ആണ്. ഉപഭോക്താവിന്റെ ചോദ്യത്തിന് കൃത്യവും വ്യക്തവുമായ ഉത്തരം നൽകുക.
 
-    **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**
+    **പ്രധാന നിർദ്ദേശം: നിങ്ങൾ മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകണം. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്. (CRITICAL INSTRUCTION: YOU MUST RESPOND ONLY IN MALAYALAM. DO NOT USE ENGLISH.)**
 
     CONTEXT:
     {context}
@@ -2175,8 +2215,50 @@ ANSWER:"""
     2. ഓരോ ഘട്ടവും വ്യക്തമായി പറയുക
     3. ശ്രദ്ധിക്കേണ്ട കാര്യങ്ങൾ ചൂണ്ടിക്കാട്ടുക""",
             
-            # ... (keep all your other patterns as they are) ...
-
+            'when_is': """1. കൃത്യമായ സമയം/തീയതി പറയുക
+    2. കാലയളവുകൾ വ്യക്തമായി പറയുക
+    3. എപ്പോൾ ആരംഭിക്കും, എപ്പോൾ അവസാനിക്കും എന്ന് പറയുക""",
+            
+            'how_much': """1. കൃത്യമായ തുക/സംഖ്യ പറയുക
+    2. ശതമാനം ഉണ്ടെങ്കിൽ അത് പറയുക
+    3. ഏത് കറൻസിയിലാണ് എന്ന് പറയുക""",
+            
+            'policy_coverage': """1. എന്താണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് വ്യക്തമായി പറയുക
+    2. എന്തെങ്കിലും വ്യവസ്ഥകൾ ഉണ്ടെങ്കിൽ അവ പറയുക
+    3. എത്ര തുകയാണ് കവർ ചെയ്യപ്പെടുന്നത് എന്ന് പറയുക""",
+            
+            'waiting_period': """1. കാത്തിരിക്കൽ കാലയളവ് എത്ര ദിവസം/മാസം/വർഷം എന്ന് പറയുക
+    2. എപ്പോൾ ആരംഭിക്കും എന്ന് പറയുക
+    3. എന്തിനാണ് കാത്തിരിക്കൽ കാലയളവ് എന്ന് വിശദീകരിക്കുക""",
+            
+            'announcement_date': """1. പ്രഖ്യാപനം ചെയ്ത കൃത്യമായ തീയതി പറയുക
+    2. ഏത് ദിവസമാണ് എന്ന് വ്യക്തമായി പറയുക
+    3. ആ തീയതിയുടെ പ്രാധാന്യം വിശദീകരിക്കുക""",
+            
+            'applicable_products': """1. ഏത് ഉത്പന്നങ്ങൾക്കാണ് ഈ നയം ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+    2. ഉത്പന്നങ്ങളുടെ പട്ടിക നൽകുക
+    3. എന്തുകൊണ്ടാണ് ഇവ തിരഞ്ഞെടുത്തത് എന്ന് വിശദീകരിക്കുക""",
+            
+            'exemption_conditions': """1. ഏത് സാഹചര്യങ്ങളിലാണ് ഒഴിവാക്കൽ ബാധകമായത് എന്ന് വ്യക്തമായി പറയുക
+    2. ഒഴിവാക്കലിന്റെ വ്യവസ്ഥകൾ വിശദീകരിക്കുക
+    3. എന്തുകൊണ്ടാണ് ഈ ഒഴിവാക്കൽ നൽകിയത് എന്ന് പറയുക""",
+            
+            'investment_objective': """1. നിക്ഷേപത്തിന്റെ ലക്ഷ്യം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+    2. എന്തിനാണ് ഈ നിക്ഷേപം ചെയ്തത് എന്ന് വിശദീകരിക്കുക
+    3. പ്രതീക്ഷിക്കുന്ന ഫലങ്ങൾ എന്തൊക്കെയാണ് എന്ന് പറയുക""",
+            
+            'consumer_impact': """1. ഉപഭോക്താക്കളിൽ എന്ത് പ്രത്യാഘാതം ഉണ്ടാകും എന്ന് വ്യക്തമായി പറയുക
+    2. എങ്ങനെയാണ് ഇത് ഉപഭോക്താക്കളെ ബാധിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+    3. ആഗോള വിപണിയിൽ എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് പറയുക""",
+            
+            'dependency_strategy': """1. ആശ്രിതത്വം കുറയ്ക്കാനുള്ള തന്ത്രം എന്താണ് എന്ന് വ്യക്തമായി പറയുക
+    2. എങ്ങനെയാണ് ഈ തന്ത്രം പ്രവർത്തിക്കുന്നത് എന്ന് വിശദീകരിക്കുക
+    3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
+            'policy_implications': """1. നയത്തിന്റെ എല്ലാ പ്രത്യാഘാതങ്ങളും വ്യക്തമായി പറയുക
+    2. എന്ത് മാറ്റങ്ങൾ ഉണ്ടാകും എന്ന് വിശദീകരിക്കുക
+    3. എന്ത് ഫലങ്ങൾ പ്രതീക്ഷിക്കാം എന്ന് പറയുക""",
+            
             'general': """1. സഹായകരമായ ഉപഭോക്താവ് സേവന പ്രതിനിധി പോലെ സ്വാഭാവികവും സംഭാഷണപരവുമായ രീതിയിൽ ഉത്തരം നൽകുക
     2. കോൺടെക്സ്റ്റിൽ നിന്ന് എല്ലാ പ്രസക്തമായ വിവരങ്ങളും ഉൾപ്പെടുത്തുക
     3. ലഭ്യമാകുമ്പോൾ സംഖ്യകൾ, തീയതികൾ, വ്യവസ്ഥകൾ എന്നിവ വ്യക്തമായി പരാമർശിക്കുക
@@ -2187,9 +2269,8 @@ ANSWER:"""
         
         instructions = pattern_specific_instructions.get(pattern, pattern_specific_instructions['general'])
         
-        # CRITICAL FIX: Add a final, reinforcing instruction at the end of the prompt.
-        return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER:"
-    
+        # CRITICAL FIX: Add a final, reinforcing instruction right before the model generates the answer.
+        return f"{base_prompt}\n{instructions}\n\n**ഓർക്കുക: മലയാളത്തിൽ മാത്രം ഉത്തരം നൽകുക. ഇംഗ്ലീഷിൽ ഉത്തരം നൽകരുത്.**\n\nANSWER (in Malayalam only):"
     # Additional helper methods for investigation (keeping existing functionality)
     
     async def _get_basic_answer(self, question: str) -> str:
