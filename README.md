@@ -477,22 +477,17 @@ graph TD
 <div align="center">
 
 ```mermaid
-gantt
-    title 📈 Real-world Performance Results
-    dateFormat X
-    axisFormat %s
+graph LR
+    A[📊 Real-world Results] --> B[🏥 Insurance Policy<br/>15 questions: 8.2s]
+    A --> C[📖 Malayalam Manual<br/>94% accuracy achieved]
+    A --> D[📈 Financial Report<br/>Tables: 7.1s]
+    A --> E[📦 ZIP Archive<br/>50 files: 12.3s]
     
-    section Insurance Policy
-    Analysis (15 questions) : 0, 8
-    
-    section Malayalam Manual
-    94% Accuracy Achieved : 0, 10
-    
-    section Financial Report
-    Tables Processed : 0, 7
-    
-    section ZIP Archive
-    50 Files Processed : 0, 12
+    style A fill:#e3f2fd
+    style B fill:#e8f5e8
+    style C fill:#fff3e0
+    style D fill:#f3e5f5
+    style E fill:#fffde7
 ```
 
 </div>
